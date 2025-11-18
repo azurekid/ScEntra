@@ -114,8 +114,9 @@ function Test-GraphConnection {
     }
     
     # Test the token by making a simple request
+    # Using /organization endpoint instead of /me because /me doesn't work with Service Principal authentication
     try {
-        $null = Invoke-GraphRequest -Uri "$script:GraphBaseUrl/me" -Method GET -ErrorAction Stop
+        $null = Invoke-GraphRequest -Uri "$script:GraphBaseUrl/organization" -Method GET -ErrorAction Stop
         return $true
     }
     catch {
