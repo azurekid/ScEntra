@@ -24,17 +24,12 @@
     PowerShellVersion = '7.0'
 
     # Modules that must be imported into the global environment prior to importing this module
-    RequiredModules = @(
-        @{ModuleName = 'Microsoft.Graph.Authentication'; ModuleVersion = '2.0.0'}
-        @{ModuleName = 'Microsoft.Graph.Users'; ModuleVersion = '2.0.0'}
-        @{ModuleName = 'Microsoft.Graph.Groups'; ModuleVersion = '2.0.0'}
-        @{ModuleName = 'Microsoft.Graph.Applications'; ModuleVersion = '2.0.0'}
-        @{ModuleName = 'Microsoft.Graph.Identity.DirectoryManagement'; ModuleVersion = '2.0.0'}
-        @{ModuleName = 'Microsoft.Graph.Identity.Governance'; ModuleVersion = '2.0.0'}
-    )
+    # Note: No longer requires Microsoft.Graph PowerShell modules - uses direct REST API calls
+    RequiredModules = @()
 
     # Functions to export from this module
     FunctionsToExport = @(
+        'Connect-ScEntraGraph'
         'Invoke-ScEntraAnalysis'
         'Get-ScEntraUsers'
         'Get-ScEntraGroups'

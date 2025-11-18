@@ -32,13 +32,12 @@ A PowerShell module for comprehensive security analysis of Microsoft Entra ID (f
 ## Prerequisites
 
 - PowerShell 7.0 or later
-- Microsoft Graph PowerShell SDK modules:
-  - Microsoft.Graph.Authentication
-  - Microsoft.Graph.Users
-  - Microsoft.Graph.Groups
-  - Microsoft.Graph.Applications
-  - Microsoft.Graph.Identity.DirectoryManagement
-  - Microsoft.Graph.Identity.Governance
+- Authentication method (choose one):
+  - Azure PowerShell (`Az` module) - Recommended
+  - Azure CLI
+  - Direct access token
+
+**Note:** This module uses Microsoft Graph REST API endpoints directly and does not require the Microsoft Graph PowerShell SDK modules.
 
 ## Installation
 
@@ -58,30 +57,79 @@ Download the `ScEntra.psd1` and `ScEntra.psm1` files and import the module:
 Import-Module ./ScEntra.psd1
 ```
 
+## Authentication
+
+ScEntra uses Microsoft Graph REST API and supports multiple authentication methods:
+
+### Method 1: Azure PowerShell (Recommended)
+
+```powershell
+# Install Azure PowerShell if not already installed
+Install-Module -Name Az -Scope CurrentUser
+
+# Connect to Azure
+Connect-AzAccount
+
+# Import and run ScEntra
+Import-Module ./ScEntra.psd1
+Invoke-ScEntraAnalysis
+```
+
+### Method 2: Azure CLI
+
+```bash
+# Install Azure CLI if not already installed
+# See: https://docs.microsoft.com/cli/azure/install-azure-cli
+
+# Login to Azure
+az login
+```
+
+```powershell
+# Import and run ScEntra
+Import-Module ./ScEntra.psd1
+Invoke-ScEntraAnalysis
+```
+
+### Method 3: Access Token
+
+```powershell
+# Obtain an access token from your authentication provider
+$token = "eyJ0eXAiOiJKV1QiLCJhbGc..."
+
+# Connect using the token
+Import-Module ./ScEntra.psd1
+Connect-ScEntraGraph -AccessToken $token
+
+# Run analysis
+Invoke-ScEntraAnalysis -SkipConnection
+```
+
 ## Quick Start
 
 ### Basic Usage
 
 ```powershell
+# Authenticate using Azure PowerShell
+Connect-AzAccount
+
 # Import the module
 Import-Module ./ScEntra.psd1
 
-# Run the complete analysis (will prompt for authentication)
+# Run the complete analysis
 Invoke-ScEntraAnalysis
 ```
 
 ### Advanced Usage
 
 ```powershell
-# Connect to Microsoft Graph with required scopes first
-Connect-MgGraph -Scopes @(
-    "User.Read.All"
-    "Group.Read.All"
-    "Application.Read.All"
-    "RoleManagement.Read.Directory"
-    "RoleEligibilitySchedule.Read.Directory"
-    "RoleAssignmentSchedule.Read.Directory"
-)
+# Authenticate using Azure PowerShell or Azure CLI first
+Connect-AzAccount
+# or
+# az login
+
+# Import the module
+Import-Module ./ScEntra.psd1
 
 # Run analysis with custom output path
 Invoke-ScEntraAnalysis -OutputPath "C:\Reports\entra-security-analysis.html" -SkipConnection
@@ -261,26 +309,52 @@ Duration: 02:45
 
 If you encounter authentication errors:
 
+**Using Azure PowerShell:**
 ```powershell
 # Disconnect and reconnect
-Disconnect-MgGraph
-Connect-MgGraph -Scopes "User.Read.All", "Group.Read.All", "Application.Read.All", "RoleManagement.Read.Directory"
+Disconnect-AzAccount
+Connect-AzAccount
+
+# Verify connection
+Get-AzContext
+```
+
+**Using Azure CLI:**
+```bash
+# Logout and login again
+az logout
+az login
+
+# Verify connection
+az account show
 ```
 
 ### Permission Errors
 
 Ensure your account has the necessary permissions to read the required data. Some operations may require Global Reader or higher privileges.
 
+The following Microsoft Graph API permissions are required:
+- `User.Read.All` - Read all users
+- `Group.Read.All` - Read all groups
+- `Application.Read.All` - Read applications and service principals
+- `RoleManagement.Read.Directory` - Read directory role assignments
+- `RoleEligibilitySchedule.Read.Directory` - Read PIM eligible assignments
+- `RoleAssignmentSchedule.Read.Directory` - Read PIM active assignments
+
 ### Module Loading Issues
 
 If the module fails to load:
 
 ```powershell
-# Check if required modules are installed
-Get-Module -ListAvailable Microsoft.Graph*
+# Verify PowerShell version (requires 7.0 or later)
+$PSVersionTable.PSVersion
 
-# Install missing modules
-Install-Module Microsoft.Graph -Scope CurrentUser
+# Check module files exist
+Test-Path ./ScEntra.psd1
+Test-Path ./ScEntra.psm1
+
+# Import with verbose output for troubleshooting
+Import-Module ./ScEntra.psd1 -Verbose
 ```
 
 ## Contributing

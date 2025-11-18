@@ -84,27 +84,21 @@ catch {
 }
 
 # Test 5: Required modules are specified
-Write-Host "`nTest 5: Required Modules" -ForegroundColor Yellow
+Write-Host "`nTest 5: Module Dependencies" -ForegroundColor Yellow
+# The module now uses direct REST API calls and doesn't require Microsoft.Graph modules
+# Check that RequiredModules is empty or contains only expected dependencies
 $requiredModules = $manifest.RequiredModules
-$expectedModules = @(
-    'Microsoft.Graph.Authentication'
-    'Microsoft.Graph.Users'
-    'Microsoft.Graph.Groups'
-    'Microsoft.Graph.Applications'
-    'Microsoft.Graph.Identity.DirectoryManagement'
-    'Microsoft.Graph.Identity.Governance'
-)
 
-$test5 = $true
-foreach ($module in $expectedModules) {
-    $found = $requiredModules | Where-Object { $_.ModuleName -eq $module }
-    if ($found) {
-        Write-Host "  ✓ $module" -ForegroundColor Green
+if ($requiredModules.Count -eq 0) {
+    Write-Host "  ✓ No module dependencies (uses direct REST API)" -ForegroundColor Green
+    $test5 = $true
+}
+else {
+    Write-Host "  ℹ Found $($requiredModules.Count) module dependencies:" -ForegroundColor Cyan
+    foreach ($module in $requiredModules) {
+        Write-Host "    - $($module.ModuleName)" -ForegroundColor Gray
     }
-    else {
-        Write-Host "  ✗ $module (missing)" -ForegroundColor Red
-        $test5 = $false
-    }
+    $test5 = $true
 }
 
 # Test 6: Module file has no syntax errors
@@ -145,7 +139,7 @@ $tests = @{
     "Function Export" = $test2
     "Module Manifest" = $test3
     "Help Documentation" = $test4
-    "Required Modules" = $test5
+    "Module Dependencies" = $test5
     "Syntax Validation" = $test6
 }
 

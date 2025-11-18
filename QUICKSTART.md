@@ -1,5 +1,11 @@
 # ScEntra Quick Start Guide
 
+## Prerequisites
+
+Before using ScEntra, ensure you have:
+- PowerShell 7.0 or later
+- Azure PowerShell module (`Az`) or Azure CLI for authentication
+
 ## Installation
 
 ```powershell
@@ -11,13 +17,40 @@ cd ScEntra
 Import-Module ./ScEntra.psd1
 ```
 
+## Authentication
+
+ScEntra uses Microsoft Graph REST API and requires authentication via Azure PowerShell or Azure CLI.
+
+### Option 1: Azure PowerShell (Recommended)
+
+```powershell
+# Install Azure PowerShell (if not already installed)
+Install-Module -Name Az -Scope CurrentUser
+
+# Authenticate
+Connect-AzAccount
+```
+
+### Option 2: Azure CLI
+
+```bash
+# Install Azure CLI (if not already installed)
+# See: https://docs.microsoft.com/cli/azure/install-azure-cli
+
+# Authenticate
+az login
+```
+
 ## Quick Analysis
 
 ### 1️⃣ Run Complete Analysis (Recommended)
 
 ```powershell
+# After authenticating with Connect-AzAccount or az login:
+Import-Module ./ScEntra.psd1
+
 # This will:
-# - Connect to Microsoft Graph
+# - Use your existing Azure authentication
 # - Collect all inventory data
 # - Analyze escalation paths
 # - Generate HTML and JSON reports
@@ -33,17 +66,14 @@ Invoke-ScEntraAnalysis -OutputPath "C:\Reports\MyEntraAnalysis.html"
 ### 3️⃣ Pre-authenticated Connection
 
 ```powershell
-# Connect first with specific scopes
-Connect-MgGraph -Scopes @(
-    "User.Read.All"
-    "Group.Read.All"
-    "Application.Read.All"
-    "RoleManagement.Read.Directory"
-    "RoleEligibilitySchedule.Read.Directory"
-    "RoleAssignmentSchedule.Read.Directory"
-)
+# Authenticate first
+Connect-AzAccount
+# or: az login
 
-# Run analysis without re-authenticating
+# Import module
+Import-Module ./ScEntra.psd1
+
+# Run analysis without checking connection again
 Invoke-ScEntraAnalysis -SkipConnection
 ```
 
@@ -54,14 +84,17 @@ Invoke-ScEntraAnalysis -SkipConnection
 ```powershell
 Import-Module ./ScEntra.psd1
 
+# Authenticate first
+Connect-AzAccount
+
 # Get all groups
 $groups = Get-ScEntraGroups
 
 # Filter to role-enabled groups
-$roleEnabledGroups = $groups | Where-Object { $_.IsAssignableToRole -eq $true }
+$roleEnabledGroups = $groups | Where-Object { $_.isAssignableToRole -eq $true }
 
 # Display
-$roleEnabledGroups | Format-Table DisplayName, MemberCount, IsAssignableToRole
+$roleEnabledGroups | Select-Object displayName, memberCount, isAssignableToRole | Format-Table
 ```
 
 ### Identify High-Risk Users
@@ -78,9 +111,11 @@ $userRoles = $roles | Where-Object { $_.MemberType -eq 'user' } |
 $highRiskUsers = $userRoles | Where-Object { $_.Count -gt 2 }
 
 foreach ($userRole in $highRiskUsers) {
-    $user = $users | Where-Object { $_.Id -eq $userRole.Name }
-    Write-Host "$($user.DisplayName): $($userRole.Count) roles" -ForegroundColor Yellow
-    $userRole.Group | ForEach-Object { Write-Host "  - $($_.RoleName)" }
+    $user = $users | Where-Object { $_.id -eq $userRole.Name }
+    if ($user) {
+        Write-Host "$($user.displayName): $($userRole.Count) roles" -ForegroundColor Yellow
+        $userRole.Group | ForEach-Object { Write-Host "  - $($_.RoleName)" }
+    }
 }
 ```
 
@@ -94,9 +129,9 @@ $roles = Get-ScEntraRoleAssignments
 $spRoles = $roles | Where-Object { $_.MemberType -match 'servicePrincipal' }
 
 foreach ($spRole in $spRoles) {
-    $sp = $sps | Where-Object { $_.Id -eq $spRole.MemberId }
+    $sp = $sps | Where-Object { $_.id -eq $spRole.MemberId }
     if ($sp) {
-        Write-Host "Service Principal: $($sp.DisplayName)" -ForegroundColor Cyan
+        Write-Host "Service Principal: $($sp.displayName)" -ForegroundColor Cyan
         Write-Host "  Role: $($spRole.RoleName)" -ForegroundColor Yellow
     }
 }
@@ -147,19 +182,22 @@ foreach ($group in $byPrincipal) {
 ### Find Nested Group Memberships
 
 ```powershell
-$groups = Get-ScEntraGroups
+# Note: You can check nested memberships using the REST API
+# The module's escalation path analysis already includes this check
 
-# Check a specific group for nested members
-$groupId = "your-group-id-here"
+# Run full analysis to see nested group risks
+$results = Invoke-ScEntraAnalysis
 
-$directMembers = Get-MgGroupMember -GroupId $groupId -All
-$transitiveMembers = Get-MgGroupTransitiveMember -GroupId $groupId -All
+# Filter for nested group membership risks
+$nestedRisks = $results.EscalationRisks | 
+    Where-Object { $_.RiskType -eq 'NestedGroupMembership' }
 
-$nestedCount = $transitiveMembers.Count - $directMembers.Count
-
-Write-Host "Direct Members: $($directMembers.Count)" -ForegroundColor Green
-Write-Host "Nested Members: $nestedCount" -ForegroundColor Yellow
-Write-Host "Total Members: $($transitiveMembers.Count)" -ForegroundColor Cyan
+foreach ($risk in $nestedRisks) {
+    Write-Host "Group: $($risk.GroupName)" -ForegroundColor Yellow
+    Write-Host "  Role: $($risk.RoleName)" -ForegroundColor Cyan
+    Write-Host "  Direct Members: $($risk.DirectMembers)" -ForegroundColor Green
+    Write-Host "  Nested Members: $($risk.NestedMembers)" -ForegroundColor Yellow
+}
 ```
 
 ## Generate Sample Report (No Authentication Needed)
@@ -187,17 +225,37 @@ Import-Module ./ScEntra.psd1 -Force
 
 ### Authentication Issues
 
+**Azure PowerShell:**
 ```powershell
 # Disconnect and reconnect
-Disconnect-MgGraph
-Connect-MgGraph -Scopes "User.Read.All", "Group.Read.All", "Application.Read.All"
+Disconnect-AzAccount
+Connect-AzAccount
+
+# Verify connection
+Get-AzContext
+```
+
+**Azure CLI:**
+```bash
+# Logout and login again
+az logout
+az login
+
+# Verify connection
+az account show
 ```
 
 ### Missing Permissions
 
-If you get permission errors, ensure your account has:
-- Global Reader role (minimum)
-- Or specific permissions: User.Read.All, Group.Read.All, Application.Read.All, RoleManagement.Read.Directory
+If you get permission errors, ensure your account has the required Microsoft Graph API permissions:
+- `User.Read.All` - Read all users
+- `Group.Read.All` - Read all groups
+- `Application.Read.All` - Read applications and service principals
+- `RoleManagement.Read.Directory` - Read directory role assignments
+- `RoleEligibilitySchedule.Read.Directory` - Read PIM eligible assignments
+- `RoleAssignmentSchedule.Read.Directory` - Read PIM active assignments
+
+Your account typically needs Global Reader role or equivalent permissions.
 
 ## Output Files
 
