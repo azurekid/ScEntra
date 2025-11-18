@@ -1,5 +1,4 @@
 #Requires -Version 7.0
-#Requires -Modules Microsoft.Graph.Authentication, Microsoft.Graph.Users, Microsoft.Graph.Groups, Microsoft.Graph.Applications, Microsoft.Graph.Identity.DirectoryManagement, Microsoft.Graph.Identity.Governance
 
 <#
 .SYNOPSIS
@@ -8,26 +7,186 @@
 .DESCRIPTION
     This module provides functions to inventory Entra ID objects (users, groups, service principals, app registrations)
     and analyze privilege escalation risks through role assignments, PIM, and nested group memberships.
+    
+    This module uses direct Microsoft Graph REST API endpoints for maximum compatibility and control.
 #>
 
 #region Helper Functions
+
+# Module-level variable to store access token
+$script:GraphAccessToken = $null
+$script:GraphApiVersion = 'v1.0'
+$script:GraphBaseUrl = "https://graph.microsoft.com/$script:GraphApiVersion"
+
+function Connect-ScEntraGraph {
+    <#
+    .SYNOPSIS
+        Connects to Microsoft Graph API and obtains an access token
+    
+    .DESCRIPTION
+        Authenticates to Microsoft Graph using device code flow or existing access token
+    
+    .PARAMETER AccessToken
+        Existing access token to use for authentication
+    
+    .PARAMETER Scopes
+        Array of permission scopes required
+    
+    .PARAMETER TenantId
+        The tenant ID to authenticate against
+    
+    .EXAMPLE
+        Connect-ScEntraGraph -Scopes "User.Read.All", "Group.Read.All"
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [string]$AccessToken,
+        
+        [Parameter(Mandatory = $false)]
+        [string[]]$Scopes = @(
+            "User.Read.All",
+            "Group.Read.All",
+            "Application.Read.All",
+            "RoleManagement.Read.Directory",
+            "RoleEligibilitySchedule.Read.Directory",
+            "RoleAssignmentSchedule.Read.Directory"
+        ),
+        
+        [Parameter(Mandatory = $false)]
+        [string]$TenantId = "common"
+    )
+    
+    if ($AccessToken) {
+        $script:GraphAccessToken = $AccessToken
+        Write-Verbose "Using provided access token"
+        return $true
+    }
+    
+    # Use Azure PowerShell or Azure CLI to get token if available
+    try {
+        # Try Azure PowerShell
+        $azContext = Get-AzContext -ErrorAction SilentlyContinue
+        if ($azContext) {
+            $token = Get-AzAccessToken -ResourceUrl "https://graph.microsoft.com" -ErrorAction SilentlyContinue
+            if ($token) {
+                $script:GraphAccessToken = $token.Token
+                Write-Host "✓ Authenticated using Azure PowerShell context" -ForegroundColor Green
+                return $true
+            }
+        }
+    }
+    catch {
+        Write-Verbose "Azure PowerShell not available: $_"
+    }
+    
+    try {
+        # Try Azure CLI
+        $cliToken = az account get-access-token --resource https://graph.microsoft.com 2>$null | ConvertFrom-Json
+        if ($cliToken -and $cliToken.accessToken) {
+            $script:GraphAccessToken = $cliToken.accessToken
+            Write-Host "✓ Authenticated using Azure CLI" -ForegroundColor Green
+            return $true
+        }
+    }
+    catch {
+        Write-Verbose "Azure CLI not available: $_"
+    }
+    
+    # If we reach here, we need interactive authentication
+    Write-Warning "No existing authentication found. Please provide an access token or authenticate using Azure PowerShell/CLI first."
+    Write-Host "`nTo authenticate, use one of the following methods:" -ForegroundColor Yellow
+    Write-Host "1. Azure PowerShell: Connect-AzAccount" -ForegroundColor Cyan
+    Write-Host "2. Azure CLI: az login" -ForegroundColor Cyan
+    Write-Host "3. Provide access token: Connect-ScEntraGraph -AccessToken <token>" -ForegroundColor Cyan
+    
+    return $false
+}
 
 function Test-GraphConnection {
     <#
     .SYNOPSIS
         Tests if connected to Microsoft Graph
     #>
+    if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
+        Write-Warning "Not connected to Microsoft Graph. Please run Connect-ScEntraGraph first."
+        return $false
+    }
+    
+    # Test the token by making a simple request
     try {
-        $context = Get-MgContext
-        if ($null -eq $context) {
-            Write-Warning "Not connected to Microsoft Graph. Please run Connect-MgGraph first."
-            return $false
-        }
+        $null = Invoke-GraphRequest -Uri "$script:GraphBaseUrl/me" -Method GET -ErrorAction Stop
         return $true
     }
     catch {
-        Write-Warning "Error checking Graph connection: $_"
+        Write-Warning "Graph connection test failed. Token may be expired. Please re-authenticate."
         return $false
+    }
+}
+
+function Invoke-GraphRequest {
+    <#
+    .SYNOPSIS
+        Makes a REST API request to Microsoft Graph
+    
+    .PARAMETER Uri
+        The URI to call
+    
+    .PARAMETER Method
+        HTTP method (GET, POST, PATCH, DELETE)
+    
+    .PARAMETER Body
+        Request body for POST/PATCH requests
+    
+    .EXAMPLE
+        Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/users" -Method GET
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Uri,
+        
+        [Parameter(Mandatory = $false)]
+        [string]$Method = 'GET',
+        
+        [Parameter(Mandatory = $false)]
+        [object]$Body
+    )
+    
+    if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
+        throw "Not authenticated. Please run Connect-ScEntraGraph first."
+    }
+    
+    $headers = @{
+        'Authorization' = "Bearer $script:GraphAccessToken"
+        'Content-Type' = 'application/json'
+        'ConsistencyLevel' = 'eventual'
+    }
+    
+    $params = @{
+        Uri = $Uri
+        Method = $Method
+        Headers = $headers
+    }
+    
+    if ($Body) {
+        $params['Body'] = ($Body | ConvertTo-Json -Depth 10)
+    }
+    
+    try {
+        $response = Invoke-RestMethod @params -ErrorAction Stop
+        return $response
+    }
+    catch {
+        $errorMessage = $_.Exception.Message
+        if ($_.ErrorDetails.Message) {
+            $errorDetails = $_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction SilentlyContinue
+            if ($errorDetails.error.message) {
+                $errorMessage = $errorDetails.error.message
+            }
+        }
+        Write-Error "Graph API request failed: $errorMessage"
+        throw
     }
 }
 
@@ -35,24 +194,47 @@ function Get-AllGraphItems {
     <#
     .SYNOPSIS
         Helper function to get all items from Graph API with pagination
+    
+    .PARAMETER Uri
+        The Graph API endpoint URI
+    
+    .PARAMETER Method
+        HTTP method (default: GET)
+    
+    .EXAMPLE
+        Get-AllGraphItems -Uri "https://graph.microsoft.com/v1.0/users"
     #>
     param(
         [Parameter(Mandatory = $true)]
-        [scriptblock]$Command
+        [string]$Uri,
+        
+        [Parameter(Mandatory = $false)]
+        [string]$Method = 'GET'
     )
     
     $allItems = @()
-    $result = & $Command
+    $nextLink = $Uri
     
-    if ($result) {
-        $allItems += $result
-        
-        # Handle pagination if available
-        while ($result.PSObject.Properties['@odata.nextLink']) {
-            $result = Invoke-MgGraphRequest -Uri $result.PSObject.Properties['@odata.nextLink'].Value -Method GET
-            $allItems += $result.value
+    do {
+        try {
+            $result = Invoke-GraphRequest -Uri $nextLink -Method $Method
+            
+            # Handle both paginated and non-paginated responses
+            if ($result.value) {
+                $allItems += $result.value
+            }
+            elseif ($result) {
+                $allItems += $result
+            }
+            
+            # Get next page link
+            $nextLink = $result.'@odata.nextLink'
         }
-    }
+        catch {
+            Write-Error "Error fetching items from $nextLink : $_"
+            break
+        }
+    } while ($nextLink)
     
     return $allItems
 }
@@ -82,9 +264,10 @@ function Get-ScEntraUsers {
     Write-Verbose "Retrieving all users from Entra ID..."
     
     try {
-        $users = Get-AllGraphItems -Command {
-            Get-MgUser -All -Property Id, DisplayName, UserPrincipalName, Mail, AccountEnabled, CreatedDateTime, UserType, OnPremisesSyncEnabled
-        }
+        $select = "id,displayName,userPrincipalName,mail,accountEnabled,createdDateTime,userType,onPremisesSyncEnabled"
+        $uri = "$script:GraphBaseUrl/users?`$select=$select"
+        
+        $users = Get-AllGraphItems -Uri $uri
         
         Write-Host "Retrieved $($users.Count) users" -ForegroundColor Green
         return $users
@@ -116,20 +299,33 @@ function Get-ScEntraGroups {
     Write-Verbose "Retrieving all groups from Entra ID..."
     
     try {
-        $groups = Get-AllGraphItems -Command {
-            Get-MgGroup -All -Property Id, DisplayName, Description, GroupTypes, SecurityEnabled, MailEnabled, IsAssignableToRole, CreatedDateTime, MembershipRule, MembershipRuleProcessingState
-        }
+        $select = "id,displayName,description,groupTypes,securityEnabled,mailEnabled,isAssignableToRole,createdDateTime,membershipRule,membershipRuleProcessingState"
+        $uri = "$script:GraphBaseUrl/groups?`$select=$select"
+        
+        $groups = Get-AllGraphItems -Uri $uri
         
         Write-Host "Retrieved $($groups.Count) groups" -ForegroundColor Green
         
         # Add member count to each group
         foreach ($group in $groups) {
             try {
-                $members = Get-MgGroupMember -GroupId $group.Id -All -ErrorAction SilentlyContinue
-                $group | Add-Member -NotePropertyName MemberCount -NotePropertyValue $members.Count -Force
+                $membersUri = "$script:GraphBaseUrl/groups/$($group.id)/members?`$count=true&`$select=id"
+                $membersResult = Invoke-GraphRequest -Uri $membersUri -Method GET -ErrorAction SilentlyContinue
+                $memberCount = 0
+                
+                if ($membersResult.'@odata.count') {
+                    $memberCount = $membersResult.'@odata.count'
+                }
+                elseif ($membersResult.value) {
+                    # Count manually if @odata.count not available
+                    $allMembers = Get-AllGraphItems -Uri "$script:GraphBaseUrl/groups/$($group.id)/members?`$select=id"
+                    $memberCount = $allMembers.Count
+                }
+                
+                $group | Add-Member -NotePropertyName memberCount -NotePropertyValue $memberCount -Force
             }
             catch {
-                $group | Add-Member -NotePropertyName MemberCount -NotePropertyValue 0 -Force
+                $group | Add-Member -NotePropertyName memberCount -NotePropertyValue 0 -Force
             }
         }
         
@@ -162,9 +358,10 @@ function Get-ScEntraServicePrincipals {
     Write-Verbose "Retrieving all service principals from Entra ID..."
     
     try {
-        $servicePrincipals = Get-AllGraphItems -Command {
-            Get-MgServicePrincipal -All -Property Id, DisplayName, AppId, ServicePrincipalType, AccountEnabled, CreatedDateTime, AppOwnerOrganizationId
-        }
+        $select = "id,displayName,appId,servicePrincipalType,accountEnabled,createdDateTime,appOwnerOrganizationId"
+        $uri = "$script:GraphBaseUrl/servicePrincipals?`$select=$select"
+        
+        $servicePrincipals = Get-AllGraphItems -Uri $uri
         
         Write-Host "Retrieved $($servicePrincipals.Count) service principals" -ForegroundColor Green
         return $servicePrincipals
@@ -196,9 +393,10 @@ function Get-ScEntraAppRegistrations {
     Write-Verbose "Retrieving all app registrations from Entra ID..."
     
     try {
-        $apps = Get-AllGraphItems -Command {
-            Get-MgApplication -All -Property Id, DisplayName, AppId, CreatedDateTime, SignInAudience, PublisherDomain
-        }
+        $select = "id,displayName,appId,createdDateTime,signInAudience,publisherDomain"
+        $uri = "$script:GraphBaseUrl/applications?`$select=$select"
+        
+        $apps = Get-AllGraphItems -Uri $uri
         
         Write-Host "Retrieved $($apps.Count) app registrations" -ForegroundColor Green
         return $apps
@@ -235,22 +433,28 @@ function Get-ScEntraRoleAssignments {
     
     try {
         # Get all directory roles
-        $roles = Get-MgDirectoryRole -All
+        $rolesUri = "$script:GraphBaseUrl/directoryRoles?`$select=id,displayName,description"
+        $roles = Get-AllGraphItems -Uri $rolesUri
         
         $allAssignments = @()
         
         foreach ($role in $roles) {
-            Write-Verbose "Processing role: $($role.DisplayName)"
+            Write-Verbose "Processing role: $($role.displayName)"
             
-            $members = Get-MgDirectoryRoleMember -DirectoryRoleId $role.Id -All
+            $membersUri = "$script:GraphBaseUrl/directoryRoles/$($role.id)/members?`$select=id"
+            $members = Get-AllGraphItems -Uri $membersUri
             
             foreach ($member in $members) {
                 $assignment = [PSCustomObject]@{
-                    RoleId = $role.Id
-                    RoleName = $role.DisplayName
-                    RoleDescription = $role.Description
-                    MemberId = $member.Id
-                    MemberType = $member.AdditionalProperties['@odata.type'] -replace '#microsoft.graph.', ''
+                    RoleId = $role.id
+                    RoleName = $role.displayName
+                    RoleDescription = $role.description
+                    MemberId = $member.id
+                    MemberType = if ($member.'@odata.type') { 
+                        $member.'@odata.type' -replace '#microsoft.graph.', '' 
+                    } else { 
+                        'unknown' 
+                    }
                     AssignmentType = 'Direct'
                 }
                 $allAssignments += $assignment
@@ -290,18 +494,23 @@ function Get-ScEntraPIMAssignments {
         # Get role eligibility schedules (eligible assignments)
         $eligibleAssignments = @()
         try {
-            $eligibleSchedules = Get-MgRoleManagementDirectoryRoleEligibilitySchedule -All -ExpandProperty Principal, RoleDefinition -ErrorAction SilentlyContinue
+            $eligibleUri = "$script:GraphBaseUrl/roleManagement/directory/roleEligibilitySchedules?`$expand=principal,roleDefinition"
+            $eligibleSchedules = Get-AllGraphItems -Uri $eligibleUri -ErrorAction SilentlyContinue
             
             foreach ($schedule in $eligibleSchedules) {
                 $assignment = [PSCustomObject]@{
-                    AssignmentId = $schedule.Id
-                    RoleId = $schedule.RoleDefinitionId
-                    RoleName = $schedule.RoleDefinition.DisplayName
-                    PrincipalId = $schedule.PrincipalId
-                    PrincipalType = $schedule.Principal.AdditionalProperties['@odata.type'] -replace '#microsoft.graph.', ''
+                    AssignmentId = $schedule.id
+                    RoleId = $schedule.roleDefinitionId
+                    RoleName = if ($schedule.roleDefinition) { $schedule.roleDefinition.displayName } else { 'Unknown' }
+                    PrincipalId = $schedule.principalId
+                    PrincipalType = if ($schedule.principal -and $schedule.principal.'@odata.type') {
+                        $schedule.principal.'@odata.type' -replace '#microsoft.graph.', ''
+                    } else {
+                        'unknown'
+                    }
                     AssignmentType = 'PIM-Eligible'
-                    Status = $schedule.Status
-                    CreatedDateTime = $schedule.CreatedDateTime
+                    Status = $schedule.status
+                    CreatedDateTime = $schedule.createdDateTime
                 }
                 $eligibleAssignments += $assignment
             }
@@ -313,18 +522,23 @@ function Get-ScEntraPIMAssignments {
         # Get role active assignments through PIM
         $activeAssignments = @()
         try {
-            $activeSchedules = Get-MgRoleManagementDirectoryRoleAssignmentSchedule -All -ExpandProperty Principal, RoleDefinition -ErrorAction SilentlyContinue
+            $activeUri = "$script:GraphBaseUrl/roleManagement/directory/roleAssignmentSchedules?`$expand=principal,roleDefinition"
+            $activeSchedules = Get-AllGraphItems -Uri $activeUri -ErrorAction SilentlyContinue
             
             foreach ($schedule in $activeSchedules) {
                 $assignment = [PSCustomObject]@{
-                    AssignmentId = $schedule.Id
-                    RoleId = $schedule.RoleDefinitionId
-                    RoleName = $schedule.RoleDefinition.DisplayName
-                    PrincipalId = $schedule.PrincipalId
-                    PrincipalType = $schedule.Principal.AdditionalProperties['@odata.type'] -replace '#microsoft.graph.', ''
+                    AssignmentId = $schedule.id
+                    RoleId = $schedule.roleDefinitionId
+                    RoleName = if ($schedule.roleDefinition) { $schedule.roleDefinition.displayName } else { 'Unknown' }
+                    PrincipalId = $schedule.principalId
+                    PrincipalType = if ($schedule.principal -and $schedule.principal.'@odata.type') {
+                        $schedule.principal.'@odata.type' -replace '#microsoft.graph.', ''
+                    } else {
+                        'unknown'
+                    }
                     AssignmentType = 'PIM-Active'
-                    Status = $schedule.Status
-                    CreatedDateTime = $schedule.CreatedDateTime
+                    Status = $schedule.status
+                    CreatedDateTime = $schedule.createdDateTime
                 }
                 $activeAssignments += $assignment
             }
@@ -408,34 +622,37 @@ function Get-ScEntraEscalationPaths {
     $escalationRisks = @()
     
     # 1. Analyze role-enabled groups
-    $roleEnabledGroups = $Groups | Where-Object { $_.IsAssignableToRole -eq $true }
+    $roleEnabledGroups = $Groups | Where-Object { $_.isAssignableToRole -eq $true }
     Write-Host "Found $($roleEnabledGroups.Count) role-enabled groups" -ForegroundColor Yellow
     
     foreach ($group in $roleEnabledGroups) {
         # Check if this group has role assignments
-        $groupRoles = $RoleAssignments | Where-Object { $_.MemberId -eq $group.Id }
+        $groupRoles = $RoleAssignments | Where-Object { $_.MemberId -eq $group.id }
         
         if ($groupRoles) {
             try {
-                $members = Get-MgGroupMember -GroupId $group.Id -All -ErrorAction SilentlyContinue
-                $owners = Get-MgGroupOwner -GroupId $group.Id -All -ErrorAction SilentlyContinue
+                $membersUri = "$script:GraphBaseUrl/groups/$($group.id)/members?`$select=id"
+                $members = Get-AllGraphItems -Uri $membersUri -ErrorAction SilentlyContinue
+                
+                $ownersUri = "$script:GraphBaseUrl/groups/$($group.id)/owners?`$select=id"
+                $owners = Get-AllGraphItems -Uri $ownersUri -ErrorAction SilentlyContinue
                 
                 foreach ($role in $groupRoles) {
                     $risk = [PSCustomObject]@{
                         RiskType = 'RoleEnabledGroup'
                         Severity = 'High'
-                        GroupId = $group.Id
-                        GroupName = $group.DisplayName
+                        GroupId = $group.id
+                        GroupName = $group.displayName
                         RoleName = $role.RoleName
                         MemberCount = $members.Count
                         OwnerCount = $owners.Count
-                        Description = "Role-enabled group '$($group.DisplayName)' has '$($role.RoleName)' role with $($members.Count) members"
+                        Description = "Role-enabled group '$($group.displayName)' has '$($role.RoleName)' role with $($members.Count) members"
                     }
                     $escalationRisks += $risk
                 }
             }
             catch {
-                Write-Verbose "Could not analyze group $($group.Id): $_"
+                Write-Verbose "Could not analyze group $($group.id): $_"
             }
         }
     }
@@ -446,12 +663,15 @@ function Get-ScEntraEscalationPaths {
     $groupsWithRoles = $RoleAssignments | Where-Object { $_.MemberType -eq 'group' } | Select-Object -ExpandProperty MemberId -Unique
     
     foreach ($groupId in $groupsWithRoles) {
-        $group = $Groups | Where-Object { $_.Id -eq $groupId }
+        $group = $Groups | Where-Object { $_.id -eq $groupId }
         if ($group) {
             try {
                 # Get transitive members (includes nested groups)
-                $transitiveMembers = Get-MgGroupTransitiveMember -GroupId $groupId -All -ErrorAction SilentlyContinue
-                $directMembers = Get-MgGroupMember -GroupId $groupId -All -ErrorAction SilentlyContinue
+                $transitiveUri = "$script:GraphBaseUrl/groups/$groupId/transitiveMembers?`$select=id"
+                $transitiveMembers = Get-AllGraphItems -Uri $transitiveUri -ErrorAction SilentlyContinue
+                
+                $directUri = "$script:GraphBaseUrl/groups/$groupId/members?`$select=id"
+                $directMembers = Get-AllGraphItems -Uri $directUri -ErrorAction SilentlyContinue
                 
                 if ($transitiveMembers.Count -gt $directMembers.Count) {
                     $nestedMemberCount = $transitiveMembers.Count - $directMembers.Count
@@ -461,12 +681,12 @@ function Get-ScEntraEscalationPaths {
                         $risk = [PSCustomObject]@{
                             RiskType = 'NestedGroupMembership'
                             Severity = 'Medium'
-                            GroupId = $group.Id
-                            GroupName = $group.DisplayName
+                            GroupId = $group.id
+                            GroupName = $group.displayName
                             RoleName = $role.RoleName
                             DirectMembers = $directMembers.Count
                             NestedMembers = $nestedMemberCount
-                            Description = "Group '$($group.DisplayName)' with '$($role.RoleName)' has $nestedMemberCount members through nested groups"
+                            Description = "Group '$($group.displayName)' with '$($role.RoleName)' has $nestedMemberCount members through nested groups"
                         }
                         $escalationRisks += $risk
                     }
@@ -483,22 +703,23 @@ function Get-ScEntraEscalationPaths {
     
     foreach ($sp in $ServicePrincipals) {
         try {
-            $owners = Get-MgServicePrincipalOwner -ServicePrincipalId $sp.Id -All -ErrorAction SilentlyContinue
+            $ownersUri = "$script:GraphBaseUrl/servicePrincipals/$($sp.id)/owners?`$select=id"
+            $owners = Get-AllGraphItems -Uri $ownersUri -ErrorAction SilentlyContinue
             
             if ($owners.Count -gt 0) {
                 # Check if SP has any role assignments
-                $spRoles = $RoleAssignments | Where-Object { $_.MemberId -eq $sp.Id }
+                $spRoles = $RoleAssignments | Where-Object { $_.MemberId -eq $sp.id }
                 
                 if ($spRoles) {
                     foreach ($role in $spRoles) {
                         $risk = [PSCustomObject]@{
                             RiskType = 'ServicePrincipalOwnership'
                             Severity = 'High'
-                            ServicePrincipalId = $sp.Id
-                            ServicePrincipalName = $sp.DisplayName
+                            ServicePrincipalId = $sp.id
+                            ServicePrincipalName = $sp.displayName
                             RoleName = $role.RoleName
                             OwnerCount = $owners.Count
-                            Description = "Service Principal '$($sp.DisplayName)' with '$($role.RoleName)' has $($owners.Count) owners who could potentially abuse permissions"
+                            Description = "Service Principal '$($sp.displayName)' with '$($role.RoleName)' has $($owners.Count) owners who could potentially abuse permissions"
                         }
                         $escalationRisks += $risk
                     }
@@ -506,29 +727,30 @@ function Get-ScEntraEscalationPaths {
             }
         }
         catch {
-            Write-Verbose "Could not analyze service principal $($sp.Id): $_"
+            Write-Verbose "Could not analyze service principal $($sp.id): $_"
         }
     }
     
     # 4. Analyze app registration ownership
     foreach ($app in $AppRegistrations) {
         try {
-            $owners = Get-MgApplicationOwner -ApplicationId $app.Id -All -ErrorAction SilentlyContinue
+            $ownersUri = "$script:GraphBaseUrl/applications/$($app.id)/owners?`$select=id"
+            $owners = Get-AllGraphItems -Uri $ownersUri -ErrorAction SilentlyContinue
             
             if ($owners.Count -gt 5) {
                 $risk = [PSCustomObject]@{
                     RiskType = 'AppRegistrationOwnership'
                     Severity = 'Medium'
-                    AppId = $app.Id
-                    AppName = $app.DisplayName
+                    AppId = $app.id
+                    AppName = $app.displayName
                     OwnerCount = $owners.Count
-                    Description = "App Registration '$($app.DisplayName)' has $($owners.Count) owners - potential for credential abuse"
+                    Description = "App Registration '$($app.displayName)' has $($owners.Count) owners - potential for credential abuse"
                 }
                 $escalationRisks += $risk
             }
         }
         catch {
-            Write-Verbose "Could not analyze app registration $($app.Id): $_"
+            Write-Verbose "Could not analyze app registration $($app.id): $_"
         }
     }
     
@@ -629,12 +851,12 @@ function Export-ScEntraReport {
     # Prepare statistics
     $stats = @{
         TotalUsers = $Users.Count
-        EnabledUsers = ($Users | Where-Object { $_.AccountEnabled -eq $true }).Count
+        EnabledUsers = ($Users | Where-Object { $_.accountEnabled -eq $true }).Count
         TotalGroups = $Groups.Count
-        RoleEnabledGroups = ($Groups | Where-Object { $_.IsAssignableToRole -eq $true }).Count
-        SecurityGroups = ($Groups | Where-Object { $_.SecurityEnabled -eq $true }).Count
+        RoleEnabledGroups = ($Groups | Where-Object { $_.isAssignableToRole -eq $true }).Count
+        SecurityGroups = ($Groups | Where-Object { $_.securityEnabled -eq $true }).Count
         TotalServicePrincipals = $ServicePrincipals.Count
-        EnabledServicePrincipals = ($ServicePrincipals | Where-Object { $_.AccountEnabled -eq $true }).Count
+        EnabledServicePrincipals = ($ServicePrincipals | Where-Object { $_.accountEnabled -eq $true }).Count
         TotalAppRegistrations = $AppRegistrations.Count
         TotalRoleAssignments = $RoleAssignments.Count
         TotalPIMAssignments = $PIMAssignments.Count
@@ -1042,10 +1264,10 @@ function Export-ScEntraReport {
         $jsonData = @{
             GeneratedAt = Get-Date -Format 'o'
             Statistics = $stats
-            Users = $Users | Select-Object Id, DisplayName, UserPrincipalName, AccountEnabled, UserType
-            Groups = $Groups | Select-Object Id, DisplayName, IsAssignableToRole, SecurityEnabled, MemberCount
-            ServicePrincipals = $ServicePrincipals | Select-Object Id, DisplayName, AppId, AccountEnabled
-            AppRegistrations = $AppRegistrations | Select-Object Id, DisplayName, AppId
+            Users = $Users | Select-Object id, displayName, userPrincipalName, accountEnabled, userType
+            Groups = $Groups | Select-Object id, displayName, isAssignableToRole, securityEnabled, memberCount
+            ServicePrincipals = $ServicePrincipals | Select-Object id, displayName, appId, accountEnabled
+            AppRegistrations = $AppRegistrations | Select-Object id, displayName, appId
             RoleAssignments = $RoleAssignments
             PIMAssignments = $PIMAssignments
             EscalationRisks = $EscalationRisks
@@ -1086,13 +1308,16 @@ function Invoke-ScEntraAnalysis {
         Skip the connection check/prompt (assumes already connected)
     
     .EXAMPLE
+        # First authenticate using Azure PowerShell or Azure CLI
+        # Connect-AzAccount  # or: az login
         Invoke-ScEntraAnalysis
         
     .EXAMPLE
         Invoke-ScEntraAnalysis -OutputPath "C:\Reports\entra-report.html"
         
     .EXAMPLE
-        Connect-MgGraph -Scopes "User.Read.All", "Group.Read.All", "Application.Read.All", "RoleManagement.Read.Directory"
+        # Use with an existing access token
+        Connect-ScEntraGraph -AccessToken "eyJ0..."
         Invoke-ScEntraAnalysis -SkipConnection
     #>
     [CmdletBinding()]
@@ -1123,8 +1348,7 @@ function Invoke-ScEntraAnalysis {
     
     # Check Graph connection
     if (-not $SkipConnection) {
-        $context = Get-MgContext
-        if ($null -eq $context) {
+        if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
             Write-Host "`nNot connected to Microsoft Graph." -ForegroundColor Yellow
             Write-Host "Connecting with required scopes..." -ForegroundColor Cyan
             
@@ -1137,12 +1361,9 @@ function Invoke-ScEntraAnalysis {
                 "RoleAssignmentSchedule.Read.Directory"
             )
             
-            try {
-                Connect-MgGraph -Scopes $requiredScopes -NoWelcome
-                Write-Host "✓ Connected successfully" -ForegroundColor Green
-            }
-            catch {
-                Write-Error "Failed to connect to Microsoft Graph: $_"
+            $connected = Connect-ScEntraGraph -Scopes $requiredScopes
+            if (-not $connected) {
+                Write-Error "Failed to connect to Microsoft Graph. Please authenticate using Azure PowerShell (Connect-AzAccount) or Azure CLI (az login) first."
                 return
             }
         }
@@ -1234,6 +1455,7 @@ function Invoke-ScEntraAnalysis {
 
 # Export module members
 Export-ModuleMember -Function @(
+    'Connect-ScEntraGraph'
     'Invoke-ScEntraAnalysis'
     'Get-ScEntraUsers'
     'Get-ScEntraGroups'
