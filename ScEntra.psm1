@@ -2608,13 +2608,10 @@ function Export-ScEntraReport {
                         hidden: false
                     });
                 } else {
-                    // If user is selected, hide all other users regardless of connection
-                    const shouldHide = isUserSelected && node.type === 'user';
-                    
-                    // Hide unrelated nodes
+                    // Hide nodes not in path
                     updates.push({
                         id: node.id,
-                        hidden: shouldHide
+                        hidden: true
                     });
                 }
             });
