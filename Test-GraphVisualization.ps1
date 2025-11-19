@@ -41,15 +41,15 @@ $appRegistrations = @(
 
 # Mock Role Assignments
 $roleAssignments = @(
-    [PSCustomObject]@{ RoleId = "role1"; RoleName = "Global Administrator"; RoleDescription = "Full admin"; MemberId = "group1"; MemberType = "group"; AssignmentType = "Direct" }
-    [PSCustomObject]@{ RoleId = "role2"; RoleName = "Application Administrator"; RoleDescription = "Manage apps"; MemberId = "user1"; MemberType = "user"; AssignmentType = "Direct" }
+    [PSCustomObject]@{ RoleId = "role1"; RoleName = "Global Administrator"; RoleDescription = "Full admin"; MemberId = "user1"; MemberType = "user"; AssignmentType = "Direct" }
+    [PSCustomObject]@{ RoleId = "role2"; RoleName = "Cloud Application Administrator"; RoleDescription = "Manage apps"; MemberId = "user2"; MemberType = "user"; AssignmentType = "Direct" }
     [PSCustomObject]@{ RoleId = "role3"; RoleName = "Privileged Role Administrator"; RoleDescription = "Manage roles"; MemberId = "sp1"; MemberType = "servicePrincipal"; AssignmentType = "Direct" }
 )
 
 # Mock PIM Assignments
 $pimAssignments = @(
-    [PSCustomObject]@{ AssignmentId = "pim1"; RoleId = "role1"; RoleName = "Global Administrator"; PrincipalId = "user2"; PrincipalType = "user"; AssignmentType = "PIM-Eligible"; Status = "Provisioned" }
-    [PSCustomObject]@{ AssignmentId = "pim2"; RoleId = "role2"; RoleName = "Application Administrator"; PrincipalId = "group2"; PrincipalType = "group"; AssignmentType = "PIM-Eligible"; Status = "Provisioned" }
+    [PSCustomObject]@{ AssignmentId = "pim1"; RoleId = "role4"; RoleName = "Application Administrator"; PrincipalId = "user3"; PrincipalType = "user"; AssignmentType = "PIM-Eligible"; Status = "Provisioned" }
+    [PSCustomObject]@{ AssignmentId = "pim2"; RoleId = "role1"; RoleName = "Global Administrator"; PrincipalId = "group2"; PrincipalType = "group"; AssignmentType = "PIM-Eligible"; Status = "Provisioned" }
 )
 
 # Mock Escalation Risks
@@ -180,6 +180,35 @@ foreach ($app in $appRegistrations) {
     if ($sp) {
         $null = $edges.Add(@{ from = $app.id; to = $sp.id; type = "has_service_principal"; label = "Creates" })
     }
+}
+
+# Add can_manage edges for Application Administrators (user2, user3)
+foreach ($sp in $servicePrincipals) {
+    $null = $edges.Add(@{ from = "user2"; to = $sp.id; type = "can_manage"; label = "Can Manage" })
+    $null = $edges.Add(@{ from = "user3"; to = $sp.id; type = "can_manage"; label = "Can Manage"; isPIM = $true })
+}
+foreach ($app in $appRegistrations) {
+    $null = $edges.Add(@{ from = "user2"; to = $app.id; type = "can_manage"; label = "Can Manage" })
+    $null = $edges.Add(@{ from = "user3"; to = $app.id; type = "can_manage"; label = "Can Manage"; isPIM = $true })
+}
+
+# Add can_manage edges for Global Administrators (user1, group2) - can manage everything
+foreach ($user in $users) {
+    if ($user.id -ne "user1") {
+        $null = $edges.Add(@{ from = "user1"; to = $user.id; type = "can_manage"; label = "Can Manage" })
+    }
+}
+foreach ($group in $groups) {
+    $null = $edges.Add(@{ from = "user1"; to = $group.id; type = "can_manage"; label = "Can Manage" })
+    $null = $edges.Add(@{ from = "group2"; to = $group.id; type = "can_manage"; label = "Can Manage"; isPIM = $true })
+}
+foreach ($sp in $servicePrincipals) {
+    $null = $edges.Add(@{ from = "user1"; to = $sp.id; type = "can_manage"; label = "Can Manage" })
+    $null = $edges.Add(@{ from = "group2"; to = $sp.id; type = "can_manage"; label = "Can Manage"; isPIM = $true })
+}
+foreach ($app in $appRegistrations) {
+    $null = $edges.Add(@{ from = "user1"; to = $app.id; type = "can_manage"; label = "Can Manage" })
+    $null = $edges.Add(@{ from = "group2"; to = $app.id; type = "can_manage"; label = "Can Manage"; isPIM = $true })
 }
 
 $graphData = @{
