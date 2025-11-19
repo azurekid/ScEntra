@@ -2002,7 +2002,31 @@ function Export-ScEntraReport {
         
         <div class="section">
             <h2>🕸️ Escalation Path Graph</h2>
-            <p style="margin-bottom: 20px; color: #666;">Interactive graph showing relationships between users, groups, service principals, app registrations, and role assignments. Drag nodes to explore the relationships.</p>
+            <p style="margin-bottom: 20px; color: #666;">Interactive graph showing relationships between users, groups, service principals, app registrations, and role assignments. Click on a node to highlight its escalation path.</p>
+            
+            <div style="margin-bottom: 20px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 300px;">
+                    <label for="nodeFilter" style="font-weight: 600; margin-right: 10px;">Filter by entity:</label>
+                    <input type="text" id="nodeFilter" placeholder="Search by name..." style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; width: 100%; max-width: 400px; font-size: 14px;">
+                </div>
+                <div>
+                    <label for="typeFilter" style="font-weight: 600; margin-right: 10px;">Type:</label>
+                    <select id="typeFilter" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                        <option value="">All Types</option>
+                        <option value="user">Users</option>
+                        <option value="group">Groups</option>
+                        <option value="role">Roles</option>
+                        <option value="servicePrincipal">Service Principals</option>
+                        <option value="application">Applications</option>
+                    </select>
+                </div>
+                <button id="resetGraph" style="padding: 8px 16px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 600;">Reset View</button>
+            </div>
+            
+            <div id="selectedNodeInfo" style="display: none; margin-bottom: 15px; padding: 12px; background: #f8f9fa; border-left: 4px solid #667eea; border-radius: 4px;">
+                <strong>Selected:</strong> <span id="selectedNodeName"></span> <span id="selectedNodeType" style="color: #666; font-size: 0.9em;"></span>
+            </div>
+            
             <div id="escalationGraph"></div>
             <div class="graph-legend">
                 <div class="legend-item">
@@ -2170,7 +2194,8 @@ function Export-ScEntraReport {
         })));
         
         // Transform edges for vis-network
-        const edges = new vis.DataSet(graphEdges.map(edge => ({
+        const edges = new vis.DataSet(graphEdges.map((edge, idx) => ({
+            id: edge.from + '-' + edge.to + '-' + idx,
             from: edge.from,
             to: edge.to,
             label: edge.label || edge.type,
@@ -2184,7 +2209,9 @@ function Export-ScEntraReport {
             },
             dashes: edge.isPIM || edge.type === 'owns',
             width: edge.type === 'has_role' ? 3 : 1.5,
-            font: { size: 10, color: '#666', align: 'middle' }
+            font: { size: 10, color: '#666', align: 'middle' },
+            edgeType: edge.type,
+            isPIM: edge.isPIM || false
         })));
         
         const container = document.getElementById('escalationGraph');
@@ -2242,17 +2269,256 @@ function Export-ScEntraReport {
         
         const network = new vis.Network(container, data, options);
         
-        // Highlight connected nodes on click
+        // Disable physics after stabilization to stop movement
+        network.once('stabilizationIterationsDone', function() {
+            network.setOptions({ physics: false });
+        });
+        
+        // Store original node colors for reset
+        const originalNodeColors = {};
+        graphNodes.forEach(node => {
+            originalNodeColors[node.id] = {
+                background: node.type === 'user' ? '#4CAF50' : 
+                           node.type === 'group' ? '#2196F3' :
+                           node.type === 'role' ? '#FF5722' :
+                           node.type === 'servicePrincipal' ? '#9C27B0' :
+                           node.type === 'application' ? '#FF9800' : '#999',
+                border: '#333'
+            };
+        });
+        
+        // Function to get all nodes in escalation path
+        function getEscalationPath(nodeId, visited = new Set()) {
+            if (visited.has(nodeId)) return visited;
+            visited.add(nodeId);
+            
+            const connectedNodes = network.getConnectedNodes(nodeId);
+            connectedNodes.forEach(connId => {
+                // Get edges between nodes to determine direction
+                const connEdges = network.getConnectedEdges(connId);
+                connEdges.forEach(edgeId => {
+                    const edge = edges.get(edgeId);
+                    // Follow edges that point to roles or show ownership/membership
+                    if (edge && (edge.from === connId || edge.to === connId)) {
+                        if (!visited.has(connId)) {
+                            getEscalationPath(connId, visited);
+                        }
+                    }
+                });
+            });
+            
+            return visited;
+        }
+        
+        // Function to highlight escalation path
+        function highlightPath(nodeId) {
+            const pathNodes = getEscalationPath(nodeId);
+            const pathEdges = new Set();
+            
+            // Find all edges in the path
+            pathNodes.forEach(nId => {
+                const connEdges = network.getConnectedEdges(nId);
+                connEdges.forEach(edgeId => {
+                    const edge = edges.get(edgeId);
+                    if (edge && pathNodes.has(edge.from) && pathNodes.has(edge.to)) {
+                        pathEdges.add(edgeId);
+                    }
+                });
+            });
+            
+            // Update all nodes
+            const updates = [];
+            nodes.forEach(node => {
+                if (pathNodes.has(node.id)) {
+                    // Highlighted nodes
+                    updates.push({
+                        id: node.id,
+                        color: {
+                            background: originalNodeColors[node.id].background,
+                            border: '#000',
+                            highlight: {
+                                background: originalNodeColors[node.id].background,
+                                border: '#000'
+                            }
+                        },
+                        borderWidth: 4,
+                        font: { color: '#000', size: 16, bold: true }
+                    });
+                } else {
+                    // Dimmed nodes
+                    updates.push({
+                        id: node.id,
+                        color: {
+                            background: '#f0f0f0',
+                            border: '#ccc',
+                            highlight: {
+                                background: '#f0f0f0',
+                                border: '#ccc'
+                            }
+                        },
+                        borderWidth: 1,
+                        font: { color: '#999', size: 12 }
+                    });
+                }
+            });
+            nodes.update(updates);
+            
+            // Update all edges
+            const edgeUpdates = [];
+            edges.forEach(edge => {
+                if (pathEdges.has(edge.id)) {
+                    // Highlighted edges
+                    edgeUpdates.push({
+                        id: edge.id,
+                        width: 4,
+                        color: { color: '#FF5722', opacity: 1 }
+                    });
+                } else {
+                    // Dimmed edges
+                    edgeUpdates.push({
+                        id: edge.id,
+                        width: 1,
+                        color: { color: '#ddd', opacity: 0.3 }
+                    });
+                }
+            });
+            edges.update(edgeUpdates);
+        }
+        
+        // Function to reset highlighting
+        function resetHighlight() {
+            const updates = [];
+            graphNodes.forEach(node => {
+                updates.push({
+                    id: node.id,
+                    color: originalNodeColors[node.id],
+                    borderWidth: 2,
+                    font: { color: '#333', size: 14 }
+                });
+            });
+            nodes.update(updates);
+            
+            const edgeUpdates = [];
+            edges.forEach(edge => {
+                edgeUpdates.push({
+                    id: edge.id,
+                    width: edge.edgeType === 'has_role' ? 3 : 1.5,
+                    color: {
+                        color: edge.edgeType === 'has_role' ? '#FF5722' :
+                               edge.edgeType === 'member_of' ? '#2196F3' :
+                               edge.edgeType === 'owns' ? '#FF9800' :
+                               edge.isPIM ? '#9C27B0' : '#999',
+                        opacity: 0.7
+                    }
+                });
+            });
+            edges.update(edgeUpdates);
+            
+            document.getElementById('selectedNodeInfo').style.display = 'none';
+        }
+        
+        // Click handler to highlight path
         network.on('click', function(params) {
             if (params.nodes.length > 0) {
                 const nodeId = params.nodes[0];
-                const connectedNodes = network.getConnectedNodes(nodeId);
-                const connectedEdges = network.getConnectedEdges(nodeId);
+                const node = nodes.get(nodeId);
                 
-                // Highlight logic can be added here
-                console.log('Selected node:', nodeId);
-                console.log('Connected nodes:', connectedNodes);
+                highlightPath(nodeId);
+                
+                // Show selected node info
+                document.getElementById('selectedNodeName').textContent = node.label;
+                document.getElementById('selectedNodeType').textContent = '(' + node.type + ')';
+                document.getElementById('selectedNodeInfo').style.display = 'block';
+                
+                // Focus on the selected node
+                network.focus(nodeId, {
+                    scale: 1.5,
+                    animation: {
+                        duration: 500,
+                        easingFunction: 'easeInOutQuad'
+                    }
+                });
+            } else {
+                resetHighlight();
             }
+        });
+        
+        // Filter functionality
+        document.getElementById('nodeFilter').addEventListener('input', function(e) {
+            const searchTerm = e.target.value.toLowerCase();
+            const typeFilter = document.getElementById('typeFilter').value;
+            
+            const matchingNodes = graphNodes.filter(node => {
+                const matchesSearch = !searchTerm || node.label.toLowerCase().includes(searchTerm);
+                const matchesType = !typeFilter || node.type === typeFilter;
+                return matchesSearch && matchesType;
+            });
+            
+            if (matchingNodes.length === 1) {
+                network.selectNodes([matchingNodes[0].id]);
+                network.focus(matchingNodes[0].id, {
+                    scale: 1.5,
+                    animation: { duration: 500, easingFunction: 'easeInOutQuad' }
+                });
+                highlightPath(matchingNodes[0].id);
+                
+                document.getElementById('selectedNodeName').textContent = matchingNodes[0].label;
+                document.getElementById('selectedNodeType').textContent = '(' + matchingNodes[0].type + ')';
+                document.getElementById('selectedNodeInfo').style.display = 'block';
+            } else if (matchingNodes.length > 1) {
+                // Highlight all matching nodes
+                const matchingIds = new Set(matchingNodes.map(n => n.id));
+                const updates = [];
+                nodes.forEach(node => {
+                    if (matchingIds.has(node.id)) {
+                        updates.push({
+                            id: node.id,
+                            color: originalNodeColors[node.id],
+                            borderWidth: 4,
+                            font: { color: '#000', size: 16 }
+                        });
+                    } else {
+                        updates.push({
+                            id: node.id,
+                            color: { background: '#f0f0f0', border: '#ccc' },
+                            borderWidth: 1,
+                            font: { color: '#999', size: 12 }
+                        });
+                    }
+                });
+                nodes.update(updates);
+            } else if (searchTerm || typeFilter) {
+                // No matches - dim everything
+                const updates = [];
+                nodes.forEach(node => {
+                    updates.push({
+                        id: node.id,
+                        color: { background: '#f0f0f0', border: '#ccc' },
+                        borderWidth: 1,
+                        font: { color: '#999', size: 12 }
+                    });
+                });
+                nodes.update(updates);
+            } else {
+                resetHighlight();
+            }
+        });
+        
+        document.getElementById('typeFilter').addEventListener('change', function() {
+            document.getElementById('nodeFilter').dispatchEvent(new Event('input'));
+        });
+        
+        // Reset button
+        document.getElementById('resetGraph').addEventListener('click', function() {
+            document.getElementById('nodeFilter').value = '';
+            document.getElementById('typeFilter').value = '';
+            resetHighlight();
+            network.fit({
+                animation: {
+                    duration: 500,
+                    easingFunction: 'easeInOutQuad'
+                }
+            });
         });
     </script>
 "@
