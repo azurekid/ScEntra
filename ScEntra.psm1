@@ -2522,9 +2522,19 @@ function Export-ScEntraReport {
             if (visited.has(nodeId)) return visited;
             visited.add(nodeId);
             
-            // Get all directly connected nodes via edges
-            const directlyConnected = network.getConnectedNodes(nodeId);
-            directlyConnected.forEach(connId => {
+            // Get all directly connected nodes by querying edges dataset
+            // This is more reliable than network.getConnectedNodes() for large graphs
+            const connectedNodes = [];
+            edges.forEach(edge => {
+                if (edge.from === nodeId && !visited.has(edge.to)) {
+                    connectedNodes.push(edge.to);
+                } else if (edge.to === nodeId && !visited.has(edge.from)) {
+                    connectedNodes.push(edge.from);
+                }
+            });
+            
+            // Recursively traverse connected nodes
+            connectedNodes.forEach(connId => {
                 if (!visited.has(connId)) {
                     getConnectedNodes(connId, visited);
                 }
