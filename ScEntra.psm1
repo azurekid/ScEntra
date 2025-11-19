@@ -70,7 +70,7 @@ function Connect-ScEntraGraph {
         if ($azContext) {
             $token = Get-AzAccessToken -ResourceUrl "https://graph.microsoft.com" -ErrorAction SilentlyContinue
             if ($token) {
-                $script:GraphAccessToken = $token.Token
+                $script:GraphAccessToken = $token.Token | ConvertFrom-SecureString -AsPlainText
                 Write-Host "✓ Authenticated using Azure PowerShell context" -ForegroundColor Green
                 return $true
             }
@@ -353,7 +353,7 @@ function Get-ScEntraUsers {
     
     try {
         $select = "id,displayName,userPrincipalName,mail,accountEnabled,createdDateTime,userType,onPremisesSyncEnabled"
-        $uri = "$script:GraphBaseUrl/users?`$select=$select"
+        $uri = "$script:GraphBaseUrl/users?`$top=999&`$select=$select"
         
         $users = Get-AllGraphItems -Uri $uri -ProgressActivity "Retrieving users from Entra ID"
         
@@ -389,7 +389,7 @@ function Get-ScEntraGroups {
     
     try {
         $select = "id,displayName,description,groupTypes,securityEnabled,mailEnabled,isAssignableToRole,createdDateTime,membershipRule,membershipRuleProcessingState"
-        $uri = "$script:GraphBaseUrl/groups?`$select=$select"
+        $uri = "$script:GraphBaseUrl/groups?`$top=999&`$select=$select"
         
         $groups = Get-AllGraphItems -Uri $uri -ProgressActivity "Retrieving groups from Entra ID"
         
@@ -426,7 +426,7 @@ function Get-ScEntraServicePrincipals {
     
     try {
         $select = "id,displayName,appId,servicePrincipalType,accountEnabled,createdDateTime,appOwnerOrganizationId"
-        $uri = "$script:GraphBaseUrl/servicePrincipals?`$select=$select"
+        $uri = "$script:GraphBaseUrl/servicePrincipals?`$top=999&`$select=$select"
         
         $servicePrincipals = Get-AllGraphItems -Uri $uri -ProgressActivity "Retrieving service principals from Entra ID"
         
@@ -461,7 +461,7 @@ function Get-ScEntraAppRegistrations {
     
     try {
         $select = "id,displayName,appId,createdDateTime,signInAudience,publisherDomain"
-        $uri = "$script:GraphBaseUrl/applications?`$select=$select"
+        $uri = "$script:GraphBaseUrl/applications?`$top=999&`$select=$select"
         
         $apps = Get-AllGraphItems -Uri $uri -ProgressActivity "Retrieving app registrations from Entra ID"
         
@@ -1181,14 +1181,14 @@ function New-ScEntraGraphData {
         'Application Administrator',
         'Hybrid Identity Administrator'
     )
-    
+
     # Find all principals with app management roles (from both direct and PIM)
     $allRoleAssignments = @($RoleAssignments; $PIMAssignments)
     $appAdmins = $allRoleAssignments | Where-Object { $appManagementRoles -contains $_.RoleName }
-    
+
     foreach ($admin in $appAdmins) {
         $principalId = if ($admin.MemberId) { $admin.MemberId } else { $admin.PrincipalId }
-        
+
         # Add can_manage edges to all service principals with roles
         foreach ($sp in $ServicePrincipals) {
             $spHasRole = $allRoleAssignments | Where-Object { $_.MemberId -eq $sp.id }
@@ -1205,7 +1205,7 @@ function New-ScEntraGraphData {
                 }
             }
         }
-        
+
         # Add can_manage edges to all app registrations
         foreach ($app in $AppRegistrations) {
             # Only add if app is linked to a privileged SP
@@ -1227,7 +1227,7 @@ function New-ScEntraGraphData {
             }
         }
     }
-    
+
     Write-Verbose "Built graph with $($nodes.Count) nodes and $($edges.Count) edges"
     
     return @{
@@ -1696,31 +1696,31 @@ function Get-ScEntraEscalationPaths {
     
     # 5. Analyze administrative roles with app/SP management capabilities
     Write-Verbose "Analyzing administrative roles with escalation capabilities..."
-    
+
     # Define roles that can manage applications and service principals
     $appManagementRoles = @(
         'Cloud Application Administrator',
         'Application Administrator',
         'Hybrid Identity Administrator'
     )
-    
+
     # Define roles that can manage all roles
     $roleManagementRoles = @(
         'Privileged Role Administrator',
         'Global Administrator'
     )
-    
+
     # Check for users/groups with app management roles who could escalate via SPs
     $appAdminAssignments = $RoleAssignments | Where-Object { $appManagementRoles -contains $_.RoleName }
     $appAdminPIMAssignments = $PIMAssignments | Where-Object { $appManagementRoles -contains $_.RoleName }
-    
+
     foreach ($assignment in ($appAdminAssignments + $appAdminPIMAssignments)) {
         # Count how many privileged SPs exist that this admin could abuse
         $privilegedSPs = $ServicePrincipals | Where-Object {
             $spId = $_.id
             ($RoleAssignments | Where-Object { $_.MemberId -eq $spId }).Count -gt 0
         }
-        
+
         if ($privilegedSPs.Count -gt 0) {
             $isPIM = $assignment -in $appAdminPIMAssignments
             $risk = [PSCustomObject]@{
@@ -1736,14 +1736,14 @@ function Get-ScEntraEscalationPaths {
             $escalationRisks += $risk
         }
     }
-    
+
     # Check for users/groups with role management capabilities
     $roleAdminAssignments = $RoleAssignments | Where-Object { $roleManagementRoles -contains $_.RoleName }
     $roleAdminPIMAssignments = $PIMAssignments | Where-Object { $roleManagementRoles -contains $_.RoleName }
-    
+
     foreach ($assignment in ($roleAdminAssignments + $roleAdminPIMAssignments)) {
         $isPIM = $assignment -in $roleAdminPIMAssignments
-        
+
         # These are always high risk as they can assign any role
         $risk = [PSCustomObject]@{
             RiskType = 'RoleAdministratorEscalation'
@@ -1756,7 +1756,7 @@ function Get-ScEntraEscalationPaths {
         }
         $escalationRisks += $risk
     }
-    
+
     # 6. Analyze PIM assignments for unusual patterns
     if ($PIMAssignments.Count -gt 0) {
         Write-Verbose "Analyzing PIM assignment patterns..."
