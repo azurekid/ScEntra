@@ -676,6 +676,9 @@ function New-ScEntraGraphData {
     .PARAMETER SPOwners
         Hashtable of service principal owners (spId -> array of owner objects)
     
+    .PARAMETER SPAppRoleAssignments
+        Hashtable of service principal app role assignments (spId -> array of principal objects)
+    
     .PARAMETER AppOwners
         Hashtable of app registration owners (appId -> array of owner objects)
     
@@ -710,6 +713,9 @@ function New-ScEntraGraphData {
         
         [Parameter(Mandatory = $false)]
         [hashtable]$SPOwners = @{},
+        
+        [Parameter(Mandatory = $false)]
+        [hashtable]$SPAppRoleAssignments = @{},
         
         [Parameter(Mandatory = $false)]
         [hashtable]$AppOwners = @{}
@@ -1035,6 +1041,70 @@ function New-ScEntraGraphData {
         }
     }
     
+    # Add service principal app role assignment edges (users/groups assigned to SP)
+    foreach ($spId in $SPAppRoleAssignments.Keys) {
+        $sp = $ServicePrincipals | Where-Object { $_.id -eq $spId } | Select-Object -First 1
+        if ($sp) {
+            if (-not $nodeIndex.ContainsKey($sp.id)) {
+                $null = $nodes.Add(@{
+                    id = $sp.id
+                    label = $sp.displayName
+                    type = 'servicePrincipal'
+                    appId = $sp.appId
+                    accountEnabled = $sp.accountEnabled
+                })
+                $nodeIndex[$sp.id] = $nodes.Count - 1
+            }
+            
+            foreach ($assignment in $SPAppRoleAssignments[$spId]) {
+                $principalType = $assignment.principalType
+                
+                if ($principalType -eq 'User') {
+                    $user = $Users | Where-Object { $_.id -eq $assignment.principalId } | Select-Object -First 1
+                    if ($user) {
+                        if (-not $nodeIndex.ContainsKey($user.id)) {
+                            $null = $nodes.Add(@{
+                                id = $user.id
+                                label = $user.displayName
+                                type = 'user'
+                                userPrincipalName = $user.userPrincipalName
+                                accountEnabled = $user.accountEnabled
+                            })
+                            $nodeIndex[$user.id] = $nodes.Count - 1
+                        }
+                        $null = $edges.Add(@{
+                            from = $user.id
+                            to = $sp.id
+                            type = 'assigned_to'
+                            label = 'Assigned'
+                        })
+                    }
+                }
+                elseif ($principalType -eq 'Group') {
+                    $group = $Groups | Where-Object { $_.id -eq $assignment.principalId } | Select-Object -First 1
+                    if ($group) {
+                        if (-not $nodeIndex.ContainsKey($group.id)) {
+                            $null = $nodes.Add(@{
+                                id = $group.id
+                                label = $group.displayName
+                                type = 'group'
+                                isAssignableToRole = $group.isAssignableToRole
+                                securityEnabled = $group.securityEnabled
+                            })
+                            $nodeIndex[$group.id] = $nodes.Count - 1
+                        }
+                        $null = $edges.Add(@{
+                            from = $group.id
+                            to = $sp.id
+                            type = 'assigned_to'
+                            label = 'Assigned'
+                        })
+                    }
+                }
+            }
+        }
+    }
+    
     # Add app registration ownership edges
     foreach ($appId in $AppOwners.Keys) {
         $app = $AppRegistrations | Where-Object { $_.id -eq $appId } | Select-Object -First 1
@@ -1175,6 +1245,7 @@ function Get-ScEntraEscalationPaths {
     $groupMemberships = @{}
     $groupOwners = @{}
     $spOwners = @{}
+    $spAppRoleAssignments = @{}
     $appOwners = @{}
     
     # Identify groups that need detailed analysis (those with roles or PIM assignments)
@@ -1398,21 +1469,30 @@ function Get-ScEntraEscalationPaths {
         $RoleAssignments | Where-Object { $_.MemberId -eq $spId }
     }
     
-    # Build batch requests for SP owners
+    # Build batch requests for SP owners and app role assignments
     $spBatchRequests = @()
     $spRequestId = 0
     foreach ($sp in $spsWithRoles) {
+        # Owners
         $spBatchRequests += @{
-            id = "$spRequestId-sp-$($sp.id)"
+            id = "$spRequestId-sp-owners-$($sp.id)"
             method = "GET"
             url = "/servicePrincipals/$($sp.id)/owners?`$select=id,displayName,userPrincipalName"
+        }
+        $spRequestId++
+        
+        # App role assignments (users/groups assigned to this SP)
+        $spBatchRequests += @{
+            id = "$spRequestId-sp-approles-$($sp.id)"
+            method = "GET"
+            url = "/servicePrincipals/$($sp.id)/appRoleAssignedTo?`$select=principalId,principalDisplayName,principalType&`$top=100"
         }
         $spRequestId++
     }
     
     $spBatchResponses = @{}
     if ($spBatchRequests.Count -gt 0) {
-        Write-Verbose "Fetching service principal owners using batch requests ($($spBatchRequests.Count) requests)"
+        Write-Verbose "Fetching service principal data using batch requests ($($spBatchRequests.Count) requests)"
         try {
             $spBatchResponses = Invoke-GraphBatchRequest -Requests $spBatchRequests
         }
@@ -1425,8 +1505,8 @@ function Get-ScEntraEscalationPaths {
     foreach ($sp in $spsWithRoles) {
         $ownerCount = 0
         
-        # Try batch response first
-        $ownerResponseKey = $spBatchResponses.Keys | Where-Object { $_ -like "*-sp-$($sp.id)" } | Select-Object -First 1
+        # Try batch response for owners first
+        $ownerResponseKey = $spBatchResponses.Keys | Where-Object { $_ -like "*-sp-owners-$($sp.id)" } | Select-Object -First 1
         if ($ownerResponseKey) {
             $ownerResponse = $spBatchResponses[$ownerResponseKey]
             if ($ownerResponse -and $ownerResponse.status -eq 200 -and $ownerResponse.body.value) {
@@ -1435,7 +1515,7 @@ function Get-ScEntraEscalationPaths {
             }
         }
         else {
-            # Fallback
+            # Fallback for owners
             try {
                 $ownersUri = "$script:GraphBaseUrl/servicePrincipals/$($sp.id)/owners?`$select=id,displayName,userPrincipalName"
                 $owners = Invoke-GraphRequest -Uri $ownersUri -Method GET -ErrorAction SilentlyContinue
@@ -1445,7 +1525,29 @@ function Get-ScEntraEscalationPaths {
                 }
             }
             catch {
-                Write-Verbose "Could not analyze service principal $($sp.id): $_"
+                Write-Verbose "Could not fetch owners for service principal $($sp.id): $_"
+            }
+        }
+        
+        # Try batch response for app role assignments
+        $appRoleResponseKey = $spBatchResponses.Keys | Where-Object { $_ -like "*-sp-approles-$($sp.id)" } | Select-Object -First 1
+        if ($appRoleResponseKey) {
+            $appRoleResponse = $spBatchResponses[$appRoleResponseKey]
+            if ($appRoleResponse -and $appRoleResponse.status -eq 200 -and $appRoleResponse.body.value) {
+                $spAppRoleAssignments[$sp.id] = $appRoleResponse.body.value
+            }
+        }
+        else {
+            # Fallback for app role assignments
+            try {
+                $appRolesUri = "$script:GraphBaseUrl/servicePrincipals/$($sp.id)/appRoleAssignedTo?`$select=principalId,principalDisplayName,principalType&`$top=100"
+                $appRoles = Invoke-GraphRequest -Uri $appRolesUri -Method GET -ErrorAction SilentlyContinue
+                if ($appRoles.value) {
+                    $spAppRoleAssignments[$sp.id] = $appRoles.value
+                }
+            }
+            catch {
+                Write-Verbose "Could not fetch app role assignments for service principal $($sp.id): $_"
             }
         }
         
@@ -1582,6 +1684,7 @@ function Get-ScEntraEscalationPaths {
         -GroupMemberships $groupMemberships `
         -GroupOwners $groupOwners `
         -SPOwners $spOwners `
+        -SPAppRoleAssignments $spAppRoleAssignments `
         -AppOwners $appOwners
     
     Write-Progress -Activity "Analyzing escalation paths" -Completed -Id 5
@@ -2213,6 +2316,7 @@ function Export-ScEntraReport {
                 color: edge.type === 'has_role' ? '#FF5722' :
                        edge.type === 'member_of' ? '#2196F3' :
                        edge.type === 'owns' ? '#FF9800' :
+                       edge.type === 'assigned_to' ? '#00BCD4' :
                        edge.isPIM ? '#9C27B0' : '#999',
                 opacity: 0.7
             },
@@ -2452,6 +2556,7 @@ function Export-ScEntraReport {
                         color: edge.edgeType === 'has_role' ? '#FF5722' :
                                edge.edgeType === 'member_of' ? '#2196F3' :
                                edge.edgeType === 'owns' ? '#FF9800' :
+                               edge.edgeType === 'assigned_to' ? '#00BCD4' :
                                edge.isPIM ? '#9C27B0' : '#999',
                         opacity: 0.7
                     },

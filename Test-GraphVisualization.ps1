@@ -87,6 +87,13 @@ $spOwners = @{
     )
 }
 
+$spAppRoleAssignments = @{
+    "sp1" = @(
+        [PSCustomObject]@{ principalId = "user3"; principalDisplayName = "Carol User"; principalType = "User" }
+        [PSCustomObject]@{ principalId = "group2"; principalDisplayName = "IT Admins"; principalType = "Group" }
+    )
+}
+
 $appOwners = @{
     "app1" = @([PSCustomObject]@{ id = "user2"; displayName = "Bob Owner" })
     "app2" = @([PSCustomObject]@{ id = "user1"; displayName = "Alice Admin" })
@@ -157,6 +164,13 @@ foreach ($spId in $spOwners.Keys) {
 foreach ($appId in $appOwners.Keys) {
     foreach ($owner in $appOwners[$appId]) {
         $null = $edges.Add(@{ from = $owner.id; to = $appId; type = "owns"; label = "Owner" })
+    }
+}
+
+# Add SP app role assignment edges
+foreach ($spId in $spAppRoleAssignments.Keys) {
+    foreach ($assignment in $spAppRoleAssignments[$spId]) {
+        $null = $edges.Add(@{ from = $assignment.principalId; to = $spId; type = "assigned_to"; label = "Assigned" })
     }
 }
 
