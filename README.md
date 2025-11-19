@@ -36,6 +36,12 @@ A PowerShell module for comprehensive security analysis of Microsoft Entra ID (f
   - Percentage-based progress bars
   - Multi-phase operation tracking
 
+- ⚡ **Performance Optimized for Large Environments**:
+  - Graph API batch processing (up to 20 requests per batch)
+  - Selective data fetching - only retrieves member details for security-relevant groups
+  - Minimized API calls to reduce detection and improve speed
+  - Smart filtering of groups before analysis (role-enabled, assigned to roles, or in PIM)
+
 ## Prerequisites
 
 - PowerShell 7.0 or later
