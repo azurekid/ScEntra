@@ -1175,6 +1175,59 @@ function New-ScEntraGraphData {
         }
     }
     
+    # Add "can_manage" edges for administrative roles with app/SP management capabilities
+    $appManagementRoles = @(
+        'Cloud Application Administrator',
+        'Application Administrator',
+        'Hybrid Identity Administrator'
+    )
+    
+    # Find all principals with app management roles (from both direct and PIM)
+    $allRoleAssignments = @($RoleAssignments; $PIMAssignments)
+    $appAdmins = $allRoleAssignments | Where-Object { $appManagementRoles -contains $_.RoleName }
+    
+    foreach ($admin in $appAdmins) {
+        $principalId = if ($admin.MemberId) { $admin.MemberId } else { $admin.PrincipalId }
+        
+        # Add can_manage edges to all service principals with roles
+        foreach ($sp in $ServicePrincipals) {
+            $spHasRole = $allRoleAssignments | Where-Object { $_.MemberId -eq $sp.id }
+            if ($spHasRole) {
+                # Ensure both nodes exist
+                if ($nodeIndex.ContainsKey($principalId) -and $nodeIndex.ContainsKey($sp.id)) {
+                    $null = $edges.Add(@{
+                        from = $principalId
+                        to = $sp.id
+                        type = 'can_manage'
+                        label = 'Can Manage'
+                        isPIM = $admin.PSObject.Properties.Name -contains 'AssignmentType'
+                    })
+                }
+            }
+        }
+        
+        # Add can_manage edges to all app registrations
+        foreach ($app in $AppRegistrations) {
+            # Only add if app is linked to a privileged SP
+            $sp = $ServicePrincipals | Where-Object { $_.appId -eq $app.appId } | Select-Object -First 1
+            if ($sp) {
+                $spHasRole = $allRoleAssignments | Where-Object { $_.MemberId -eq $sp.id }
+                if ($spHasRole) {
+                    # Ensure both nodes exist
+                    if ($nodeIndex.ContainsKey($principalId) -and $nodeIndex.ContainsKey($app.id)) {
+                        $null = $edges.Add(@{
+                            from = $principalId
+                            to = $app.id
+                            type = 'can_manage'
+                            label = 'Can Manage'
+                            isPIM = $admin.PSObject.Properties.Name -contains 'AssignmentType'
+                        })
+                    }
+                }
+            }
+        }
+    }
+    
     Write-Verbose "Built graph with $($nodes.Count) nodes and $($edges.Count) edges"
     
     return @{
@@ -1641,7 +1694,70 @@ function Get-ScEntraEscalationPaths {
     
     Write-Progress -Activity "Analyzing escalation paths" -Completed -Id 5
     
-    # 5. Analyze PIM assignments for unusual patterns
+    # 5. Analyze administrative roles with app/SP management capabilities
+    Write-Verbose "Analyzing administrative roles with escalation capabilities..."
+    
+    # Define roles that can manage applications and service principals
+    $appManagementRoles = @(
+        'Cloud Application Administrator',
+        'Application Administrator',
+        'Hybrid Identity Administrator'
+    )
+    
+    # Define roles that can manage all roles
+    $roleManagementRoles = @(
+        'Privileged Role Administrator',
+        'Global Administrator'
+    )
+    
+    # Check for users/groups with app management roles who could escalate via SPs
+    $appAdminAssignments = $RoleAssignments | Where-Object { $appManagementRoles -contains $_.RoleName }
+    $appAdminPIMAssignments = $PIMAssignments | Where-Object { $appManagementRoles -contains $_.RoleName }
+    
+    foreach ($assignment in ($appAdminAssignments + $appAdminPIMAssignments)) {
+        # Count how many privileged SPs exist that this admin could abuse
+        $privilegedSPs = $ServicePrincipals | Where-Object {
+            $spId = $_.id
+            ($RoleAssignments | Where-Object { $_.MemberId -eq $spId }).Count -gt 0
+        }
+        
+        if ($privilegedSPs.Count -gt 0) {
+            $isPIM = $assignment -in $appAdminPIMAssignments
+            $risk = [PSCustomObject]@{
+                RiskType = 'AppAdministratorEscalation'
+                Severity = 'High'
+                PrincipalId = $assignment.MemberId
+                PrincipalType = $assignment.MemberType
+                RoleName = $assignment.RoleName
+                PrivilegedSPCount = $privilegedSPs.Count
+                IsPIM = $isPIM
+                Description = "$(if($isPIM){'PIM eligible '})$($assignment.RoleName) can manage $($privilegedSPs.Count) service principal(s) with privileged role assignments, enabling potential privilege escalation"
+            }
+            $escalationRisks += $risk
+        }
+    }
+    
+    # Check for users/groups with role management capabilities
+    $roleAdminAssignments = $RoleAssignments | Where-Object { $roleManagementRoles -contains $_.RoleName }
+    $roleAdminPIMAssignments = $PIMAssignments | Where-Object { $roleManagementRoles -contains $_.RoleName }
+    
+    foreach ($assignment in ($roleAdminAssignments + $roleAdminPIMAssignments)) {
+        $isPIM = $assignment -in $roleAdminPIMAssignments
+        
+        # These are always high risk as they can assign any role
+        $risk = [PSCustomObject]@{
+            RiskType = 'RoleAdministratorEscalation'
+            Severity = 'Critical'
+            PrincipalId = $assignment.MemberId
+            PrincipalType = $assignment.MemberType
+            RoleName = $assignment.RoleName
+            IsPIM = $isPIM
+            Description = "$(if($isPIM){'PIM eligible '})$($assignment.RoleName) can assign any role including Global Administrator, representing maximum escalation risk"
+        }
+        $escalationRisks += $risk
+    }
+    
+    # 6. Analyze PIM assignments for unusual patterns
     if ($PIMAssignments.Count -gt 0) {
         Write-Verbose "Analyzing PIM assignment patterns..."
         Write-Progress -Activity "Analyzing PIM assignment patterns" -Status "Grouping PIM assignments by principal" -PercentComplete 50 -Id 9
@@ -2317,11 +2433,12 @@ function Export-ScEntraReport {
                        edge.type === 'member_of' ? '#2196F3' :
                        edge.type === 'owns' ? '#FF9800' :
                        edge.type === 'assigned_to' ? '#00BCD4' :
+                       edge.type === 'can_manage' ? '#E91E63' :
                        edge.isPIM ? '#9C27B0' : '#999',
                 opacity: 0.7
             },
-            dashes: edge.isPIM || edge.type === 'owns',
-            width: edge.type === 'has_role' ? 3 : 1.5,
+            dashes: edge.isPIM || edge.type === 'owns' || edge.type === 'can_manage',
+            width: edge.type === 'has_role' ? 3 : (edge.type === 'can_manage' ? 2 : 1.5),
             font: { size: 10, color: '#666', align: 'middle' },
             edgeType: edge.type,
             isPIM: edge.isPIM || false
@@ -2556,12 +2673,13 @@ function Export-ScEntraReport {
             edges.forEach(edge => {
                 edgeUpdates.push({
                     id: edge.id,
-                    width: edge.edgeType === 'has_role' ? 3 : 1.5,
+                    width: edge.edgeType === 'has_role' ? 3 : (edge.edgeType === 'can_manage' ? 2 : 1.5),
                     color: {
                         color: edge.edgeType === 'has_role' ? '#FF5722' :
                                edge.edgeType === 'member_of' ? '#2196F3' :
                                edge.edgeType === 'owns' ? '#FF9800' :
                                edge.edgeType === 'assigned_to' ? '#00BCD4' :
+                               edge.edgeType === 'can_manage' ? '#E91E63' :
                                edge.isPIM ? '#9C27B0' : '#999',
                         opacity: 0.7
                     },
