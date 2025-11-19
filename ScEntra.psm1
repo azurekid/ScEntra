@@ -257,6 +257,76 @@ function Get-AllGraphItems {
     return $allItems
 }
 
+function Invoke-GraphBatchRequest {
+    <#
+    .SYNOPSIS
+        Makes a batch request to Microsoft Graph API for multiple operations
+    
+    .PARAMETER Requests
+        Array of request objects with id, method, and url properties
+    
+    .PARAMETER MaxBatchSize
+        Maximum number of requests per batch (default: 20, Graph API limit)
+    
+    .EXAMPLE
+        $requests = @(
+            @{ id = "1"; method = "GET"; url = "/groups/id1/members" }
+            @{ id = "2"; method = "GET"; url = "/groups/id2/members" }
+        )
+        Invoke-GraphBatchRequest -Requests $requests
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [array]$Requests,
+        
+        [Parameter(Mandatory = $false)]
+        [int]$MaxBatchSize = 20
+    )
+    
+    if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
+        throw "Not authenticated. Please run Connect-ScEntraGraph first."
+    }
+    
+    $allResponses = @{}
+    $batches = @()
+    
+    # Split requests into batches of MaxBatchSize
+    for ($i = 0; $i -lt $Requests.Count; $i += $MaxBatchSize) {
+        $batchSize = [Math]::Min($MaxBatchSize, $Requests.Count - $i)
+        $batches += ,@($Requests[$i..($i + $batchSize - 1)])
+    }
+    
+    Write-Verbose "Processing $($Requests.Count) requests in $($batches.Count) batches"
+    
+    foreach ($batch in $batches) {
+        $batchBody = @{
+            requests = $batch
+        }
+        
+        try {
+            $headers = @{
+                'Authorization' = "Bearer $script:GraphAccessToken"
+                'Content-Type' = 'application/json'
+            }
+            
+            $batchUri = "$script:GraphBaseUrl/`$batch"
+            $response = Invoke-RestMethod -Uri $batchUri -Method POST -Headers $headers -Body ($batchBody | ConvertTo-Json -Depth 10) -ErrorAction Stop
+            
+            # Process responses
+            foreach ($resp in $response.responses) {
+                $allResponses[$resp.id] = $resp
+            }
+        }
+        catch {
+            Write-Error "Batch request failed: $_"
+            throw
+        }
+    }
+    
+    return $allResponses
+}
+
 #endregion
 
 #region Inventory Functions
@@ -302,7 +372,8 @@ function Get-ScEntraGroups {
         Gets all groups from Entra ID
     
     .DESCRIPTION
-        Retrieves comprehensive information about all groups including role-enabled status
+        Retrieves comprehensive information about all groups including role-enabled status.
+        Member counts are fetched on-demand only for groups relevant to role analysis.
     
     .EXAMPLE
         $groups = Get-ScEntraGroups
@@ -323,37 +394,7 @@ function Get-ScEntraGroups {
         $groups = Get-AllGraphItems -Uri $uri -ProgressActivity "Retrieving groups from Entra ID"
         
         Write-Host "Retrieved $($groups.Count) groups" -ForegroundColor Green
-        
-        # Add member count to each group
-        $groupCount = 0
-        $totalGroups = $groups.Count
-        foreach ($group in $groups) {
-            $groupCount++
-            $percentComplete = [math]::Round(($groupCount / $totalGroups) * 100)
-            Write-Progress -Activity "Fetching group member counts" -Status "Processing group $groupCount of $totalGroups - $($group.displayName)" -PercentComplete $percentComplete -Id 2
-            
-            try {
-                $membersUri = "$script:GraphBaseUrl/groups/$($group.id)/members?`$count=true&`$select=id"
-                $membersResult = Invoke-GraphRequest -Uri $membersUri -Method GET -ErrorAction SilentlyContinue
-                $memberCount = 0
-                
-                if ($membersResult.'@odata.count') {
-                    $memberCount = $membersResult.'@odata.count'
-                }
-                elseif ($membersResult.value) {
-                    # Count manually if @odata.count not available
-                    $allMembers = Get-AllGraphItems -Uri "$script:GraphBaseUrl/groups/$($group.id)/members?`$select=id"
-                    $memberCount = $allMembers.Count
-                }
-                
-                $group | Add-Member -NotePropertyName memberCount -NotePropertyValue $memberCount -Force
-            }
-            catch {
-                $group | Add-Member -NotePropertyName memberCount -NotePropertyValue 0 -Force
-            }
-        }
-        
-        Write-Progress -Activity "Fetching group member counts" -Completed -Id 2
+        Write-Verbose "Member counts will be fetched on-demand for groups with role assignments or PIM eligibility"
         
         return $groups
     }
@@ -606,7 +647,7 @@ function Get-ScEntraEscalationPaths {
     
     .DESCRIPTION
         Analyzes nested group memberships, role assignments, and ownership patterns to identify
-        potential privilege escalation risks
+        potential privilege escalation risks. Uses batch processing to minimize Graph API calls.
     
     .PARAMETER Users
         Array of users from Get-ScEntraUsers
@@ -658,46 +699,142 @@ function Get-ScEntraEscalationPaths {
     
     $escalationRisks = @()
     
-    # 1. Analyze role-enabled groups
-    $roleEnabledGroups = $Groups | Where-Object { $_.isAssignableToRole -eq $true }
-    Write-Host "Found $($roleEnabledGroups.Count) role-enabled groups" -ForegroundColor Yellow
+    # Identify groups that need detailed analysis (those with roles or PIM assignments)
+    $groupsWithRoles = $RoleAssignments | Where-Object { $_.MemberType -eq 'group' } | Select-Object -ExpandProperty MemberId -Unique
+    $groupsInPIM = $PIMAssignments | Where-Object { $_.PrincipalType -eq 'group' } | Select-Object -ExpandProperty PrincipalId -Unique
+    $roleEnabledGroups = $Groups | Where-Object { $_.isAssignableToRole -eq $true } | Select-Object -ExpandProperty id
     
-    $groupCount = 0
-    $totalGroups = $roleEnabledGroups.Count
-    foreach ($group in $roleEnabledGroups) {
-        $groupCount++
-        if ($totalGroups -gt 0) {
-            $percentComplete = [math]::Round(($groupCount / $totalGroups) * 100)
-            Write-Progress -Activity "Analyzing escalation paths" -Status "Analyzing role-enabled group $groupCount of $totalGroups - $($group.displayName)" -PercentComplete $percentComplete -Id 5
+    # Combine and deduplicate all relevant group IDs
+    $relevantGroupIds = @($groupsWithRoles; $groupsInPIM; $roleEnabledGroups) | Select-Object -Unique
+    
+    Write-Host "Found $($roleEnabledGroups.Count) role-enabled groups" -ForegroundColor Yellow
+    Write-Host "Analyzing $($relevantGroupIds.Count) groups with role assignments or PIM eligibility (optimized)" -ForegroundColor Cyan
+    
+    # Build batch requests for group members, owners, and transitive members
+    $batchRequests = @()
+    $requestId = 0
+    
+    foreach ($groupId in $relevantGroupIds) {
+        # Members request
+        $batchRequests += @{
+            id = "$requestId-members"
+            method = "GET"
+            url = "/groups/$groupId/members?`$select=id&`$count=true"
+            headers = @{
+                "ConsistencyLevel" = "eventual"
+            }
         }
+        $requestId++
         
-        # Check if this group has role assignments
-        $groupRoles = $RoleAssignments | Where-Object { $_.MemberId -eq $group.id }
+        # Owners request
+        $batchRequests += @{
+            id = "$requestId-owners"
+            method = "GET"
+            url = "/groups/$groupId/owners?`$select=id"
+        }
+        $requestId++
         
-        if ($groupRoles) {
-            try {
-                $membersUri = "$script:GraphBaseUrl/groups/$($group.id)/members?`$select=id"
-                $members = Get-AllGraphItems -Uri $membersUri -ErrorAction SilentlyContinue
-                
-                $ownersUri = "$script:GraphBaseUrl/groups/$($group.id)/owners?`$select=id"
-                $owners = Get-AllGraphItems -Uri $ownersUri -ErrorAction SilentlyContinue
-                
-                foreach ($role in $groupRoles) {
-                    $risk = [PSCustomObject]@{
-                        RiskType = 'RoleEnabledGroup'
-                        Severity = 'High'
-                        GroupId = $group.id
-                        GroupName = $group.displayName
-                        RoleName = $role.RoleName
-                        MemberCount = $members.Count
-                        OwnerCount = $owners.Count
-                        Description = "Role-enabled group '$($group.displayName)' has '$($role.RoleName)' role with $($members.Count) members"
-                    }
-                    $escalationRisks += $risk
+        # Only get transitive members for groups that have role assignments (not just role-enabled)
+        if ($groupsWithRoles -contains $groupId) {
+            $batchRequests += @{
+                id = "$requestId-transitive"
+                method = "GET"
+                url = "/groups/$groupId/transitiveMembers?`$select=id&`$count=true"
+                headers = @{
+                    "ConsistencyLevel" = "eventual"
                 }
             }
-            catch {
-                Write-Verbose "Could not analyze group $($group.id): $_"
+            $requestId++
+        }
+    }
+    
+    Write-Verbose "Fetching group data using batch requests ($($batchRequests.Count) requests for $($relevantGroupIds.Count) groups)"
+    Write-Progress -Activity "Analyzing escalation paths" -Status "Fetching group membership data in batches" -PercentComplete 10 -Id 5
+    
+    # Execute batch requests
+    $batchResponses = @{}
+    if ($batchRequests.Count -gt 0) {
+        try {
+            $batchResponses = Invoke-GraphBatchRequest -Requests $batchRequests
+        }
+        catch {
+            Write-Warning "Batch request failed, falling back to individual requests: $_"
+            # Fallback handled below
+        }
+    }
+    
+    # Process role-enabled groups with their fetched data
+    $groupCount = 0
+    $totalGroups = $roleEnabledGroups.Count
+    
+    foreach ($groupId in $roleEnabledGroups) {
+        $groupCount++
+        if ($totalGroups -gt 0) {
+            $percentComplete = [math]::Round(20 + ($groupCount / $totalGroups) * 30)
+            Write-Progress -Activity "Analyzing escalation paths" -Status "Analyzing role-enabled group $groupCount of $totalGroups" -PercentComplete $percentComplete -Id 5
+        }
+        
+        $group = $Groups | Where-Object { $_.id -eq $groupId }
+        if (-not $group) { continue }
+        
+        # Check if this group has role assignments
+        $groupRoles = $RoleAssignments | Where-Object { $_.MemberId -eq $groupId }
+        
+        if ($groupRoles) {
+            # Get data from batch responses or fetch individually as fallback
+            $memberCount = 0
+            $ownerCount = 0
+            
+            # Find the corresponding batch response
+            $membersResponse = $batchResponses.Values | Where-Object { $_.id -like "*-members" -and $_.body.value } | Select-Object -First 1
+            $ownersResponse = $batchResponses.Values | Where-Object { $_.id -like "*-owners" -and $_.body.value } | Select-Object -First 1
+            
+            if ($membersResponse -and $membersResponse.status -eq 200) {
+                $memberCount = if ($membersResponse.body.'@odata.count') { 
+                    $membersResponse.body.'@odata.count' 
+                } else { 
+                    $membersResponse.body.value.Count 
+                }
+            }
+            else {
+                # Fallback: fetch individually
+                try {
+                    $membersUri = "$script:GraphBaseUrl/groups/$groupId/members?`$select=id&`$count=true"
+                    $membersResult = Invoke-GraphRequest -Uri $membersUri -Method GET -ErrorAction SilentlyContinue
+                    $memberCount = if ($membersResult.'@odata.count') { $membersResult.'@odata.count' } else { $membersResult.value.Count }
+                }
+                catch {
+                    Write-Verbose "Could not fetch members for group ${groupId}: $($_.Exception.Message)"
+                }
+            }
+            
+            if ($ownersResponse -and $ownersResponse.status -eq 200) {
+                $ownerCount = $ownersResponse.body.value.Count
+            }
+            else {
+                # Fallback: fetch individually
+                try {
+                    $ownersUri = "$script:GraphBaseUrl/groups/$groupId/owners?`$select=id"
+                    $ownersResult = Invoke-GraphRequest -Uri $ownersUri -Method GET -ErrorAction SilentlyContinue
+                    $ownerCount = $ownersResult.value.Count
+                }
+                catch {
+                    Write-Verbose "Could not fetch owners for group ${groupId}: $($_.Exception.Message)"
+                }
+            }
+            
+            foreach ($role in $groupRoles) {
+                $risk = [PSCustomObject]@{
+                    RiskType = 'RoleEnabledGroup'
+                    Severity = 'High'
+                    GroupId = $group.id
+                    GroupName = $group.displayName
+                    RoleName = $role.RoleName
+                    MemberCount = $memberCount
+                    OwnerCount = $ownerCount
+                    Description = "Role-enabled group '$($group.displayName)' has '$($role.RoleName)' role with $memberCount members"
+                }
+                $escalationRisks += $risk
             }
         }
     }
@@ -705,129 +842,216 @@ function Get-ScEntraEscalationPaths {
     # 2. Analyze nested group memberships leading to roles
     Write-Verbose "Analyzing nested group memberships..."
     
-    $groupsWithRoles = $RoleAssignments | Where-Object { $_.MemberType -eq 'group' } | Select-Object -ExpandProperty MemberId -Unique
-    
     $groupCount = 0
     $totalGroups = $groupsWithRoles.Count
     foreach ($groupId in $groupsWithRoles) {
         $groupCount++
         if ($totalGroups -gt 0) {
-            $percentComplete = [math]::Round(($groupCount / $totalGroups) * 100)
-            Write-Progress -Activity "Analyzing nested group memberships" -Status "Processing group $groupCount of $totalGroups" -PercentComplete $percentComplete -Id 6
+            $percentComplete = [math]::Round(50 + ($groupCount / $totalGroups) * 20)
+            Write-Progress -Activity "Analyzing escalation paths" -Status "Analyzing nested memberships for group $groupCount of $totalGroups" -PercentComplete $percentComplete -Id 5
         }
         
         $group = $Groups | Where-Object { $_.id -eq $groupId }
         if ($group) {
-            try {
-                # Get transitive members (includes nested groups)
-                $transitiveUri = "$script:GraphBaseUrl/groups/$groupId/transitiveMembers?`$select=id"
-                $transitiveMembers = Get-AllGraphItems -Uri $transitiveUri -ErrorAction SilentlyContinue
-                
-                $directUri = "$script:GraphBaseUrl/groups/$groupId/members?`$select=id"
-                $directMembers = Get-AllGraphItems -Uri $directUri -ErrorAction SilentlyContinue
-                
-                if ($transitiveMembers.Count -gt $directMembers.Count) {
-                    $nestedMemberCount = $transitiveMembers.Count - $directMembers.Count
-                    $groupRoles = $RoleAssignments | Where-Object { $_.MemberId -eq $groupId }
-                    
-                    foreach ($role in $groupRoles) {
-                        $risk = [PSCustomObject]@{
-                            RiskType = 'NestedGroupMembership'
-                            Severity = 'Medium'
-                            GroupId = $group.id
-                            GroupName = $group.displayName
-                            RoleName = $role.RoleName
-                            DirectMembers = $directMembers.Count
-                            NestedMembers = $nestedMemberCount
-                            Description = "Group '$($group.displayName)' with '$($role.RoleName)' has $nestedMemberCount members through nested groups"
-                        }
-                        $escalationRisks += $risk
-                    }
+            $directMemberCount = 0
+            $transitiveMemberCount = 0
+            
+            # Try to get from batch responses first
+            $membersResponse = $batchResponses.Values | Where-Object { $_.id -like "*-members" }
+            $transitiveResponse = $batchResponses.Values | Where-Object { $_.id -like "*-transitive" }
+            
+            if ($membersResponse -and $membersResponse.status -eq 200) {
+                $directMemberCount = if ($membersResponse.body.'@odata.count') { 
+                    $membersResponse.body.'@odata.count' 
+                } else { 
+                    $membersResponse.body.value.Count 
                 }
             }
-            catch {
-                Write-Verbose "Could not analyze nested members for group ${groupId}: $_"
+            else {
+                try {
+                    $directUri = "$script:GraphBaseUrl/groups/$groupId/members?`$select=id&`$count=true"
+                    $directResult = Invoke-GraphRequest -Uri $directUri -Method GET -ErrorAction SilentlyContinue
+                    $directMemberCount = if ($directResult.'@odata.count') { $directResult.'@odata.count' } else { $directResult.value.Count }
+                }
+                catch {
+                    Write-Verbose "Could not fetch direct members for group ${groupId}: $($_.Exception.Message)"
+                }
+            }
+            
+            if ($transitiveResponse -and $transitiveResponse.status -eq 200) {
+                $transitiveMemberCount = if ($transitiveResponse.body.'@odata.count') { 
+                    $transitiveResponse.body.'@odata.count' 
+                } else { 
+                    $transitiveResponse.body.value.Count 
+                }
+            }
+            else {
+                try {
+                    $transitiveUri = "$script:GraphBaseUrl/groups/$groupId/transitiveMembers?`$select=id&`$count=true"
+                    $transitiveResult = Invoke-GraphRequest -Uri $transitiveUri -Method GET -ErrorAction SilentlyContinue
+                    $transitiveMemberCount = if ($transitiveResult.'@odata.count') { $transitiveResult.'@odata.count' } else { $transitiveResult.value.Count }
+                }
+                catch {
+                    Write-Verbose "Could not fetch transitive members for group ${groupId}: $($_.Exception.Message)"
+                }
+            }
+            
+            if ($transitiveMemberCount -gt $directMemberCount) {
+                $nestedMemberCount = $transitiveMemberCount - $directMemberCount
+                $groupRoles = $RoleAssignments | Where-Object { $_.MemberId -eq $groupId }
+                
+                foreach ($role in $groupRoles) {
+                    $risk = [PSCustomObject]@{
+                        RiskType = 'NestedGroupMembership'
+                        Severity = 'Medium'
+                        GroupId = $group.id
+                        GroupName = $group.displayName
+                        RoleName = $role.RoleName
+                        DirectMembers = $directMemberCount
+                        NestedMembers = $nestedMemberCount
+                        Description = "Group '$($group.displayName)' with '$($role.RoleName)' has $nestedMemberCount members through nested groups"
+                    }
+                    $escalationRisks += $risk
+                }
             }
         }
     }
     
-    Write-Progress -Activity "Analyzing nested group memberships" -Completed -Id 6
+    # 3. Analyze service principal ownership - batch processing
+    Write-Verbose "Analyzing service principal ownership..."
+    Write-Progress -Activity "Analyzing escalation paths" -Status "Analyzing service principal ownership" -PercentComplete 70 -Id 5
     
-    # 3. Analyze service principal and app ownership
-    Write-Verbose "Analyzing service principal and app ownership..."
+    # Only analyze SPs with role assignments
+    $spsWithRoles = $ServicePrincipals | Where-Object { 
+        $spId = $_.id
+        $RoleAssignments | Where-Object { $_.MemberId -eq $spId }
+    }
     
-    $spCount = 0
-    $totalSPs = $ServicePrincipals.Count
-    foreach ($sp in $ServicePrincipals) {
-        $spCount++
-        if ($totalSPs -gt 0 -and $spCount % 10 -eq 0) {
-            $percentComplete = [math]::Round(($spCount / $totalSPs) * 100)
-            Write-Progress -Activity "Analyzing service principal ownership" -Status "Processing service principal $spCount of $totalSPs" -PercentComplete $percentComplete -Id 7
+    # Build batch requests for SP owners
+    $spBatchRequests = @()
+    $spRequestId = 0
+    foreach ($sp in $spsWithRoles) {
+        $spBatchRequests += @{
+            id = "$spRequestId"
+            method = "GET"
+            url = "/servicePrincipals/$($sp.id)/owners?`$select=id"
         }
-        
+        $spRequestId++
+    }
+    
+    $spBatchResponses = @{}
+    if ($spBatchRequests.Count -gt 0) {
+        Write-Verbose "Fetching service principal owners using batch requests ($($spBatchRequests.Count) requests)"
         try {
-            $ownersUri = "$script:GraphBaseUrl/servicePrincipals/$($sp.id)/owners?`$select=id"
-            $owners = Get-AllGraphItems -Uri $ownersUri -ErrorAction SilentlyContinue
-            
-            if ($owners.Count -gt 0) {
-                # Check if SP has any role assignments
-                $spRoles = $RoleAssignments | Where-Object { $_.MemberId -eq $sp.id }
-                
-                if ($spRoles) {
-                    foreach ($role in $spRoles) {
-                        $risk = [PSCustomObject]@{
-                            RiskType = 'ServicePrincipalOwnership'
-                            Severity = 'High'
-                            ServicePrincipalId = $sp.id
-                            ServicePrincipalName = $sp.displayName
-                            RoleName = $role.RoleName
-                            OwnerCount = $owners.Count
-                            Description = "Service Principal '$($sp.displayName)' with '$($role.RoleName)' has $($owners.Count) owners who could potentially abuse permissions"
-                        }
-                        $escalationRisks += $risk
-                    }
-                }
-            }
+            $spBatchResponses = Invoke-GraphBatchRequest -Requests $spBatchRequests
         }
         catch {
-            Write-Verbose "Could not analyze service principal $($sp.id): $_"
+            Write-Verbose "SP batch request failed, will use fallback: $_"
         }
     }
     
-    Write-Progress -Activity "Analyzing service principal ownership" -Completed -Id 7
-    
-    # 4. Analyze app registration ownership
-    $appCount = 0
-    $totalApps = $AppRegistrations.Count
-    foreach ($app in $AppRegistrations) {
-        $appCount++
-        if ($totalApps -gt 0 -and $appCount % 10 -eq 0) {
-            $percentComplete = [math]::Round(($appCount / $totalApps) * 100)
-            Write-Progress -Activity "Analyzing app registration ownership" -Status "Processing app registration $appCount of $totalApps" -PercentComplete $percentComplete -Id 8
+    $spCount = 0
+    foreach ($sp in $spsWithRoles) {
+        $ownerCount = 0
+        
+        # Try batch response first
+        $ownerResponse = $spBatchResponses["$spCount"]
+        if ($ownerResponse -and $ownerResponse.status -eq 200) {
+            $ownerCount = $ownerResponse.body.value.Count
+        }
+        else {
+            # Fallback
+            try {
+                $ownersUri = "$script:GraphBaseUrl/servicePrincipals/$($sp.id)/owners?`$select=id"
+                $owners = Invoke-GraphRequest -Uri $ownersUri -Method GET -ErrorAction SilentlyContinue
+                $ownerCount = $owners.value.Count
+            }
+            catch {
+                Write-Verbose "Could not analyze service principal $($sp.id): $_"
+            }
         }
         
-        try {
-            $ownersUri = "$script:GraphBaseUrl/applications/$($app.id)/owners?`$select=id"
-            $owners = Get-AllGraphItems -Uri $ownersUri -ErrorAction SilentlyContinue
+        if ($ownerCount -gt 0) {
+            $spRoles = $RoleAssignments | Where-Object { $_.MemberId -eq $sp.id }
             
-            if ($owners.Count -gt 5) {
+            foreach ($role in $spRoles) {
                 $risk = [PSCustomObject]@{
-                    RiskType = 'AppRegistrationOwnership'
-                    Severity = 'Medium'
-                    AppId = $app.id
-                    AppName = $app.displayName
-                    OwnerCount = $owners.Count
-                    Description = "App Registration '$($app.displayName)' has $($owners.Count) owners - potential for credential abuse"
+                    RiskType = 'ServicePrincipalOwnership'
+                    Severity = 'High'
+                    ServicePrincipalId = $sp.id
+                    ServicePrincipalName = $sp.displayName
+                    RoleName = $role.RoleName
+                    OwnerCount = $ownerCount
+                    Description = "Service Principal '$($sp.displayName)' with '$($role.RoleName)' has $ownerCount owners who could potentially abuse permissions"
                 }
                 $escalationRisks += $risk
             }
         }
+        $spCount++
+    }
+    
+    # 4. Analyze app registration ownership - batch processing
+    Write-Verbose "Analyzing app registration ownership..."
+    Write-Progress -Activity "Analyzing escalation paths" -Status "Analyzing app registration ownership" -PercentComplete 85 -Id 5
+    
+    # Build batch requests for app owners
+    $appBatchRequests = @()
+    $appRequestId = 0
+    foreach ($app in $AppRegistrations) {
+        $appBatchRequests += @{
+            id = "$appRequestId"
+            method = "GET"
+            url = "/applications/$($app.id)/owners?`$select=id"
+        }
+        $appRequestId++
+    }
+    
+    $appBatchResponses = @{}
+    if ($appBatchRequests.Count -gt 0) {
+        Write-Verbose "Fetching app registration owners using batch requests ($($appBatchRequests.Count) requests)"
+        try {
+            $appBatchResponses = Invoke-GraphBatchRequest -Requests $appBatchRequests
+        }
         catch {
-            Write-Verbose "Could not analyze app registration $($app.id): $_"
+            Write-Verbose "App batch request failed, will use fallback: $_"
         }
     }
     
-    Write-Progress -Activity "Analyzing app registration ownership" -Completed -Id 8
+    $appCount = 0
+    foreach ($app in $AppRegistrations) {
+        $ownerCount = 0
+        
+        # Try batch response first
+        $ownerResponse = $appBatchResponses["$appCount"]
+        if ($ownerResponse -and $ownerResponse.status -eq 200) {
+            $ownerCount = $ownerResponse.body.value.Count
+        }
+        else {
+            # Fallback
+            try {
+                $ownersUri = "$script:GraphBaseUrl/applications/$($app.id)/owners?`$select=id"
+                $owners = Invoke-GraphRequest -Uri $ownersUri -Method GET -ErrorAction SilentlyContinue
+                $ownerCount = $owners.value.Count
+            }
+            catch {
+                Write-Verbose "Could not analyze app registration $($app.id): $_"
+            }
+        }
+        
+        if ($ownerCount -gt 5) {
+            $risk = [PSCustomObject]@{
+                RiskType = 'AppRegistrationOwnership'
+                Severity = 'Medium'
+                AppId = $app.id
+                AppName = $app.displayName
+                OwnerCount = $ownerCount
+                Description = "App Registration '$($app.displayName)' has $ownerCount owners - potential for credential abuse"
+            }
+            $escalationRisks += $risk
+        }
+        $appCount++
+    }
+    
     Write-Progress -Activity "Analyzing escalation paths" -Completed -Id 5
     
     # 5. Analyze PIM assignments for unusual patterns
