@@ -2595,7 +2595,7 @@ function Export-ScEntraReport {
                     });
                 } else {
                     // If user is selected, hide all other users regardless of connection
-                    const shouldHide = isUserSelected && node.type === 'user' ? true : true;
+                    const shouldHide = isUserSelected && node.type === 'user';
                     
                     // Hide unrelated nodes
                     updates.push({
