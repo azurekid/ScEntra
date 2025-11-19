@@ -2400,24 +2400,17 @@ function Export-ScEntraReport {
             };
         });
         
-        // Function to get all nodes in escalation path
-        function getEscalationPath(nodeId, visited = new Set()) {
+        // Function to get all connected nodes (directly or through path)
+        function getConnectedNodes(nodeId, visited = new Set()) {
             if (visited.has(nodeId)) return visited;
             visited.add(nodeId);
             
-            const connectedNodes = network.getConnectedNodes(nodeId);
-            connectedNodes.forEach(connId => {
-                // Get edges between nodes to determine direction
-                const connEdges = network.getConnectedEdges(connId);
-                connEdges.forEach(edgeId => {
-                    const edge = edges.get(edgeId);
-                    // Follow edges that point to roles or show ownership/membership
-                    if (edge && (edge.from === connId || edge.to === connId)) {
-                        if (!visited.has(connId)) {
-                            getEscalationPath(connId, visited);
-                        }
-                    }
-                });
+            // Get all directly connected nodes via edges
+            const directlyConnected = network.getConnectedNodes(nodeId);
+            directlyConnected.forEach(connId => {
+                if (!visited.has(connId)) {
+                    getConnectedNodes(connId, visited);
+                }
             });
             
             return visited;
@@ -2425,7 +2418,7 @@ function Export-ScEntraReport {
         
         // Function to highlight escalation path
         function highlightPath(nodeId) {
-            const pathNodes = getEscalationPath(nodeId);
+            const pathNodes = getConnectedNodes(nodeId);
             const pathEdges = new Set();
             
             // Find all edges in the path
