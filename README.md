@@ -23,9 +23,15 @@ A PowerShell module for comprehensive security analysis of Microsoft Entra ID (f
   - Service Principal ownership analysis
   - App Registration ownership patterns
   - Multiple PIM role assignments
+  - Escalation paths from SPNs and App Registrations
+  - Owner and member relationships for all entities
 
 - 📊 **Rich Visualization**:
   - Interactive HTML reports with charts
+  - **Bloodhound-style graph visualization** showing escalation paths
+  - Interactive network graph with draggable nodes
+  - Color-coded entities (users, groups, roles, SPNs, apps)
+  - Visual representation of relationships and escalation paths
   - JSON export for programmatic analysis
   - Risk severity categorization
 
@@ -229,6 +235,9 @@ The analysis generates two files:
 
 1. **HTML Report** (`ScEntra-Report-{timestamp}.html`):
    - Interactive dashboard with statistics
+   - **Interactive escalation path graph** (Bloodhound-style visualization)
+   - Network diagram showing users, groups, roles, service principals, and app registrations
+   - Visual representation of escalation paths and relationships
    - Charts showing role distribution and risk types
    - Detailed risk table with severity indicators
 
@@ -236,16 +245,41 @@ The analysis generates two files:
    - Complete data export for programmatic analysis
    - All collected inventory data
    - Identified risks with full details
+   - Graph data structure (nodes and edges)
 
 ## Risk Types
 
 ScEntra identifies the following risk types:
 
 - **RoleEnabledGroup**: Groups assigned to roles with privileged access
-- **NestedGroupMembership**: Privilege escalation through nested group memberships
-- **ServicePrincipalOwnership**: Service principals with role assignments and multiple owners
-- **AppRegistrationOwnership**: App registrations with excessive owners
+- **NestedGroupMembership**: Privilege escalation through nested group memberships  
+- **ServicePrincipalOwnership**: Service principals with role assignments and multiple owners (including escalation paths from owners)
+- **AppRegistrationOwnership**: App registrations with excessive owners (including paths to linked service principals)
 - **MultiplePIMRoles**: Principals with multiple PIM role assignments
+
+## Graph Visualization
+
+The interactive graph visualization provides a Bloodhound-style view of escalation paths:
+
+**Node Types:**
+- 🟢 **Users** (Green) - User accounts
+- 🔵 **Groups** (Blue) - Security and role-enabled groups
+- 🔴 **Roles** (Red/Diamond) - Entra ID directory roles
+- 🟣 **Service Principals** (Purple) - Application service principals
+- 🟠 **Applications** (Orange) - App registrations
+
+**Edge Types:**
+- **has_role** (Solid) - Direct or PIM role assignments
+- **member_of** (Solid) - Group membership
+- **owns** (Dashed) - Ownership relationship
+- **has_service_principal** - Link between app registration and its service principal
+
+**Features:**
+- Drag nodes to rearrange the graph
+- Zoom and pan to explore different areas
+- Click on nodes to highlight connections
+- Hover over nodes to see details
+- PIM assignments shown with dashed edges
 
 ## Severity Levels
 
