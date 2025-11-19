@@ -1182,104 +1182,48 @@ function New-ScEntraGraphData {
         'Hybrid Identity Administrator'
     )
     
-    $globalAdminRoles = @(
-        'Global Administrator'
-    )
-    
     # Find all principals with app management roles (from both direct and PIM)
     $allRoleAssignments = @($RoleAssignments; $PIMAssignments)
     $appAdmins = $allRoleAssignments | Where-Object { $appManagementRoles -contains $_.RoleName }
-    $globalAdmins = $allRoleAssignments | Where-Object { $globalAdminRoles -contains $_.RoleName }
     
-    # App Admins can manage ALL service principals and app registrations
     foreach ($admin in $appAdmins) {
         $principalId = if ($admin.MemberId) { $admin.MemberId } else { $admin.PrincipalId }
         
-        # Add can_manage edges to ALL service principals (not just privileged ones)
+        # Add can_manage edges to all service principals with roles
         foreach ($sp in $ServicePrincipals) {
-            # Ensure both nodes exist
-            if ($nodeIndex.ContainsKey($principalId) -and $nodeIndex.ContainsKey($sp.id)) {
-                $null = $edges.Add(@{
-                    from = $principalId
-                    to = $sp.id
-                    type = 'can_manage'
-                    label = 'Can Manage'
-                    isPIM = $admin.PSObject.Properties.Name -contains 'AssignmentType'
-                })
-            }
-        }
-        
-        # Add can_manage edges to ALL app registrations
-        foreach ($app in $AppRegistrations) {
-            # Ensure both nodes exist
-            if ($nodeIndex.ContainsKey($principalId) -and $nodeIndex.ContainsKey($app.id)) {
-                $null = $edges.Add(@{
-                    from = $principalId
-                    to = $app.id
-                    type = 'can_manage'
-                    label = 'Can Manage'
-                    isPIM = $admin.PSObject.Properties.Name -contains 'AssignmentType'
-                })
-            }
-        }
-    }
-    
-    # Global Admins can manage ALL objects (users, groups, apps, SPs, roles)
-    foreach ($admin in $globalAdmins) {
-        $principalId = if ($admin.MemberId) { $admin.MemberId } else { $admin.PrincipalId }
-        
-        # Skip if principal is not in the graph
-        if (-not $nodeIndex.ContainsKey($principalId)) { continue }
-        
-        # Add can_manage edges to all users (except self)
-        foreach ($user in $Users) {
-            if ($user.id -ne $principalId -and $nodeIndex.ContainsKey($user.id)) {
-                $null = $edges.Add(@{
-                    from = $principalId
-                    to = $user.id
-                    type = 'can_manage'
-                    label = 'Can Manage'
-                    isPIM = $admin.PSObject.Properties.Name -contains 'AssignmentType'
-                })
-            }
-        }
-        
-        # Add can_manage edges to all groups
-        foreach ($group in $Groups) {
-            if ($nodeIndex.ContainsKey($group.id)) {
-                $null = $edges.Add(@{
-                    from = $principalId
-                    to = $group.id
-                    type = 'can_manage'
-                    label = 'Can Manage'
-                    isPIM = $admin.PSObject.Properties.Name -contains 'AssignmentType'
-                })
-            }
-        }
-        
-        # Add can_manage edges to all service principals
-        foreach ($sp in $ServicePrincipals) {
-            if ($nodeIndex.ContainsKey($sp.id)) {
-                $null = $edges.Add(@{
-                    from = $principalId
-                    to = $sp.id
-                    type = 'can_manage'
-                    label = 'Can Manage'
-                    isPIM = $admin.PSObject.Properties.Name -contains 'AssignmentType'
-                })
+            $spHasRole = $allRoleAssignments | Where-Object { $_.MemberId -eq $sp.id }
+            if ($spHasRole) {
+                # Ensure both nodes exist
+                if ($nodeIndex.ContainsKey($principalId) -and $nodeIndex.ContainsKey($sp.id)) {
+                    $null = $edges.Add(@{
+                        from = $principalId
+                        to = $sp.id
+                        type = 'can_manage'
+                        label = 'Can Manage'
+                        isPIM = $admin.PSObject.Properties.Name -contains 'AssignmentType'
+                    })
+                }
             }
         }
         
         # Add can_manage edges to all app registrations
         foreach ($app in $AppRegistrations) {
-            if ($nodeIndex.ContainsKey($app.id)) {
-                $null = $edges.Add(@{
-                    from = $principalId
-                    to = $app.id
-                    type = 'can_manage'
-                    label = 'Can Manage'
-                    isPIM = $admin.PSObject.Properties.Name -contains 'AssignmentType'
-                })
+            # Only add if app is linked to a privileged SP
+            $sp = $ServicePrincipals | Where-Object { $_.appId -eq $app.appId } | Select-Object -First 1
+            if ($sp) {
+                $spHasRole = $allRoleAssignments | Where-Object { $_.MemberId -eq $sp.id }
+                if ($spHasRole) {
+                    # Ensure both nodes exist
+                    if ($nodeIndex.ContainsKey($principalId) -and $nodeIndex.ContainsKey($app.id)) {
+                        $null = $edges.Add(@{
+                            from = $principalId
+                            to = $app.id
+                            type = 'can_manage'
+                            label = 'Can Manage'
+                            isPIM = $admin.PSObject.Properties.Name -contains 'AssignmentType'
+                        })
+                    }
+                }
             }
         }
     }
@@ -1760,28 +1704,24 @@ function Get-ScEntraEscalationPaths {
         'Hybrid Identity Administrator'
     )
     
-    # Define roles that can manage all roles and objects
+    # Define roles that can manage all roles
     $roleManagementRoles = @(
         'Privileged Role Administrator',
         'Global Administrator'
     )
     
-    # Check for users/groups with app management roles
+    # Check for users/groups with app management roles who could escalate via SPs
     $appAdminAssignments = $RoleAssignments | Where-Object { $appManagementRoles -contains $_.RoleName }
     $appAdminPIMAssignments = $PIMAssignments | Where-Object { $appManagementRoles -contains $_.RoleName }
     
     foreach ($assignment in ($appAdminAssignments + $appAdminPIMAssignments)) {
-        # These admins can manage ALL apps and SPs
-        $totalSPs = $ServicePrincipals.Count
-        $totalApps = $AppRegistrations.Count
-        
-        # Count how many privileged SPs exist
+        # Count how many privileged SPs exist that this admin could abuse
         $privilegedSPs = $ServicePrincipals | Where-Object {
             $spId = $_.id
             ($RoleAssignments | Where-Object { $_.MemberId -eq $spId }).Count -gt 0
         }
         
-        if ($totalSPs -gt 0 -or $totalApps -gt 0) {
+        if ($privilegedSPs.Count -gt 0) {
             $isPIM = $assignment -in $appAdminPIMAssignments
             $risk = [PSCustomObject]@{
                 RiskType = 'AppAdministratorEscalation'
@@ -1789,11 +1729,9 @@ function Get-ScEntraEscalationPaths {
                 PrincipalId = $assignment.MemberId
                 PrincipalType = $assignment.MemberType
                 RoleName = $assignment.RoleName
-                TotalSPs = $totalSPs
-                TotalApps = $totalApps
                 PrivilegedSPCount = $privilegedSPs.Count
                 IsPIM = $isPIM
-                Description = "$(if($isPIM){'PIM eligible '})$($assignment.RoleName) can manage ALL $totalApps app registration(s) and $totalSPs service principal(s)$(if($privilegedSPs.Count -gt 0){", including $($privilegedSPs.Count) with privileged role assignments"}), enabling potential privilege escalation"
+                Description = "$(if($isPIM){'PIM eligible '})$($assignment.RoleName) can manage $($privilegedSPs.Count) service principal(s) with privileged role assignments, enabling potential privilege escalation"
             }
             $escalationRisks += $risk
         }
@@ -1805,9 +1743,8 @@ function Get-ScEntraEscalationPaths {
     
     foreach ($assignment in ($roleAdminAssignments + $roleAdminPIMAssignments)) {
         $isPIM = $assignment -in $roleAdminPIMAssignments
-        $isGlobalAdmin = $assignment.RoleName -eq 'Global Administrator'
         
-        # These are always high risk as they can manage/assign roles
+        # These are always high risk as they can assign any role
         $risk = [PSCustomObject]@{
             RiskType = 'RoleAdministratorEscalation'
             Severity = 'Critical'
@@ -1815,7 +1752,7 @@ function Get-ScEntraEscalationPaths {
             PrincipalType = $assignment.MemberType
             RoleName = $assignment.RoleName
             IsPIM = $isPIM
-            Description = "$(if($isPIM){'PIM eligible '})$($assignment.RoleName) $(if($isGlobalAdmin){'can manage ALL objects (users, groups, apps, SPs) and'}else{''}) can assign any role including Global Administrator, representing maximum escalation risk"
+            Description = "$(if($isPIM){'PIM eligible '})$($assignment.RoleName) can assign any role including Global Administrator, representing maximum escalation risk"
         }
         $escalationRisks += $risk
     }
