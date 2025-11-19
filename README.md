@@ -29,6 +29,13 @@ A PowerShell module for comprehensive security analysis of Microsoft Entra ID (f
   - JSON export for programmatic analysis
   - Risk severity categorization
 
+- ⏱️ **Real-time Progress Tracking**:
+  - Live progress indicators during long-running operations
+  - Pagination progress with item counts
+  - Current operation and item name display
+  - Percentage-based progress bars
+  - Multi-phase operation tracking
+
 ## Prerequisites
 
 - PowerShell 7.0 or later
@@ -253,7 +260,7 @@ The following Microsoft Graph API permissions are required:
 
 ## Example Output
 
-When you run `Invoke-ScEntraAnalysis`, you'll see progress output like:
+When you run `Invoke-ScEntraAnalysis`, you'll see progress output with real-time progress indicators:
 
 ```
 ╔═══════════════════════════════════════════════════════════╗
@@ -263,22 +270,29 @@ When you run `Invoke-ScEntraAnalysis`, you'll see progress output like:
 
 [1/5] 📋 Collecting Inventory...
 ============================================================
+Retrieving users from Entra ID [Fetching page 3 (retrieved 300 items so far)]
 Retrieved 150 users
+Retrieving groups from Entra ID [Retrieved 45 groups]
+Fetching group member counts [Processing group 15 of 45 - Engineering Team] 33%
 Retrieved 45 groups
 Retrieved 30 service principals
 Retrieved 25 app registrations
 
 [2/5] 👑 Enumerating Role Assignments...
 ============================================================
+Enumerating role assignments [Processing role 3 of 12 - Security Reader] 25%
 Retrieved 28 direct role assignments across 12 roles
 
 [3/5] 🔐 Checking PIM Assignments...
 ============================================================
+Retrieving PIM assignments [Fetching active role assignments]
 Retrieved 15 PIM assignments (10 eligible, 5 active)
 
 [4/5] 🔍 Analyzing Escalation Paths...
 ============================================================
 Found 5 role-enabled groups
+Analyzing escalation paths [Analyzing role-enabled group 2 of 5] 40%
+Analyzing nested group memberships [Processing group 3 of 8] 37%
 Identified 8 potential escalation risks
 
 [5/5] 📊 Generating Report...
