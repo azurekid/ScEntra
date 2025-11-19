@@ -2527,9 +2527,14 @@ function Export-ScEntraReport {
         });
         
         // Function to get all connected nodes (directly or through path)
-        function getConnectedNodes(nodeId, visited = new Set()) {
+        function getConnectedNodes(nodeId, visited = new Set(), excludeOtherUsers = false, originNodeId = null) {
             if (visited.has(nodeId)) return visited;
             visited.add(nodeId);
+            
+            // If this is the first call, set originNodeId
+            if (originNodeId === null) {
+                originNodeId = nodeId;
+            }
             
             // Get all directly connected nodes by querying edges dataset
             // Convert DataSet to array first, then iterate
@@ -2546,7 +2551,15 @@ function Export-ScEntraReport {
             // Recursively traverse connected nodes
             connectedNodes.forEach(connId => {
                 if (!visited.has(connId)) {
-                    getConnectedNodes(connId, visited);
+                    // If excludeOtherUsers is true, skip traversal to other user nodes
+                    if (excludeOtherUsers) {
+                        const connNode = nodes.get(connId);
+                        // Skip if it's a user node and not the origin node
+                        if (connNode && connNode.type === 'user' && connId !== originNodeId) {
+                            return;
+                        }
+                    }
+                    getConnectedNodes(connId, visited, excludeOtherUsers, originNodeId);
                 }
             });
             
@@ -2555,12 +2568,13 @@ function Export-ScEntraReport {
         
         // Function to highlight escalation path
         function highlightPath(nodeId) {
-            const pathNodes = getConnectedNodes(nodeId);
-            const pathEdges = new Set();
-            
             // Determine if selected node is a user
             const selectedNode = nodes.get(nodeId);
             const isUserSelected = selectedNode && selectedNode.type === 'user';
+            
+            // Get connected nodes, excluding other users if a user is selected
+            const pathNodes = getConnectedNodes(nodeId, new Set(), isUserSelected);
+            const pathEdges = new Set();
             
             // Find all edges in the path
             pathNodes.forEach(nId => {
