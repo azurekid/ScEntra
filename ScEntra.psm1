@@ -2468,17 +2468,26 @@ function Export-ScEntraReport {
             });
             nodes.update(updates);
             
-            // Hide edges not in path
+            // Show only relationship edges (hide has_role edges)
             const edgeUpdates = [];
             edges.forEach(edge => {
                 if (pathEdges.has(edge.id)) {
-                    // Highlighted edges - shown
-                    edgeUpdates.push({
-                        id: edge.id,
-                        width: 4,
-                        color: { color: '#FF5722', opacity: 1 },
-                        hidden: false
-                    });
+                    // In path - check if it's a has_role edge
+                    if (edge.edgeType === 'has_role') {
+                        // Hide role assignment edges (red lines)
+                        edgeUpdates.push({
+                            id: edge.id,
+                            hidden: true
+                        });
+                    } else {
+                        // Show relationship edges (gray lines) with emphasis
+                        edgeUpdates.push({
+                            id: edge.id,
+                            width: 3,
+                            color: { color: '#666', opacity: 1 },
+                            hidden: false
+                        });
+                    }
                 } else {
                     // Hide unrelated edges
                     edgeUpdates.push({
