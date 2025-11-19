@@ -2239,6 +2239,15 @@ function Export-ScEntraReport {
                         <option value="application">Applications</option>
                     </select>
                 </div>
+                <div>
+                    <label for="assignmentFilter" style="font-weight: 600; margin-right: 10px;">Assignment:</label>
+                    <select id="assignmentFilter" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                        <option value="">All Assignments</option>
+                        <option value="member">Member</option>
+                        <option value="active">Active</option>
+                        <option value="eligible">Eligible</option>
+                    </select>
+                </div>
                 <button id="resetGraph" style="padding: 8px 16px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 600;">Reset View</button>
             </div>
             
@@ -2549,6 +2558,10 @@ function Export-ScEntraReport {
             const pathNodes = getConnectedNodes(nodeId);
             const pathEdges = new Set();
             
+            // Determine if selected node is a user
+            const selectedNode = nodes.get(nodeId);
+            const isUserSelected = selectedNode && selectedNode.type === 'user';
+            
             // Find all edges in the path
             pathNodes.forEach(nId => {
                 const connEdges = network.getConnectedEdges(nId);
@@ -2581,10 +2594,13 @@ function Export-ScEntraReport {
                         hidden: false
                     });
                 } else {
+                    // If user is selected, hide all other users regardless of connection
+                    const shouldHide = isUserSelected && node.type === 'user' ? true : true;
+                    
                     // Hide unrelated nodes
                     updates.push({
                         id: node.id,
-                        hidden: true
+                        hidden: shouldHide
                     });
                 }
             });
@@ -2740,35 +2756,60 @@ function Export-ScEntraReport {
         });
         
         // Filter functionality
-        document.getElementById('nodeFilter').addEventListener('input', function(e) {
-            const searchTerm = e.target.value.toLowerCase();
+        function applyFilters() {
+            const searchTerm = document.getElementById('nodeFilter').value.toLowerCase();
             const typeFilter = document.getElementById('typeFilter').value;
+            const assignmentFilter = document.getElementById('assignmentFilter').value;
             
-            const matchingNodes = graphNodes.filter(node => {
-                const matchesSearch = !searchTerm || node.label.toLowerCase().includes(searchTerm);
-                const matchesType = !typeFilter || node.type === typeFilter;
-                return matchesSearch && matchesType;
-            });
-            
-            if (matchingNodes.length === 1) {
-                network.selectNodes([matchingNodes[0].id]);
-                network.focus(matchingNodes[0].id, {
-                    scale: 1.5,
-                    animation: { duration: 500, easingFunction: 'easeInOutQuad' }
-                });
-                highlightPath(matchingNodes[0].id);
+            // If assignment filter is set, filter edges first
+            if (assignmentFilter) {
+                const allEdges = edges.get();
+                const edgeUpdates = [];
+                const validNodeIds = new Set();
                 
-                document.getElementById('selectedNodeName').textContent = matchingNodes[0].label;
-                document.getElementById('selectedNodeType').textContent = '(' + matchingNodes[0].type + ')';
-                document.getElementById('selectedNodeInfo').style.display = 'block';
-            } else if (matchingNodes.length > 1) {
-                // Show only matching nodes
-                const matchingIds = new Set(matchingNodes.map(n => n.id));
-                const updates = [];
+                allEdges.forEach(edge => {
+                    let matches = false;
+                    const edgeLabel = (edge.label || '').toLowerCase();
+                    
+                    if (assignmentFilter === 'member' && edgeLabel === 'member') {
+                        matches = true;
+                    } else if (assignmentFilter === 'active' && (edgeLabel === 'direct' || edgeLabel === 'pim active')) {
+                        matches = true;
+                    } else if (assignmentFilter === 'eligible' && edgeLabel === 'eligible') {
+                        matches = true;
+                    }
+                    
+                    if (matches) {
+                        validNodeIds.add(edge.from);
+                        validNodeIds.add(edge.to);
+                        edgeUpdates.push({
+                            id: edge.id,
+                            hidden: false
+                        });
+                    } else {
+                        edgeUpdates.push({
+                            id: edge.id,
+                            hidden: true
+                        });
+                    }
+                });
+                edges.update(edgeUpdates);
+                
+                // Filter nodes based on edges and other filters
+                const matchingNodes = graphNodes.filter(node => {
+                    const matchesSearch = !searchTerm || node.label.toLowerCase().includes(searchTerm);
+                    const matchesType = !typeFilter || node.type === typeFilter;
+                    const matchesAssignment = !assignmentFilter || validNodeIds.has(node.id);
+                    return matchesSearch && matchesType && matchesAssignment;
+                });
+                
+                const nodeUpdates = [];
                 const allNodes = nodes.get();
+                const matchingIds = new Set(matchingNodes.map(n => n.id));
+                
                 allNodes.forEach(node => {
                     if (matchingIds.has(node.id)) {
-                        updates.push({
+                        nodeUpdates.push({
                             id: node.id,
                             color: originalNodeColors[node.id],
                             borderWidth: 4,
@@ -2776,37 +2817,83 @@ function Export-ScEntraReport {
                             hidden: false
                         });
                     } else {
-                        updates.push({
+                        nodeUpdates.push({
                             id: node.id,
                             hidden: true
                         });
                     }
                 });
-                nodes.update(updates);
-            } else if (searchTerm || typeFilter) {
-                // No matches - hide everything
-                const updates = [];
-                const allNodes = nodes.get();
-                allNodes.forEach(node => {
-                    updates.push({
-                        id: node.id,
-                        hidden: true
-                    });
-                });
-                nodes.update(updates);
+                nodes.update(nodeUpdates);
+                
             } else {
-                resetHighlight();
+                // No assignment filter - use standard filtering
+                const matchingNodes = graphNodes.filter(node => {
+                    const matchesSearch = !searchTerm || node.label.toLowerCase().includes(searchTerm);
+                    const matchesType = !typeFilter || node.type === typeFilter;
+                    return matchesSearch && matchesType;
+                });
+                
+                if (matchingNodes.length === 1) {
+                    network.selectNodes([matchingNodes[0].id]);
+                    network.focus(matchingNodes[0].id, {
+                        scale: 1.5,
+                        animation: { duration: 500, easingFunction: 'easeInOutQuad' }
+                    });
+                    highlightPath(matchingNodes[0].id);
+                    
+                    document.getElementById('selectedNodeName').textContent = matchingNodes[0].label;
+                    document.getElementById('selectedNodeType').textContent = '(' + matchingNodes[0].type + ')';
+                    document.getElementById('selectedNodeInfo').style.display = 'block';
+                } else if (matchingNodes.length > 1) {
+                    // Show only matching nodes
+                    const matchingIds = new Set(matchingNodes.map(n => n.id));
+                    const updates = [];
+                    const allNodes = nodes.get();
+                    allNodes.forEach(node => {
+                        if (matchingIds.has(node.id)) {
+                            updates.push({
+                                id: node.id,
+                                color: originalNodeColors[node.id],
+                                borderWidth: 4,
+                                font: { color: '#000', size: 16 },
+                                hidden: false
+                            });
+                        } else {
+                            updates.push({
+                                id: node.id,
+                                hidden: true
+                            });
+                        }
+                    });
+                    nodes.update(updates);
+                } else if (searchTerm || typeFilter) {
+                    // No matches - hide everything
+                    const updates = [];
+                    const allNodes = nodes.get();
+                    allNodes.forEach(node => {
+                        updates.push({
+                            id: node.id,
+                            hidden: true
+                        });
+                    });
+                    nodes.update(updates);
+                } else {
+                    resetHighlight();
+                }
             }
-        });
+        }
         
-        document.getElementById('typeFilter').addEventListener('change', function() {
-            document.getElementById('nodeFilter').dispatchEvent(new Event('input'));
-        });
+        document.getElementById('nodeFilter').addEventListener('input', applyFilters);
+        
+        document.getElementById('typeFilter').addEventListener('change', applyFilters);
+        
+        document.getElementById('assignmentFilter').addEventListener('change', applyFilters);
         
         // Reset button
         document.getElementById('resetGraph').addEventListener('click', function() {
             document.getElementById('nodeFilter').value = '';
             document.getElementById('typeFilter').value = '';
+            document.getElementById('assignmentFilter').value = '';
             resetHighlight();
             network.fit({
                 animation: {
