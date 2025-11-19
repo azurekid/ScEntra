@@ -640,6 +640,478 @@ function Get-ScEntraPIMAssignments {
 
 #region Escalation Path Analysis
 
+function New-ScEntraGraphData {
+    <#
+    .SYNOPSIS
+        Builds graph data structure for visualization of escalation paths
+    
+    .DESCRIPTION
+        Creates nodes and edges representing the relationships between users, groups, 
+        service principals, app registrations, and role assignments for graph visualization
+    
+    .PARAMETER Users
+        Array of users
+    
+    .PARAMETER Groups
+        Array of groups
+    
+    .PARAMETER ServicePrincipals
+        Array of service principals
+    
+    .PARAMETER AppRegistrations
+        Array of app registrations
+    
+    .PARAMETER RoleAssignments
+        Array of role assignments (includes both direct and PIM)
+    
+    .PARAMETER PIMAssignments
+        Array of PIM assignments
+    
+    .PARAMETER GroupMemberships
+        Hashtable of group memberships (groupId -> array of member objects)
+    
+    .PARAMETER GroupOwners
+        Hashtable of group owners (groupId -> array of owner objects)
+    
+    .PARAMETER SPOwners
+        Hashtable of service principal owners (spId -> array of owner objects)
+    
+    .PARAMETER AppOwners
+        Hashtable of app registration owners (appId -> array of owner objects)
+    
+    .EXAMPLE
+        $graphData = New-ScEntraGraphData -Users $users -Groups $groups -RoleAssignments $roles
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [array]$Users,
+        
+        [Parameter(Mandatory = $true)]
+        [array]$Groups,
+        
+        [Parameter(Mandatory = $false)]
+        [array]$ServicePrincipals = @(),
+        
+        [Parameter(Mandatory = $false)]
+        [array]$AppRegistrations = @(),
+        
+        [Parameter(Mandatory = $true)]
+        [array]$RoleAssignments,
+        
+        [Parameter(Mandatory = $false)]
+        [array]$PIMAssignments = @(),
+        
+        [Parameter(Mandatory = $false)]
+        [hashtable]$GroupMemberships = @{},
+        
+        [Parameter(Mandatory = $false)]
+        [hashtable]$GroupOwners = @{},
+        
+        [Parameter(Mandatory = $false)]
+        [hashtable]$SPOwners = @{},
+        
+        [Parameter(Mandatory = $false)]
+        [hashtable]$AppOwners = @{}
+    )
+    
+    Write-Verbose "Building graph data structure..."
+    
+    $nodes = [System.Collections.ArrayList]::new()
+    $edges = [System.Collections.ArrayList]::new()
+    $nodeIndex = @{}
+    
+    # Add role nodes (only for roles that have assignments)
+    $assignedRoles = @($RoleAssignments | Select-Object -ExpandProperty RoleName -Unique)
+    $pimRoles = @($PIMAssignments | Select-Object -ExpandProperty RoleName -Unique)
+    $allRoles = @($assignedRoles; $pimRoles) | Select-Object -Unique
+    
+    foreach ($roleName in $allRoles) {
+        $roleId = "role-$roleName"
+        if (-not $nodeIndex.ContainsKey($roleId)) {
+            $null = $nodes.Add(@{
+                id = $roleId
+                label = $roleName
+                type = 'role'
+                isPrivileged = $true
+            })
+            $nodeIndex[$roleId] = $nodes.Count - 1
+        }
+    }
+    
+    # Add nodes and edges for direct role assignments
+    foreach ($assignment in $RoleAssignments) {
+        $roleId = "role-$($assignment.RoleName)"
+        
+        # Determine the principal type and add node
+        switch ($assignment.MemberType) {
+            'user' {
+                $user = $Users | Where-Object { $_.id -eq $assignment.MemberId } | Select-Object -First 1
+                if ($user) {
+                    if (-not $nodeIndex.ContainsKey($user.id)) {
+                        $null = $nodes.Add(@{
+                            id = $user.id
+                            label = $user.displayName
+                            type = 'user'
+                            userPrincipalName = $user.userPrincipalName
+                            accountEnabled = $user.accountEnabled
+                        })
+                        $nodeIndex[$user.id] = $nodes.Count - 1
+                    }
+                    $null = $edges.Add(@{
+                        from = $user.id
+                        to = $roleId
+                        type = 'has_role'
+                        label = 'Direct'
+                    })
+                }
+            }
+            'group' {
+                $group = $Groups | Where-Object { $_.id -eq $assignment.MemberId } | Select-Object -First 1
+                if ($group) {
+                    if (-not $nodeIndex.ContainsKey($group.id)) {
+                        $null = $nodes.Add(@{
+                            id = $group.id
+                            label = $group.displayName
+                            type = 'group'
+                            isAssignableToRole = $group.isAssignableToRole
+                            securityEnabled = $group.securityEnabled
+                        })
+                        $nodeIndex[$group.id] = $nodes.Count - 1
+                    }
+                    $null = $edges.Add(@{
+                        from = $group.id
+                        to = $roleId
+                        type = 'has_role'
+                        label = 'Direct'
+                    })
+                }
+            }
+            'servicePrincipal' {
+                $sp = $ServicePrincipals | Where-Object { $_.id -eq $assignment.MemberId } | Select-Object -First 1
+                if ($sp) {
+                    if (-not $nodeIndex.ContainsKey($sp.id)) {
+                        $null = $nodes.Add(@{
+                            id = $sp.id
+                            label = $sp.displayName
+                            type = 'servicePrincipal'
+                            appId = $sp.appId
+                            accountEnabled = $sp.accountEnabled
+                        })
+                        $nodeIndex[$sp.id] = $nodes.Count - 1
+                    }
+                    $null = $edges.Add(@{
+                        from = $sp.id
+                        to = $roleId
+                        type = 'has_role'
+                        label = 'Direct'
+                    })
+                }
+            }
+        }
+    }
+    
+    # Add nodes and edges for PIM assignments (eligible)
+    foreach ($pimAssignment in $PIMAssignments) {
+        $roleId = "role-$($pimAssignment.RoleName)"
+        $assignmentLabel = if ($pimAssignment.AssignmentType -eq 'PIM-Eligible') { 'Eligible' } else { 'PIM Active' }
+        
+        # Determine the principal type and add node
+        switch ($pimAssignment.PrincipalType) {
+            'user' {
+                $user = $Users | Where-Object { $_.id -eq $pimAssignment.PrincipalId } | Select-Object -First 1
+                if ($user) {
+                    if (-not $nodeIndex.ContainsKey($user.id)) {
+                        $null = $nodes.Add(@{
+                            id = $user.id
+                            label = $user.displayName
+                            type = 'user'
+                            userPrincipalName = $user.userPrincipalName
+                            accountEnabled = $user.accountEnabled
+                        })
+                        $nodeIndex[$user.id] = $nodes.Count - 1
+                    }
+                    $null = $edges.Add(@{
+                        from = $user.id
+                        to = $roleId
+                        type = 'has_role'
+                        label = $assignmentLabel
+                        isPIM = $true
+                    })
+                }
+            }
+            'group' {
+                $group = $Groups | Where-Object { $_.id -eq $pimAssignment.PrincipalId } | Select-Object -First 1
+                if ($group) {
+                    if (-not $nodeIndex.ContainsKey($group.id)) {
+                        $null = $nodes.Add(@{
+                            id = $group.id
+                            label = $group.displayName
+                            type = 'group'
+                            isAssignableToRole = $group.isAssignableToRole
+                            securityEnabled = $group.securityEnabled
+                        })
+                        $nodeIndex[$group.id] = $nodes.Count - 1
+                    }
+                    $null = $edges.Add(@{
+                        from = $group.id
+                        to = $roleId
+                        type = 'has_role'
+                        label = $assignmentLabel
+                        isPIM = $true
+                    })
+                }
+            }
+            'servicePrincipal' {
+                $sp = $ServicePrincipals | Where-Object { $_.id -eq $pimAssignment.PrincipalId } | Select-Object -First 1
+                if ($sp) {
+                    if (-not $nodeIndex.ContainsKey($sp.id)) {
+                        $null = $nodes.Add(@{
+                            id = $sp.id
+                            label = $sp.displayName
+                            type = 'servicePrincipal'
+                            appId = $sp.appId
+                            accountEnabled = $sp.accountEnabled
+                        })
+                        $nodeIndex[$sp.id] = $nodes.Count - 1
+                    }
+                    $null = $edges.Add(@{
+                        from = $sp.id
+                        to = $roleId
+                        type = 'has_role'
+                        label = $assignmentLabel
+                        isPIM = $true
+                    })
+                }
+            }
+        }
+    }
+    
+    # Add group membership edges
+    foreach ($groupId in $GroupMemberships.Keys) {
+        $group = $Groups | Where-Object { $_.id -eq $groupId } | Select-Object -First 1
+        if ($group) {
+            if (-not $nodeIndex.ContainsKey($group.id)) {
+                $null = $nodes.Add(@{
+                    id = $group.id
+                    label = $group.displayName
+                    type = 'group'
+                    isAssignableToRole = $group.isAssignableToRole
+                    securityEnabled = $group.securityEnabled
+                })
+                $nodeIndex[$group.id] = $nodes.Count - 1
+            }
+            
+            foreach ($member in $GroupMemberships[$groupId]) {
+                $memberType = if ($member.'@odata.type') { 
+                    $member.'@odata.type' -replace '#microsoft.graph.', '' 
+                } else { 
+                    'unknown' 
+                }
+                
+                switch ($memberType) {
+                    'user' {
+                        $user = $Users | Where-Object { $_.id -eq $member.id } | Select-Object -First 1
+                        if ($user) {
+                            if (-not $nodeIndex.ContainsKey($user.id)) {
+                                $null = $nodes.Add(@{
+                                    id = $user.id
+                                    label = $user.displayName
+                                    type = 'user'
+                                    userPrincipalName = $user.userPrincipalName
+                                    accountEnabled = $user.accountEnabled
+                                })
+                                $nodeIndex[$user.id] = $nodes.Count - 1
+                            }
+                            $null = $edges.Add(@{
+                                from = $user.id
+                                to = $group.id
+                                type = 'member_of'
+                                label = 'Member'
+                            })
+                        }
+                    }
+                    'group' {
+                        $nestedGroup = $Groups | Where-Object { $_.id -eq $member.id } | Select-Object -First 1
+                        if ($nestedGroup) {
+                            if (-not $nodeIndex.ContainsKey($nestedGroup.id)) {
+                                $null = $nodes.Add(@{
+                                    id = $nestedGroup.id
+                                    label = $nestedGroup.displayName
+                                    type = 'group'
+                                    isAssignableToRole = $nestedGroup.isAssignableToRole
+                                    securityEnabled = $nestedGroup.securityEnabled
+                                })
+                                $nodeIndex[$nestedGroup.id] = $nodes.Count - 1
+                            }
+                            $null = $edges.Add(@{
+                                from = $nestedGroup.id
+                                to = $group.id
+                                type = 'member_of'
+                                label = 'Nested'
+                            })
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    # Add group ownership edges
+    foreach ($groupId in $GroupOwners.Keys) {
+        $group = $Groups | Where-Object { $_.id -eq $groupId } | Select-Object -First 1
+        if ($group) {
+            if (-not $nodeIndex.ContainsKey($group.id)) {
+                $null = $nodes.Add(@{
+                    id = $group.id
+                    label = $group.displayName
+                    type = 'group'
+                    isAssignableToRole = $group.isAssignableToRole
+                    securityEnabled = $group.securityEnabled
+                })
+                $nodeIndex[$group.id] = $nodes.Count - 1
+            }
+            
+            foreach ($owner in $GroupOwners[$groupId]) {
+                $user = $Users | Where-Object { $_.id -eq $owner.id } | Select-Object -First 1
+                if ($user) {
+                    if (-not $nodeIndex.ContainsKey($user.id)) {
+                        $null = $nodes.Add(@{
+                            id = $user.id
+                            label = $user.displayName
+                            type = 'user'
+                            userPrincipalName = $user.userPrincipalName
+                            accountEnabled = $user.accountEnabled
+                        })
+                        $nodeIndex[$user.id] = $nodes.Count - 1
+                    }
+                    $null = $edges.Add(@{
+                        from = $user.id
+                        to = $group.id
+                        type = 'owns'
+                        label = 'Owner'
+                    })
+                }
+            }
+        }
+    }
+    
+    # Add service principal ownership edges
+    foreach ($spId in $SPOwners.Keys) {
+        $sp = $ServicePrincipals | Where-Object { $_.id -eq $spId } | Select-Object -First 1
+        if ($sp) {
+            if (-not $nodeIndex.ContainsKey($sp.id)) {
+                $null = $nodes.Add(@{
+                    id = $sp.id
+                    label = $sp.displayName
+                    type = 'servicePrincipal'
+                    appId = $sp.appId
+                    accountEnabled = $sp.accountEnabled
+                })
+                $nodeIndex[$sp.id] = $nodes.Count - 1
+            }
+            
+            foreach ($owner in $SPOwners[$spId]) {
+                $user = $Users | Where-Object { $_.id -eq $owner.id } | Select-Object -First 1
+                if ($user) {
+                    if (-not $nodeIndex.ContainsKey($user.id)) {
+                        $null = $nodes.Add(@{
+                            id = $user.id
+                            label = $user.displayName
+                            type = 'user'
+                            userPrincipalName = $user.userPrincipalName
+                            accountEnabled = $user.accountEnabled
+                        })
+                        $nodeIndex[$user.id] = $nodes.Count - 1
+                    }
+                    $null = $edges.Add(@{
+                        from = $user.id
+                        to = $sp.id
+                        type = 'owns'
+                        label = 'Owner'
+                    })
+                }
+            }
+        }
+    }
+    
+    # Add app registration ownership edges
+    foreach ($appId in $AppOwners.Keys) {
+        $app = $AppRegistrations | Where-Object { $_.id -eq $appId } | Select-Object -First 1
+        if ($app) {
+            if (-not $nodeIndex.ContainsKey($app.id)) {
+                $null = $nodes.Add(@{
+                    id = $app.id
+                    label = $app.displayName
+                    type = 'application'
+                    appId = $app.appId
+                })
+                $nodeIndex[$app.id] = $nodes.Count - 1
+            }
+            
+            foreach ($owner in $AppOwners[$appId]) {
+                $user = $Users | Where-Object { $_.id -eq $owner.id } | Select-Object -First 1
+                if ($user) {
+                    if (-not $nodeIndex.ContainsKey($user.id)) {
+                        $null = $nodes.Add(@{
+                            id = $user.id
+                            label = $user.displayName
+                            type = 'user'
+                            userPrincipalName = $user.userPrincipalName
+                            accountEnabled = $user.accountEnabled
+                        })
+                        $nodeIndex[$user.id] = $nodes.Count - 1
+                    }
+                    $null = $edges.Add(@{
+                        from = $user.id
+                        to = $app.id
+                        type = 'owns'
+                        label = 'Owner'
+                    })
+                }
+            }
+        }
+    }
+    
+    # Link app registrations to their service principals
+    foreach ($app in $AppRegistrations) {
+        $sp = $ServicePrincipals | Where-Object { $_.appId -eq $app.appId } | Select-Object -First 1
+        if ($sp) {
+            if (-not $nodeIndex.ContainsKey($app.id)) {
+                $null = $nodes.Add(@{
+                    id = $app.id
+                    label = $app.displayName
+                    type = 'application'
+                    appId = $app.appId
+                })
+                $nodeIndex[$app.id] = $nodes.Count - 1
+            }
+            if (-not $nodeIndex.ContainsKey($sp.id)) {
+                $null = $nodes.Add(@{
+                    id = $sp.id
+                    label = $sp.displayName
+                    type = 'servicePrincipal'
+                    appId = $sp.appId
+                    accountEnabled = $sp.accountEnabled
+                })
+                $nodeIndex[$sp.id] = $nodes.Count - 1
+            }
+            $null = $edges.Add(@{
+                from = $app.id
+                to = $sp.id
+                type = 'has_service_principal'
+                label = 'Creates'
+            })
+        }
+    }
+    
+    Write-Verbose "Built graph with $($nodes.Count) nodes and $($edges.Count) edges"
+    
+    return @{
+        nodes = $nodes
+        edges = $edges
+    }
+}
 function Get-ScEntraEscalationPaths {
     <#
     .SYNOPSIS
@@ -699,6 +1171,12 @@ function Get-ScEntraEscalationPaths {
     
     $escalationRisks = @()
     
+    # Hashtables to store membership and ownership data for graph building
+    $groupMemberships = @{}
+    $groupOwners = @{}
+    $spOwners = @{}
+    $appOwners = @{}
+    
     # Identify groups that need detailed analysis (those with roles or PIM assignments)
     $groupsWithRoles = $RoleAssignments | Where-Object { $_.MemberType -eq 'group' } | Select-Object -ExpandProperty MemberId -Unique
     $groupsInPIM = $PIMAssignments | Where-Object { $_.PrincipalType -eq 'group' } | Select-Object -ExpandProperty PrincipalId -Unique
@@ -715,29 +1193,29 @@ function Get-ScEntraEscalationPaths {
     $requestId = 0
     
     foreach ($groupId in $relevantGroupIds) {
-        # Members request
+        # Members request (with full details for graph building)
         $batchRequests += @{
-            id = "$requestId-members"
+            id = "$requestId-members-$groupId"
             method = "GET"
-            url = "/groups/$groupId/members?`$select=id&`$count=true"
+            url = "/groups/$groupId/members?`$select=id,displayName,userPrincipalName&`$count=true"
             headers = @{
                 "ConsistencyLevel" = "eventual"
             }
         }
         $requestId++
         
-        # Owners request
+        # Owners request (with full details for graph building)
         $batchRequests += @{
-            id = "$requestId-owners"
+            id = "$requestId-owners-$groupId"
             method = "GET"
-            url = "/groups/$groupId/owners?`$select=id"
+            url = "/groups/$groupId/owners?`$select=id,displayName,userPrincipalName"
         }
         $requestId++
         
         # Only get transitive members for groups that have role assignments (not just role-enabled)
         if ($groupsWithRoles -contains $groupId) {
             $batchRequests += @{
-                id = "$requestId-transitive"
+                id = "$requestId-transitive-$groupId"
                 method = "GET"
                 url = "/groups/$groupId/transitiveMembers?`$select=id&`$count=true"
                 headers = @{
@@ -763,6 +1241,53 @@ function Get-ScEntraEscalationPaths {
         }
     }
     
+    # Process batch responses and populate membership/ownership data
+    foreach ($groupId in $relevantGroupIds) {
+        # Extract members from batch responses
+        $membersResponseKey = $batchResponses.Keys | Where-Object { $_ -like "*-members-$groupId" } | Select-Object -First 1
+        if ($membersResponseKey) {
+            $membersResponse = $batchResponses[$membersResponseKey]
+            if ($membersResponse -and $membersResponse.status -eq 200 -and $membersResponse.body.value) {
+                $groupMemberships[$groupId] = $membersResponse.body.value
+            }
+        }
+        else {
+            # Fallback: fetch individually if not in batch
+            try {
+                $membersUri = "$script:GraphBaseUrl/groups/$groupId/members?`$select=id,displayName,userPrincipalName"
+                $membersResult = Invoke-GraphRequest -Uri $membersUri -Method GET -ErrorAction SilentlyContinue
+                if ($membersResult.value) {
+                    $groupMemberships[$groupId] = $membersResult.value
+                }
+            }
+            catch {
+                Write-Verbose "Could not fetch members for group ${groupId}: $($_.Exception.Message)"
+            }
+        }
+        
+        # Extract owners from batch responses
+        $ownersResponseKey = $batchResponses.Keys | Where-Object { $_ -like "*-owners-$groupId" } | Select-Object -First 1
+        if ($ownersResponseKey) {
+            $ownersResponse = $batchResponses[$ownersResponseKey]
+            if ($ownersResponse -and $ownersResponse.status -eq 200 -and $ownersResponse.body.value) {
+                $groupOwners[$groupId] = $ownersResponse.body.value
+            }
+        }
+        else {
+            # Fallback: fetch individually if not in batch
+            try {
+                $ownersUri = "$script:GraphBaseUrl/groups/$groupId/owners?`$select=id,displayName,userPrincipalName"
+                $ownersResult = Invoke-GraphRequest -Uri $ownersUri -Method GET -ErrorAction SilentlyContinue
+                if ($ownersResult.value) {
+                    $groupOwners[$groupId] = $ownersResult.value
+                }
+            }
+            catch {
+                Write-Verbose "Could not fetch owners for group ${groupId}: $($_.Exception.Message)"
+            }
+        }
+    }
+    
     # Process role-enabled groups with their fetched data
     $groupCount = 0
     $totalGroups = $roleEnabledGroups.Count
@@ -781,47 +1306,9 @@ function Get-ScEntraEscalationPaths {
         $groupRoles = $RoleAssignments | Where-Object { $_.MemberId -eq $groupId }
         
         if ($groupRoles) {
-            # Get data from batch responses or fetch individually as fallback
-            $memberCount = 0
-            $ownerCount = 0
-            
-            # Find the corresponding batch response
-            $membersResponse = $batchResponses.Values | Where-Object { $_.id -like "*-members" -and $_.body.value } | Select-Object -First 1
-            $ownersResponse = $batchResponses.Values | Where-Object { $_.id -like "*-owners" -and $_.body.value } | Select-Object -First 1
-            
-            if ($membersResponse -and $membersResponse.status -eq 200) {
-                $memberCount = if ($membersResponse.body.'@odata.count') { 
-                    $membersResponse.body.'@odata.count' 
-                } else { 
-                    $membersResponse.body.value.Count 
-                }
-            }
-            else {
-                # Fallback: fetch individually
-                try {
-                    $membersUri = "$script:GraphBaseUrl/groups/$groupId/members?`$select=id&`$count=true"
-                    $membersResult = Invoke-GraphRequest -Uri $membersUri -Method GET -ErrorAction SilentlyContinue
-                    $memberCount = if ($membersResult.'@odata.count') { $membersResult.'@odata.count' } else { $membersResult.value.Count }
-                }
-                catch {
-                    Write-Verbose "Could not fetch members for group ${groupId}: $($_.Exception.Message)"
-                }
-            }
-            
-            if ($ownersResponse -and $ownersResponse.status -eq 200) {
-                $ownerCount = $ownersResponse.body.value.Count
-            }
-            else {
-                # Fallback: fetch individually
-                try {
-                    $ownersUri = "$script:GraphBaseUrl/groups/$groupId/owners?`$select=id"
-                    $ownersResult = Invoke-GraphRequest -Uri $ownersUri -Method GET -ErrorAction SilentlyContinue
-                    $ownerCount = $ownersResult.value.Count
-                }
-                catch {
-                    Write-Verbose "Could not fetch owners for group ${groupId}: $($_.Exception.Message)"
-                }
-            }
+            # Get counts from collected data
+            $memberCount = if ($groupMemberships.ContainsKey($groupId)) { $groupMemberships[$groupId].Count } else { 0 }
+            $ownerCount = if ($groupOwners.ContainsKey($groupId)) { $groupOwners[$groupId].Count } else { 0 }
             
             foreach ($role in $groupRoles) {
                 $risk = [PSCustomObject]@{
@@ -853,39 +1340,23 @@ function Get-ScEntraEscalationPaths {
         
         $group = $Groups | Where-Object { $_.id -eq $groupId }
         if ($group) {
-            $directMemberCount = 0
+            $directMemberCount = if ($groupMemberships.ContainsKey($groupId)) { $groupMemberships[$groupId].Count } else { 0 }
             $transitiveMemberCount = 0
             
-            # Try to get from batch responses first
-            $membersResponse = $batchResponses.Values | Where-Object { $_.id -like "*-members" }
-            $transitiveResponse = $batchResponses.Values | Where-Object { $_.id -like "*-transitive" }
-            
-            if ($membersResponse -and $membersResponse.status -eq 200) {
-                $directMemberCount = if ($membersResponse.body.'@odata.count') { 
-                    $membersResponse.body.'@odata.count' 
-                } else { 
-                    $membersResponse.body.value.Count 
+            # Try to get transitive count from batch responses
+            $transitiveResponseKey = $batchResponses.Keys | Where-Object { $_ -like "*-transitive-$groupId" } | Select-Object -First 1
+            if ($transitiveResponseKey) {
+                $transitiveResponse = $batchResponses[$transitiveResponseKey]
+                if ($transitiveResponse -and $transitiveResponse.status -eq 200) {
+                    $transitiveMemberCount = if ($transitiveResponse.body.'@odata.count') { 
+                        $transitiveResponse.body.'@odata.count' 
+                    } else { 
+                        $transitiveResponse.body.value.Count 
+                    }
                 }
             }
             else {
-                try {
-                    $directUri = "$script:GraphBaseUrl/groups/$groupId/members?`$select=id&`$count=true"
-                    $directResult = Invoke-GraphRequest -Uri $directUri -Method GET -ErrorAction SilentlyContinue
-                    $directMemberCount = if ($directResult.'@odata.count') { $directResult.'@odata.count' } else { $directResult.value.Count }
-                }
-                catch {
-                    Write-Verbose "Could not fetch direct members for group ${groupId}: $($_.Exception.Message)"
-                }
-            }
-            
-            if ($transitiveResponse -and $transitiveResponse.status -eq 200) {
-                $transitiveMemberCount = if ($transitiveResponse.body.'@odata.count') { 
-                    $transitiveResponse.body.'@odata.count' 
-                } else { 
-                    $transitiveResponse.body.value.Count 
-                }
-            }
-            else {
+                # Fallback: fetch individually
                 try {
                     $transitiveUri = "$script:GraphBaseUrl/groups/$groupId/transitiveMembers?`$select=id&`$count=true"
                     $transitiveResult = Invoke-GraphRequest -Uri $transitiveUri -Method GET -ErrorAction SilentlyContinue
@@ -932,9 +1403,9 @@ function Get-ScEntraEscalationPaths {
     $spRequestId = 0
     foreach ($sp in $spsWithRoles) {
         $spBatchRequests += @{
-            id = "$spRequestId"
+            id = "$spRequestId-sp-$($sp.id)"
             method = "GET"
-            url = "/servicePrincipals/$($sp.id)/owners?`$select=id"
+            url = "/servicePrincipals/$($sp.id)/owners?`$select=id,displayName,userPrincipalName"
         }
         $spRequestId++
     }
@@ -955,16 +1426,23 @@ function Get-ScEntraEscalationPaths {
         $ownerCount = 0
         
         # Try batch response first
-        $ownerResponse = $spBatchResponses["$spCount"]
-        if ($ownerResponse -and $ownerResponse.status -eq 200) {
-            $ownerCount = $ownerResponse.body.value.Count
+        $ownerResponseKey = $spBatchResponses.Keys | Where-Object { $_ -like "*-sp-$($sp.id)" } | Select-Object -First 1
+        if ($ownerResponseKey) {
+            $ownerResponse = $spBatchResponses[$ownerResponseKey]
+            if ($ownerResponse -and $ownerResponse.status -eq 200 -and $ownerResponse.body.value) {
+                $spOwners[$sp.id] = $ownerResponse.body.value
+                $ownerCount = $ownerResponse.body.value.Count
+            }
         }
         else {
             # Fallback
             try {
-                $ownersUri = "$script:GraphBaseUrl/servicePrincipals/$($sp.id)/owners?`$select=id"
+                $ownersUri = "$script:GraphBaseUrl/servicePrincipals/$($sp.id)/owners?`$select=id,displayName,userPrincipalName"
                 $owners = Invoke-GraphRequest -Uri $ownersUri -Method GET -ErrorAction SilentlyContinue
-                $ownerCount = $owners.value.Count
+                if ($owners.value) {
+                    $spOwners[$sp.id] = $owners.value
+                    $ownerCount = $owners.value.Count
+                }
             }
             catch {
                 Write-Verbose "Could not analyze service principal $($sp.id): $_"
@@ -999,9 +1477,9 @@ function Get-ScEntraEscalationPaths {
     $appRequestId = 0
     foreach ($app in $AppRegistrations) {
         $appBatchRequests += @{
-            id = "$appRequestId"
+            id = "$appRequestId-app-$($app.id)"
             method = "GET"
-            url = "/applications/$($app.id)/owners?`$select=id"
+            url = "/applications/$($app.id)/owners?`$select=id,displayName,userPrincipalName"
         }
         $appRequestId++
     }
@@ -1022,16 +1500,23 @@ function Get-ScEntraEscalationPaths {
         $ownerCount = 0
         
         # Try batch response first
-        $ownerResponse = $appBatchResponses["$appCount"]
-        if ($ownerResponse -and $ownerResponse.status -eq 200) {
-            $ownerCount = $ownerResponse.body.value.Count
+        $ownerResponseKey = $appBatchResponses.Keys | Where-Object { $_ -like "*-app-$($app.id)" } | Select-Object -First 1
+        if ($ownerResponseKey) {
+            $ownerResponse = $appBatchResponses[$ownerResponseKey]
+            if ($ownerResponse -and $ownerResponse.status -eq 200 -and $ownerResponse.body.value) {
+                $appOwners[$app.id] = $ownerResponse.body.value
+                $ownerCount = $ownerResponse.body.value.Count
+            }
         }
         else {
             # Fallback
             try {
-                $ownersUri = "$script:GraphBaseUrl/applications/$($app.id)/owners?`$select=id"
+                $ownersUri = "$script:GraphBaseUrl/applications/$($app.id)/owners?`$select=id,displayName,userPrincipalName"
                 $owners = Invoke-GraphRequest -Uri $ownersUri -Method GET -ErrorAction SilentlyContinue
-                $ownerCount = $owners.value.Count
+                if ($owners.value) {
+                    $appOwners[$app.id] = $owners.value
+                    $ownerCount = $owners.value.Count
+                }
             }
             catch {
                 Write-Verbose "Could not analyze app registration $($app.id): $_"
@@ -1079,7 +1564,32 @@ function Get-ScEntraEscalationPaths {
     }
     
     Write-Host "Identified $($escalationRisks.Count) potential escalation risks" -ForegroundColor Yellow
-    return $escalationRisks
+    
+    # Build graph data structure for visualization
+    Write-Verbose "Building graph data structure for visualization..."
+    Write-Progress -Activity "Analyzing escalation paths" -Status "Building graph visualization data" -PercentComplete 95 -Id 5
+    
+    # Combine all role assignments (direct + PIM) for graph building
+    $allRoleAssignments = @($RoleAssignments; $PIMAssignments)
+    
+    $graphData = New-ScEntraGraphData `
+        -Users $Users `
+        -Groups $Groups `
+        -ServicePrincipals $ServicePrincipals `
+        -AppRegistrations $AppRegistrations `
+        -RoleAssignments $RoleAssignments `
+        -PIMAssignments $PIMAssignments `
+        -GroupMemberships $groupMemberships `
+        -GroupOwners $groupOwners `
+        -SPOwners $spOwners `
+        -AppOwners $appOwners
+    
+    Write-Progress -Activity "Analyzing escalation paths" -Completed -Id 5
+    
+    return @{
+        Risks = $escalationRisks
+        GraphData = $graphData
+    }
 }
 
 #endregion
@@ -1146,6 +1656,9 @@ function Export-ScEntraReport {
         [array]$EscalationRisks = @(),
         
         [Parameter(Mandatory = $false)]
+        [hashtable]$GraphData = $null,
+        
+        [Parameter(Mandatory = $false)]
         [string]$OutputPath = "./ScEntra-Report-$(Get-Date -Format 'yyyyMMdd-HHmmss').html"
     )
     
@@ -1187,6 +1700,8 @@ function Export-ScEntraReport {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ScEntra Analysis Report</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.6/dist/vis-network.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/vis-network@9.1.6/dist/dist/vis-network.min.css" rel="stylesheet" type="text/css" />
     <style>
         * {
             margin: 0;
@@ -1370,6 +1885,43 @@ function Export-ScEntraReport {
             background: #28a745;
             color: white;
         }
+        
+        #escalationGraph {
+            width: 100%;
+            height: 800px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: #fafafa;
+        }
+        
+        .graph-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: 2px solid #333;
+        }
+        
+        .legend-color.user { background: #4CAF50; }
+        .legend-color.group { background: #2196F3; }
+        .legend-color.role { background: #FF5722; }
+        .legend-color.servicePrincipal { background: #9C27B0; }
+        .legend-color.application { background: #FF9800; }
     </style>
 </head>
 <body>
@@ -1440,6 +1992,43 @@ function Export-ScEntraReport {
             </div>
         </div>
 "@
+
+    # Add graph visualization if graph data is available
+    if ($GraphData -and $GraphData.nodes -and $GraphData.nodes.Count -gt 0) {
+        $nodesJson = $GraphData.nodes | ConvertTo-Json -Compress -Depth 10
+        $edgesJson = $GraphData.edges | ConvertTo-Json -Compress -Depth 10
+        
+        $html += @"
+        
+        <div class="section">
+            <h2>🕸️ Escalation Path Graph</h2>
+            <p style="margin-bottom: 20px; color: #666;">Interactive graph showing relationships between users, groups, service principals, app registrations, and role assignments. Drag nodes to explore the relationships.</p>
+            <div id="escalationGraph"></div>
+            <div class="graph-legend">
+                <div class="legend-item">
+                    <div class="legend-color user"></div>
+                    <span>User</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color group"></div>
+                    <span>Group</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color role"></div>
+                    <span>Role</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color servicePrincipal"></div>
+                    <span>Service Principal</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color application"></div>
+                    <span>Application</span>
+                </div>
+            </div>
+        </div>
+"@
+    }
 
     if ($EscalationRisks.Count -gt 0) {
         $html += @"
@@ -1552,6 +2141,124 @@ function Export-ScEntraReport {
             }
         });
     </script>
+"@
+
+    # Add graph visualization script if graph data is available
+    if ($GraphData -and $GraphData.nodes -and $GraphData.nodes.Count -gt 0) {
+        $html += @"
+    <script>
+        // Escalation Path Graph
+        const graphNodes = $nodesJson;
+        const graphEdges = $edgesJson;
+        
+        // Transform nodes for vis-network
+        const nodes = new vis.DataSet(graphNodes.map(node => ({
+            id: node.id,
+            label: node.label,
+            group: node.type,
+            title: node.label + ' (' + node.type + ')',
+            shape: node.type === 'role' ? 'diamond' : (node.type === 'group' ? 'box' : 'dot'),
+            color: {
+                background: node.type === 'user' ? '#4CAF50' : 
+                           node.type === 'group' ? '#2196F3' :
+                           node.type === 'role' ? '#FF5722' :
+                           node.type === 'servicePrincipal' ? '#9C27B0' :
+                           node.type === 'application' ? '#FF9800' : '#999',
+                border: '#333'
+            },
+            font: { color: '#333', size: 14 }
+        })));
+        
+        // Transform edges for vis-network
+        const edges = new vis.DataSet(graphEdges.map(edge => ({
+            from: edge.from,
+            to: edge.to,
+            label: edge.label || edge.type,
+            arrows: 'to',
+            color: {
+                color: edge.type === 'has_role' ? '#FF5722' :
+                       edge.type === 'member_of' ? '#2196F3' :
+                       edge.type === 'owns' ? '#FF9800' :
+                       edge.isPIM ? '#9C27B0' : '#999',
+                opacity: 0.7
+            },
+            dashes: edge.isPIM || edge.type === 'owns',
+            width: edge.type === 'has_role' ? 3 : 1.5,
+            font: { size: 10, color: '#666', align: 'middle' }
+        })));
+        
+        const container = document.getElementById('escalationGraph');
+        const data = { nodes: nodes, edges: edges };
+        
+        const options = {
+            nodes: {
+                borderWidth: 2,
+                size: 25,
+                font: {
+                    size: 14,
+                    color: '#333'
+                },
+                scaling: {
+                    min: 20,
+                    max: 40
+                }
+            },
+            edges: {
+                smooth: {
+                    type: 'continuous',
+                    roundness: 0.5
+                },
+                width: 2
+            },
+            physics: {
+                enabled: true,
+                barnesHut: {
+                    gravitationalConstant: -8000,
+                    centralGravity: 0.3,
+                    springLength: 200,
+                    springConstant: 0.04,
+                    damping: 0.09,
+                    avoidOverlap: 0.1
+                },
+                stabilization: {
+                    enabled: true,
+                    iterations: 200,
+                    updateInterval: 25
+                }
+            },
+            interaction: {
+                hover: true,
+                tooltipDelay: 100,
+                zoomView: true,
+                dragView: true
+            },
+            layout: {
+                improvedLayout: true,
+                hierarchical: {
+                    enabled: false
+                }
+            }
+        };
+        
+        const network = new vis.Network(container, data, options);
+        
+        // Highlight connected nodes on click
+        network.on('click', function(params) {
+            if (params.nodes.length > 0) {
+                const nodeId = params.nodes[0];
+                const connectedNodes = network.getConnectedNodes(nodeId);
+                const connectedEdges = network.getConnectedEdges(nodeId);
+                
+                // Highlight logic can be added here
+                console.log('Selected node:', nodeId);
+                console.log('Connected nodes:', connectedNodes);
+            }
+        });
+    </script>
+"@
+    }
+    
+    $html += @"
 </body>
 </html>
 "@
@@ -1574,6 +2281,7 @@ function Export-ScEntraReport {
             RoleAssignments = $RoleAssignments
             PIMAssignments = $PIMAssignments
             EscalationRisks = $EscalationRisks
+            GraphData = $GraphData
         }
         
         $jsonData | ConvertTo-Json -Depth 10 | Out-File -FilePath $jsonPath -Encoding UTF8
@@ -1702,13 +2410,17 @@ function Invoke-ScEntraAnalysis {
     Write-Host "`n[4/5] 🔍 Analyzing Escalation Paths..." -ForegroundColor Cyan
     Write-Host "=" * 60
     
-    $escalationRisks = Get-ScEntraEscalationPaths `
+    $escalationResult = Get-ScEntraEscalationPaths `
         -Users $users `
         -Groups $groups `
         -RoleAssignments $roleAssignments `
         -PIMAssignments $pimAssignments `
         -ServicePrincipals $servicePrincipals `
         -AppRegistrations $appRegistrations
+    
+    # Extract risks and graph data from result
+    $escalationRisks = $escalationResult.Risks
+    $graphData = $escalationResult.GraphData
     
     # Step 5: Generate Report
     Write-Host "`n[5/5] 📊 Generating Report..." -ForegroundColor Cyan
@@ -1722,6 +2434,7 @@ function Invoke-ScEntraAnalysis {
         -RoleAssignments $roleAssignments `
         -PIMAssignments $pimAssignments `
         -EscalationRisks $escalationRisks `
+        -GraphData $graphData `
         -OutputPath $OutputPath
     
     $endTime = Get-Date
@@ -1750,6 +2463,7 @@ function Invoke-ScEntraAnalysis {
         RoleAssignments = $roleAssignments
         PIMAssignments = $pimAssignments
         EscalationRisks = $escalationRisks
+        GraphData = $graphData
         ReportPath = $reportPath
     }
 }
