@@ -202,6 +202,9 @@ function Get-AllGraphItems {
     .PARAMETER Method
         HTTP method (default: GET)
     
+    .PARAMETER ProgressActivity
+        Optional activity name to display in progress bar
+    
     .EXAMPLE
         Get-AllGraphItems -Uri "https://graph.microsoft.com/v1.0/users"
     #>
@@ -210,14 +213,24 @@ function Get-AllGraphItems {
         [string]$Uri,
         
         [Parameter(Mandatory = $false)]
-        [string]$Method = 'GET'
+        [string]$Method = 'GET',
+        
+        [Parameter(Mandatory = $false)]
+        [string]$ProgressActivity = $null
     )
     
     $allItems = @()
     $nextLink = $Uri
+    $pageCount = 0
     
     do {
         try {
+            $pageCount++
+            
+            if ($ProgressActivity) {
+                Write-Progress -Activity $ProgressActivity -Status "Fetching page $pageCount (retrieved $($allItems.Count) items so far)" -Id 1
+            }
+            
             $result = Invoke-GraphRequest -Uri $nextLink -Method $Method
             
             # Handle both paginated and non-paginated responses
@@ -236,6 +249,10 @@ function Get-AllGraphItems {
             break
         }
     } while ($nextLink)
+    
+    if ($ProgressActivity) {
+        Write-Progress -Activity $ProgressActivity -Completed -Id 1
+    }
     
     return $allItems
 }
@@ -268,7 +285,7 @@ function Get-ScEntraUsers {
         $select = "id,displayName,userPrincipalName,mail,accountEnabled,createdDateTime,userType,onPremisesSyncEnabled"
         $uri = "$script:GraphBaseUrl/users?`$select=$select"
         
-        $users = Get-AllGraphItems -Uri $uri
+        $users = Get-AllGraphItems -Uri $uri -ProgressActivity "Retrieving users from Entra ID"
         
         Write-Host "Retrieved $($users.Count) users" -ForegroundColor Green
         return $users
@@ -303,12 +320,18 @@ function Get-ScEntraGroups {
         $select = "id,displayName,description,groupTypes,securityEnabled,mailEnabled,isAssignableToRole,createdDateTime,membershipRule,membershipRuleProcessingState"
         $uri = "$script:GraphBaseUrl/groups?`$select=$select"
         
-        $groups = Get-AllGraphItems -Uri $uri
+        $groups = Get-AllGraphItems -Uri $uri -ProgressActivity "Retrieving groups from Entra ID"
         
         Write-Host "Retrieved $($groups.Count) groups" -ForegroundColor Green
         
         # Add member count to each group
+        $groupCount = 0
+        $totalGroups = $groups.Count
         foreach ($group in $groups) {
+            $groupCount++
+            $percentComplete = [math]::Round(($groupCount / $totalGroups) * 100)
+            Write-Progress -Activity "Fetching group member counts" -Status "Processing group $groupCount of $totalGroups - $($group.displayName)" -PercentComplete $percentComplete -Id 2
+            
             try {
                 $membersUri = "$script:GraphBaseUrl/groups/$($group.id)/members?`$count=true&`$select=id"
                 $membersResult = Invoke-GraphRequest -Uri $membersUri -Method GET -ErrorAction SilentlyContinue
@@ -329,6 +352,8 @@ function Get-ScEntraGroups {
                 $group | Add-Member -NotePropertyName memberCount -NotePropertyValue 0 -Force
             }
         }
+        
+        Write-Progress -Activity "Fetching group member counts" -Completed -Id 2
         
         return $groups
     }
@@ -362,7 +387,7 @@ function Get-ScEntraServicePrincipals {
         $select = "id,displayName,appId,servicePrincipalType,accountEnabled,createdDateTime,appOwnerOrganizationId"
         $uri = "$script:GraphBaseUrl/servicePrincipals?`$select=$select"
         
-        $servicePrincipals = Get-AllGraphItems -Uri $uri
+        $servicePrincipals = Get-AllGraphItems -Uri $uri -ProgressActivity "Retrieving service principals from Entra ID"
         
         Write-Host "Retrieved $($servicePrincipals.Count) service principals" -ForegroundColor Green
         return $servicePrincipals
@@ -397,7 +422,7 @@ function Get-ScEntraAppRegistrations {
         $select = "id,displayName,appId,createdDateTime,signInAudience,publisherDomain"
         $uri = "$script:GraphBaseUrl/applications?`$select=$select"
         
-        $apps = Get-AllGraphItems -Uri $uri
+        $apps = Get-AllGraphItems -Uri $uri -ProgressActivity "Retrieving app registrations from Entra ID"
         
         Write-Host "Retrieved $($apps.Count) app registrations" -ForegroundColor Green
         return $apps
@@ -435,11 +460,16 @@ function Get-ScEntraRoleAssignments {
     try {
         # Get all directory roles
         $rolesUri = "$script:GraphBaseUrl/directoryRoles?`$select=id,displayName,description"
-        $roles = Get-AllGraphItems -Uri $rolesUri
+        $roles = Get-AllGraphItems -Uri $rolesUri -ProgressActivity "Retrieving directory roles"
         
         $allAssignments = @()
+        $roleCount = 0
+        $totalRoles = $roles.Count
         
         foreach ($role in $roles) {
+            $roleCount++
+            $percentComplete = [math]::Round(($roleCount / $totalRoles) * 100)
+            Write-Progress -Activity "Enumerating role assignments" -Status "Processing role $roleCount of $totalRoles - $($role.displayName)" -PercentComplete $percentComplete -Id 3
             Write-Verbose "Processing role: $($role.displayName)"
             
             $membersUri = "$script:GraphBaseUrl/directoryRoles/$($role.id)/members?`$select=id"
@@ -461,6 +491,8 @@ function Get-ScEntraRoleAssignments {
                 $allAssignments += $assignment
             }
         }
+        
+        Write-Progress -Activity "Enumerating role assignments" -Completed -Id 3
         
         Write-Host "Retrieved $($allAssignments.Count) direct role assignments across $($roles.Count) roles" -ForegroundColor Green
         return $allAssignments
@@ -495,6 +527,7 @@ function Get-ScEntraPIMAssignments {
         # Get role eligibility schedules (eligible assignments)
         $eligibleAssignments = @()
         try {
+            Write-Progress -Activity "Retrieving PIM assignments" -Status "Fetching eligible role assignments" -PercentComplete 25 -Id 4
             $eligibleUri = "$script:GraphBaseUrl/roleManagement/directory/roleEligibilitySchedules?`$expand=principal,roleDefinition"
             $eligibleSchedules = Get-AllGraphItems -Uri $eligibleUri -ErrorAction SilentlyContinue
             
@@ -523,6 +556,7 @@ function Get-ScEntraPIMAssignments {
         # Get role active assignments through PIM
         $activeAssignments = @()
         try {
+            Write-Progress -Activity "Retrieving PIM assignments" -Status "Fetching active role assignments" -PercentComplete 75 -Id 4
             $activeUri = "$script:GraphBaseUrl/roleManagement/directory/roleAssignmentSchedules?`$expand=principal,roleDefinition"
             $activeSchedules = Get-AllGraphItems -Uri $activeUri -ErrorAction SilentlyContinue
             
@@ -547,6 +581,8 @@ function Get-ScEntraPIMAssignments {
         catch {
             Write-Verbose "Could not retrieve PIM active assignments: $_"
         }
+        
+        Write-Progress -Activity "Retrieving PIM assignments" -Completed -Id 4
         
         $allPIMAssignments = $eligibleAssignments + $activeAssignments
         
@@ -626,7 +662,15 @@ function Get-ScEntraEscalationPaths {
     $roleEnabledGroups = $Groups | Where-Object { $_.isAssignableToRole -eq $true }
     Write-Host "Found $($roleEnabledGroups.Count) role-enabled groups" -ForegroundColor Yellow
     
+    $groupCount = 0
+    $totalGroups = $roleEnabledGroups.Count
     foreach ($group in $roleEnabledGroups) {
+        $groupCount++
+        if ($totalGroups -gt 0) {
+            $percentComplete = [math]::Round(($groupCount / $totalGroups) * 100)
+            Write-Progress -Activity "Analyzing escalation paths" -Status "Analyzing role-enabled group $groupCount of $totalGroups - $($group.displayName)" -PercentComplete $percentComplete -Id 5
+        }
+        
         # Check if this group has role assignments
         $groupRoles = $RoleAssignments | Where-Object { $_.MemberId -eq $group.id }
         
@@ -663,7 +707,15 @@ function Get-ScEntraEscalationPaths {
     
     $groupsWithRoles = $RoleAssignments | Where-Object { $_.MemberType -eq 'group' } | Select-Object -ExpandProperty MemberId -Unique
     
+    $groupCount = 0
+    $totalGroups = $groupsWithRoles.Count
     foreach ($groupId in $groupsWithRoles) {
+        $groupCount++
+        if ($totalGroups -gt 0) {
+            $percentComplete = [math]::Round(($groupCount / $totalGroups) * 100)
+            Write-Progress -Activity "Analyzing nested group memberships" -Status "Processing group $groupCount of $totalGroups" -PercentComplete $percentComplete -Id 6
+        }
+        
         $group = $Groups | Where-Object { $_.id -eq $groupId }
         if ($group) {
             try {
@@ -699,10 +751,20 @@ function Get-ScEntraEscalationPaths {
         }
     }
     
+    Write-Progress -Activity "Analyzing nested group memberships" -Completed -Id 6
+    
     # 3. Analyze service principal and app ownership
     Write-Verbose "Analyzing service principal and app ownership..."
     
+    $spCount = 0
+    $totalSPs = $ServicePrincipals.Count
     foreach ($sp in $ServicePrincipals) {
+        $spCount++
+        if ($totalSPs -gt 0 -and $spCount % 10 -eq 0) {
+            $percentComplete = [math]::Round(($spCount / $totalSPs) * 100)
+            Write-Progress -Activity "Analyzing service principal ownership" -Status "Processing service principal $spCount of $totalSPs" -PercentComplete $percentComplete -Id 7
+        }
+        
         try {
             $ownersUri = "$script:GraphBaseUrl/servicePrincipals/$($sp.id)/owners?`$select=id"
             $owners = Get-AllGraphItems -Uri $ownersUri -ErrorAction SilentlyContinue
@@ -732,8 +794,18 @@ function Get-ScEntraEscalationPaths {
         }
     }
     
+    Write-Progress -Activity "Analyzing service principal ownership" -Completed -Id 7
+    
     # 4. Analyze app registration ownership
+    $appCount = 0
+    $totalApps = $AppRegistrations.Count
     foreach ($app in $AppRegistrations) {
+        $appCount++
+        if ($totalApps -gt 0 -and $appCount % 10 -eq 0) {
+            $percentComplete = [math]::Round(($appCount / $totalApps) * 100)
+            Write-Progress -Activity "Analyzing app registration ownership" -Status "Processing app registration $appCount of $totalApps" -PercentComplete $percentComplete -Id 8
+        }
+        
         try {
             $ownersUri = "$script:GraphBaseUrl/applications/$($app.id)/owners?`$select=id"
             $owners = Get-AllGraphItems -Uri $ownersUri -ErrorAction SilentlyContinue
@@ -755,9 +827,13 @@ function Get-ScEntraEscalationPaths {
         }
     }
     
+    Write-Progress -Activity "Analyzing app registration ownership" -Completed -Id 8
+    Write-Progress -Activity "Analyzing escalation paths" -Completed -Id 5
+    
     # 5. Analyze PIM assignments for unusual patterns
     if ($PIMAssignments.Count -gt 0) {
         Write-Verbose "Analyzing PIM assignment patterns..."
+        Write-Progress -Activity "Analyzing PIM assignment patterns" -Status "Grouping PIM assignments by principal" -PercentComplete 50 -Id 9
         
         $pimByPrincipal = $PIMAssignments | Group-Object -Property PrincipalId
         
@@ -774,6 +850,8 @@ function Get-ScEntraEscalationPaths {
                 $escalationRisks += $risk
             }
         }
+        
+        Write-Progress -Activity "Analyzing PIM assignment patterns" -Completed -Id 9
     }
     
     Write-Host "Identified $($escalationRisks.Count) potential escalation risks" -ForegroundColor Yellow
