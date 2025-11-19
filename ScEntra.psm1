@@ -2078,8 +2078,17 @@ function Export-ScEntraReport {
                 default { 'badge-medium' }
             }
             
+            # Extract entity IDs from risk for filtering
+            $entityIds = @()
+            if ($risk.GroupId) { $entityIds += $risk.GroupId }
+            if ($risk.ServicePrincipalId) { $entityIds += $risk.ServicePrincipalId }
+            if ($risk.AppId) { $entityIds += $risk.AppId }
+            if ($risk.PrincipalId) { $entityIds += $risk.PrincipalId }
+            if ($risk.MemberId) { $entityIds += $risk.MemberId }
+            $entityIdsAttr = ($entityIds -join ',')
+            
             $html += @"
-                    <tr>
+                    <tr data-entity-ids="$entityIdsAttr" class="risk-row">
                         <td><span class="badge $badgeClass">$($risk.Severity)</span></td>
                         <td>$($risk.RiskType)</td>
                         <td>$($risk.Description)</td>
@@ -2326,11 +2335,11 @@ function Export-ScEntraReport {
                 });
             });
             
-            // Update all nodes
+            // Hide nodes not in path, show nodes in path
             const updates = [];
             nodes.forEach(node => {
                 if (pathNodes.has(node.id)) {
-                    // Highlighted nodes
+                    // Highlighted nodes - shown
                     updates.push({
                         id: node.id,
                         color: {
@@ -2342,47 +2351,82 @@ function Export-ScEntraReport {
                             }
                         },
                         borderWidth: 4,
-                        font: { color: '#000', size: 16, bold: true }
+                        font: { color: '#000', size: 16, bold: true },
+                        hidden: false
                     });
                 } else {
-                    // Dimmed nodes
+                    // Hide unrelated nodes
                     updates.push({
                         id: node.id,
-                        color: {
-                            background: '#f0f0f0',
-                            border: '#ccc',
-                            highlight: {
-                                background: '#f0f0f0',
-                                border: '#ccc'
-                            }
-                        },
-                        borderWidth: 1,
-                        font: { color: '#999', size: 12 }
+                        hidden: true
                     });
                 }
             });
             nodes.update(updates);
             
-            // Update all edges
+            // Hide edges not in path
             const edgeUpdates = [];
             edges.forEach(edge => {
                 if (pathEdges.has(edge.id)) {
-                    // Highlighted edges
+                    // Highlighted edges - shown
                     edgeUpdates.push({
                         id: edge.id,
                         width: 4,
-                        color: { color: '#FF5722', opacity: 1 }
+                        color: { color: '#FF5722', opacity: 1 },
+                        hidden: false
                     });
                 } else {
-                    // Dimmed edges
+                    // Hide unrelated edges
                     edgeUpdates.push({
                         id: edge.id,
-                        width: 1,
-                        color: { color: '#ddd', opacity: 0.3 }
+                        hidden: true
                     });
                 }
             });
             edges.update(edgeUpdates);
+            
+            // Filter risk table to show only related risks
+            filterRiskTable(Array.from(pathNodes));
+        }
+        
+        // Function to filter risk table based on selected nodes
+        function filterRiskTable(nodeIds) {
+            const riskRows = document.querySelectorAll('.risk-row');
+            let visibleCount = 0;
+            
+            riskRows.forEach(row => {
+                const entityIds = row.getAttribute('data-entity-ids');
+                if (!entityIds) {
+                    row.style.display = '';
+                    visibleCount++;
+                    return;
+                }
+                
+                const rowEntityIds = entityIds.split(',').filter(id => id.trim());
+                const hasMatch = rowEntityIds.some(entityId => nodeIds.includes(entityId));
+                
+                if (hasMatch) {
+                    row.style.display = '';
+                    visibleCount++;
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+            
+            // Show message if no risks match
+            const risksSection = document.querySelector('.section h2');
+            if (risksSection && risksSection.textContent.includes('Escalation Risks')) {
+                const existingMsg = document.getElementById('risk-filter-msg');
+                if (existingMsg) existingMsg.remove();
+                
+                if (visibleCount === 0 && riskRows.length > 0) {
+                    const msg = document.createElement('p');
+                    msg.id = 'risk-filter-msg';
+                    msg.style.cssText = 'color: #666; font-style: italic; margin-top: 10px;';
+                    msg.textContent = 'No escalation risks found for the selected entity.';
+                    risksSection.parentNode.insertBefore(msg, risksSection.nextSibling);
+                }
+            }
         }
         
         // Function to reset highlighting
@@ -2393,7 +2437,8 @@ function Export-ScEntraReport {
                     id: node.id,
                     color: originalNodeColors[node.id],
                     borderWidth: 2,
-                    font: { color: '#333', size: 14 }
+                    font: { color: '#333', size: 14 },
+                    hidden: false
                 });
             });
             nodes.update(updates);
@@ -2409,12 +2454,21 @@ function Export-ScEntraReport {
                                edge.edgeType === 'owns' ? '#FF9800' :
                                edge.isPIM ? '#9C27B0' : '#999',
                         opacity: 0.7
-                    }
+                    },
+                    hidden: false
                 });
             });
             edges.update(edgeUpdates);
             
             document.getElementById('selectedNodeInfo').style.display = 'none';
+            
+            // Reset risk table
+            const riskRows = document.querySelectorAll('.risk-row');
+            riskRows.forEach(row => {
+                row.style.display = '';
+            });
+            const riskMsg = document.getElementById('risk-filter-msg');
+            if (riskMsg) riskMsg.remove();
         }
         
         // Click handler to highlight path
@@ -2466,7 +2520,7 @@ function Export-ScEntraReport {
                 document.getElementById('selectedNodeType').textContent = '(' + matchingNodes[0].type + ')';
                 document.getElementById('selectedNodeInfo').style.display = 'block';
             } else if (matchingNodes.length > 1) {
-                // Highlight all matching nodes
+                // Show only matching nodes
                 const matchingIds = new Set(matchingNodes.map(n => n.id));
                 const updates = [];
                 nodes.forEach(node => {
@@ -2475,27 +2529,24 @@ function Export-ScEntraReport {
                             id: node.id,
                             color: originalNodeColors[node.id],
                             borderWidth: 4,
-                            font: { color: '#000', size: 16 }
+                            font: { color: '#000', size: 16 },
+                            hidden: false
                         });
                     } else {
                         updates.push({
                             id: node.id,
-                            color: { background: '#f0f0f0', border: '#ccc' },
-                            borderWidth: 1,
-                            font: { color: '#999', size: 12 }
+                            hidden: true
                         });
                     }
                 });
                 nodes.update(updates);
             } else if (searchTerm || typeFilter) {
-                // No matches - dim everything
+                // No matches - hide everything
                 const updates = [];
                 nodes.forEach(node => {
                     updates.push({
                         id: node.id,
-                        color: { background: '#f0f0f0', border: '#ccc' },
-                        borderWidth: 1,
-                        font: { color: '#999', size: 12 }
+                        hidden: true
                     });
                 });
                 nodes.update(updates);
