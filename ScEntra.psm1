@@ -2523,9 +2523,10 @@ function Export-ScEntraReport {
             visited.add(nodeId);
             
             // Get all directly connected nodes by querying edges dataset
-            // This is more reliable than network.getConnectedNodes() for large graphs
+            // Convert DataSet to array first, then iterate
+            const allEdges = edges.get();
             const connectedNodes = [];
-            edges.forEach(edge => {
+            allEdges.forEach(edge => {
                 if (edge.from === nodeId && !visited.has(edge.to)) {
                     connectedNodes.push(edge.to);
                 } else if (edge.to === nodeId && !visited.has(edge.from)) {
@@ -2561,7 +2562,8 @@ function Export-ScEntraReport {
             
             // Hide nodes not in path, show nodes in path
             const updates = [];
-            nodes.forEach(node => {
+            const allNodes = nodes.get();
+            allNodes.forEach(node => {
                 if (pathNodes.has(node.id)) {
                     // Highlighted nodes - shown
                     updates.push({
@@ -2590,7 +2592,8 @@ function Export-ScEntraReport {
             
             // Show edges in path with different styling based on type
             const edgeUpdates = [];
-            edges.forEach(edge => {
+            const allEdges = edges.get();
+            allEdges.forEach(edge => {
                 if (pathEdges.has(edge.id)) {
                     // In path - show but style differently based on edge type
                     if (edge.edgeType === 'has_role') {
@@ -2680,7 +2683,8 @@ function Export-ScEntraReport {
             nodes.update(updates);
             
             const edgeUpdates = [];
-            edges.forEach(edge => {
+            const allEdges = edges.get();
+            allEdges.forEach(edge => {
                 edgeUpdates.push({
                     id: edge.id,
                     width: edge.edgeType === 'has_role' ? 3 : (edge.edgeType === 'can_manage' ? 2 : 1.5),
@@ -2761,7 +2765,8 @@ function Export-ScEntraReport {
                 // Show only matching nodes
                 const matchingIds = new Set(matchingNodes.map(n => n.id));
                 const updates = [];
-                nodes.forEach(node => {
+                const allNodes = nodes.get();
+                allNodes.forEach(node => {
                     if (matchingIds.has(node.id)) {
                         updates.push({
                             id: node.id,
@@ -2781,7 +2786,8 @@ function Export-ScEntraReport {
             } else if (searchTerm || typeFilter) {
                 // No matches - hide everything
                 const updates = [];
-                nodes.forEach(node => {
+                const allNodes = nodes.get();
+                allNodes.forEach(node => {
                     updates.push({
                         id: node.id,
                         hidden: true
