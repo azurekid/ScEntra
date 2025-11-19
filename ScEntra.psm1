@@ -2461,19 +2461,22 @@ function Export-ScEntraReport {
             });
             nodes.update(updates);
             
-            // Show only relationship edges (hide has_role edges)
+            // Show edges in path with different styling based on type
             const edgeUpdates = [];
             edges.forEach(edge => {
                 if (pathEdges.has(edge.id)) {
-                    // In path - check if it's a has_role edge
+                    // In path - show but style differently based on edge type
                     if (edge.edgeType === 'has_role') {
-                        // Hide role assignment edges (red lines)
+                        // Show role assignment edges but muted (light gray, thin)
                         edgeUpdates.push({
                             id: edge.id,
-                            hidden: true
+                            width: 1,
+                            color: { color: '#ddd', opacity: 0.4 },
+                            hidden: false,
+                            dashes: true
                         });
                     } else {
-                        // Show relationship edges (gray lines) with emphasis
+                        // Show relationship edges with emphasis (dark gray, thick)
                         edgeUpdates.push({
                             id: edge.id,
                             width: 3,
