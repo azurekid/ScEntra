@@ -2511,19 +2511,24 @@ function Export-ScEntraReport {
         
         // Helper to create data URIs for inline SVG icons
         const svgIcon = function(svg) { return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg); };
-        
+        const defaultUserIconSvg = '<svg id="e24671f6-f501-4952-a2db-8b0b1d329c17" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="be92901b-ec33-4c65-adf1-9b0eed06d677" x1="9" y1="6.88" x2="9" y2="20.45" gradientUnits="userSpaceOnUse"><stop offset="0.22" stop-color="#32d4f5"/><stop offset="1" stop-color="#198ab3"/></linearGradient><linearGradient id="b46fc246-25d8-4398-8779-1042e8cacae7" x1="8.61" y1="-0.4" x2="9.6" y2="11.92" gradientUnits="userSpaceOnUse"><stop offset="0.22" stop-color="#32d4f5"/><stop offset="1" stop-color="#198ab3"/></linearGradient></defs><title>Icon-identity-230</title><path d="M15.72,18a1.45,1.45,0,0,0,1.45-1.45.47.47,0,0,0,0-.17C16.59,11.81,14,8.09,9,8.09S1.34,11.24.83,16.39A1.46,1.46,0,0,0,2.14,18H15.72Z" fill="url(#be92901b-ec33-4c65-adf1-9b0eed06d677)"/><path d="M9,9.17a4.59,4.59,0,0,1-2.48-.73L9,14.86l2.44-6.38A4.53,4.53,0,0,1,9,9.17Z" fill="#fff" opacity="0.8"/><circle cx="9.01" cy="4.58" r="4.58" fill="url(#b46fc246-25d8-4398-8779-1042e8cacae7)"/></svg>';
+        const userIconOverride = 'data:image/svg+xml;base64,PHN2ZyBpZD0iZTI0NjcxZjYtZjUwMS00OTUyLWEyZGItOGIwYjFkMzI5YzE3IiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOCAxOCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJiZTkyOTAxYi1lYzMzLTRjNjUtYWRmMS05YjBlZWQwNmQ2NzciIHgxPSI5IiB5MT0iNi44OCIgeDI9IjkiIHkyPSIyMC40NSIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPjxzdG9wIG9mZnNldD0iMC4yMiIgc3RvcC1jb2xvcj0iIzMyZDRmNSIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzE5OGFiMyIvPjwvbGluZWFyR3JhZGllbnQ+PGxpbmVhckdyYWRpZW50IGlkPSJiNDZmYzI0Ni0yNWQ4LTQzOTgtODc3OS0xMDQyZThjYWNhZTciIHgxPSI4LjYxIiB5MT0iLTAuNCIgeDI9IjkuNiIgeTI9IjExLjkyIiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHN0b3Agb2Zmc2V0PSIwLjIyIiBzdG9wLWNvbG9yPSIjMzJkNGY1Ii8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjMTk4YWIzIi8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PHRpdGxlPkljb24taWRlbnRpdHktMjMwPC90aXRsZT48cGF0aCBkPSJNMTUuNzIsMThhMS40NSwxLjQ1LDAsMCwwLDEuNDUtMS40NS40Ny40NywwLDAsMCwwLS4xN0MxNi41OSwxMS44MSwxNCw4LjA5LDksOC4wOVMxLjM0LDExLjI0LjgzLDE2LjM5QTEuNDYsMS40NiwwLDAsMCwyLjE0LDE4SDE1LjcyWiIgZmlsbD0idXJsKCNiZTkyOTAxYi1lYzMzLTRjNjUtYWRmMS05YjBlZWQwNmQ2NzcpIi8+PHBhdGggZD0iTTksOS4xN2E0LjU5LDQuNTksMCwwLDEtMi40OC0uNzNMOSwxNC44NmwyLjQ0LTYuMzhBNC41Myw0LjUzLDAsMCwxLDksOS4xN1oiIGZpbGw9IiNmZmYiIG9wYWNpdHk9IjAuOCIvPjxjaXJjbGUgY3g9IjkuMDEiIGN5PSI0LjU4IiByPSI0LjU4IiBmaWxsPSJ1cmwoI2I0NmZjMjQ2LTI1ZDgtNDM5OC04Nzc5LTEwNDJlOGNhY2FlNykiLz48L3N2Zz4=';
+        const userIconDataUri = (userIconOverride && !userIconOverride.includes('…')) ? userIconOverride : svgIcon(defaultUserIconSvg);
+
         // Microsoft-inspired icon set for each node type
         const nodeIcons = {
-            user: svgIcon('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="11" r="7" fill="#50E6FF"/><path d="M6 28c0-5.5 4.5-10 10-10s10 4.5 10 10" fill="#0078D4"/></svg>'),
-            group: svgIcon('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="11" cy="12" r="5" fill="#6BB8FF"/><circle cx="21" cy="12" r="5" fill="#005FB8"/><path d="M4 28c0-4.4 3.6-8 8-8h0.5c1.7 0 3.3 0.6 4.5 1.6c1.2-1 2.8-1.6 4.5-1.6H22c4.4 0 8 3.6 8 8" fill="#004578"/></svg>'),
-            role: svgIcon('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M16 3l11 5v8c0 6.2-4.7 11.9-11 13-6.3-1.1-11-6.8-11-13V8l11-5z" fill="#FF8C00"/><path d="M16 7l7 3.2v6.3c0 4.1-2.9 7.9-7 8.8c-4.1-0.9-7-4.7-7-8.8V10.2L16 7z" fill="#FFF4CE"/></svg>'),
-            servicePrincipal: svgIcon('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><polygon points="16,2 29,9.5 29,22.5 16,30 3,22.5 3,9.5" fill="#8A2DA5"/><path d="M16 7l9 5.2v7.6L16 25l-9-5.2v-7.6L16 7z" fill="#E5CCFF"/></svg>'),
-            application: svgIcon('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect x="4" y="6" width="24" height="20" rx="2" fill="#107C10"/><rect x="6" y="10" width="20" height="12" fill="#FFFFFF"/><rect x="6" y="6" width="24" height="4" fill="#5EC85A"/></svg>')
-        };
+            user: userIconDataUri,
+            group: svgIcon('<svg id="a5c2c34a-a5f9-4043-a084-e51b74497895" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="f97360fa-fd13-420b-9b43-74b8dde83a11" x1="6.7" y1="7.26" x2="6.7" y2="18.36" gradientUnits="userSpaceOnUse"><stop offset="0.22" stop-color="#32d4f5"/><stop offset="1" stop-color="#198ab3"/></linearGradient><linearGradient id="b2ab4071-529d-4450-9443-e6dc0939cc4e" x1="6.42" y1="1.32" x2="7.23" y2="11.39" gradientUnits="userSpaceOnUse"><stop offset="0.22" stop-color="#32d4f5"/><stop offset="1" stop-color="#198ab3"/></linearGradient></defs><title>Icon-identity-223</title><path d="M17.22,13.92a.79.79,0,0,0,.8-.79A.28.28,0,0,0,18,13c-.31-2.5-1.74-4.54-4.46-4.54S9.35,10.22,9.07,13a.81.81,0,0,0,.72.88h7.43Z" fill="#0078d4"/><path d="M13.55,9.09a2.44,2.44,0,0,1-1.36-.4l1.35,3.52,1.33-3.49A2.54,2.54,0,0,1,13.55,9.09Z" fill="#fff" opacity="0.8"/><circle cx="13.55" cy="6.58" r="2.51" fill="#0078d4"/><path d="M12.19,16.36a1.19,1.19,0,0,0,1.19-1.19.66.66,0,0,0,0-.14c-.47-3.74-2.6-6.78-6.66-6.78S.44,10.83,0,15a1.2,1.2,0,0,0,1.07,1.31h11.1Z" fill="url(#f97360fa-fd13-420b-9b43-74b8dde83a11)"/><path d="M6.77,9.14a3.72,3.72,0,0,1-2-.6l2,5.25,2-5.21A3.81,3.81,0,0,1,6.77,9.14Z" fill="#fff" opacity="0.8"/><circle cx="6.74" cy="5.39" r="3.75" fill="url(#b2ab4071-529d-4450-9443-e6dc0939cc4e)"/></svg>'),
+            role: svgIcon('<svg id="a12d75ea-cbb6-44fa-832a-e54cce009101" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="e2b13d81-97e0-465a-b9ed-b7f57e1b3f8c" x1="9" y1="16.79" x2="9" y2="1.21" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#0078d4"/><stop offset="0.06" stop-color="#0a7cd7"/><stop offset="0.34" stop-color="#2e8ce1"/><stop offset="0.59" stop-color="#4897e9"/><stop offset="0.82" stop-color="#589eed"/><stop offset="1" stop-color="#5ea0ef"/></linearGradient></defs><title>Icon-identity-233</title><path d="M16.08,8.44c0,4.57-5.62,8.25-6.85,9a.43.43,0,0,1-.46,0c-1.23-.74-6.85-4.42-6.85-9V2.94a.44.44,0,0,1,.43-.44C6.73,2.39,5.72.5,9,.5s2.27,1.89,6.65,2a.44.44,0,0,1,.43.44Z" fill="#0078d4"/><path d="M15.5,8.48c0,4.2-5.16,7.57-6.29,8.25a.4.4,0,0,1-.42,0C7.66,16.05,2.5,12.68,2.5,8.48v-5A.41.41,0,0,1,2.9,3C6.92,2.93,6,1.21,9,1.21S11.08,2.93,15.1,3a.41.41,0,0,1,.4.4Z" fill="url(#e2b13d81-97e0-465a-b9ed-b7f57e1b3f8c)"/><path d="M11.85,7.66h-.4V6.24a2.62,2.62,0,0,0-.7-1.81,2.37,2.37,0,0,0-3.48,0,2.61,2.61,0,0,0-.7,1.81V7.66h-.4A.32.32,0,0,0,5.82,8v3.68a.32.32,0,0,0,.33.32h5.7a.32.32,0,0,0,.33-.32V8A.32.32,0,0,0,11.85,7.66Zm-1.55,0H7.7V6.22a1.43,1.43,0,0,1,.41-1,1.19,1.19,0,0,1,1.78,0,1.56,1.56,0,0,1,.16.2h0a1.4,1.4,0,0,1,.25.79Z" fill="#ffbd02"/><path d="M6.15,7.66h5.7a.32.32,0,0,1,.21.08L5.94,11.9a.33.33,0,0,1-.12-.24V8A.32.32,0,0,1,6.15,7.66Z" fill="#ffe452"/><path d="M11.85,7.66H6.15a.32.32,0,0,0-.21.08l6.12,4.16a.3.3,0,0,0,.12-.24V8A.32.32,0,0,0,11.85,7.66Z" fill="#ffd400" opacity="0.5"/></svg>'),
+            servicePrincipal: svgIcon('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="b05ecef1-bdba-47cb-a2a6-665a5bf9ae79" x1="9" y1="19.049" x2="9" y2="1.048" gradientUnits="userSpaceOnUse"><stop offset="0.2" stop-color="#0078d4"/><stop offset="0.287" stop-color="#1380da"/><stop offset="0.495" stop-color="#3c91e5"/><stop offset="0.659" stop-color="#559cec"/><stop offset="0.759" stop-color="#5ea0ef"/></linearGradient></defs><g id="adc593fc-9575-4f0f-b9cc-4803103092a4"><g><rect x="1" y="1" width="16" height="16" rx="0.534" fill="url(#b05ecef1-bdba-47cb-a2a6-665a5bf9ae79)"/><g><g opacity="0.95"><rect x="2.361" y="2.777" width="3.617" height="3.368" rx="0.14" fill="#fff"/><rect x="7.192" y="2.777" width="3.617" height="3.368" rx="0.14" fill="#fff"/><rect x="12.023" y="2.777" width="3.617" height="3.368" rx="0.14" fill="#fff"/></g><rect x="2.361" y="7.28" width="8.394" height="3.368" rx="0.14" fill="#fff" opacity="0.45"/><rect x="12.009" y="7.28" width="3.617" height="3.368" rx="0.14" fill="#fff" opacity="0.9"/><rect x="2.361" y="11.854" width="13.186" height="3.368" rx="0.14" fill="#fff" opacity="0.75"/></g></g></g></svg>'),
+            application: svgIcon('<svg id="a76a0103-ce03-4d58-859d-4c27e02925d2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="efeb8e96-2af0-4681-9a6a-45f9b0262f19" x1="-6518.78" y1="1118.86" x2="-6518.78" y2="1090.06" gradientTransform="matrix(0.5, 0, 0, -0.5, 3267.42, 559.99)" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#5ea0ef"/><stop offset="0.18" stop-color="#589eed"/><stop offset="0.41" stop-color="#4897e9"/><stop offset="0.66" stop-color="#2e8ce1"/><stop offset="0.94" stop-color="#0a7cd7"/><stop offset="1" stop-color="#0078d4"/></linearGradient></defs><path d="M5.67,10.61H10v4.32H5.67Zm-5-5.76H5V.53H1.23a.6.6,0,0,0-.6.6Zm.6,10.08H5V10.61H.63v3.72A.6.6,0,0,0,1.23,14.93Zm-.6-5H5V5.57H.63Zm10.08,5h3.72a.6.6,0,0,0,.6-.6V10.61H10.71Zm-5-5H10V5.57H5.67Zm5,0H15V5.57H10.71Zm0-9.36V4.85H15V1.13a.6.6,0,0,0-.6-.6Zm-5,4.32H10V.53H5.67Z" fill="url(#efeb8e96-2af0-4681-9a6a-45f9b0262f19)"/><polygon points="17.37 10.7 17.37 15.21 13.5 17.47 13.5 12.96 17.37 10.7" fill="#32bedd"/><polygon points="17.37 10.7 13.5 12.97 9.63 10.7 13.5 8.44 17.37 10.7" fill="#9cebff"/><polygon points="13.5 12.97 13.5 17.47 9.63 15.21 9.63 10.7 13.5 12.97" fill="#50e6ff"/><polygon points="9.63 15.21 13.5 12.96 13.5 17.47 9.63 15.21" fill="#9cebff"/><polygon points="17.37 15.21 13.5 12.96 13.5 17.47 17.37 15.21" fill="#50e6ff"/></svg>')
+        
+            };
         
         // Transform nodes for vis-network with iconography
         const nodes = new vis.DataSet(graphNodes.map(node => {
             const icon = nodeIcons[node.type];
+            const hasIcon = Boolean(icon);
             const baseColor = node.type === 'user' ? '#4CAF50' :
                               node.type === 'group' ? '#2196F3' :
                               node.type === 'role' ? '#FF5722' :
@@ -2535,16 +2540,17 @@ function Export-ScEntraReport {
                 label: node.label,
                 group: node.type,
                 title: node.label + ' (' + node.type + ')',
-                shape: icon ? 'circularImage' : fallbackShape,
-                color: {
-                    background: baseColor,
-                    border: '#333'
-                },
+                shape: hasIcon ? 'image' : fallbackShape,
+                borderWidth: hasIcon ? 0 : 2,
                 font: { color: '#333', size: 14 }
             };
-            if (icon) {
+            if (hasIcon) {
                 config.image = icon;
-                config.shapeProperties = { useBorderWithImage: true };
+            } else {
+                config.color = {
+                    background: baseColor,
+                    border: '#333'
+                };
             }
             return config;
         }));
@@ -2641,15 +2647,20 @@ function Export-ScEntraReport {
         });
         
         // Store original node colors for reset
-        const originalNodeColors = {};
+        const originalNodeStyles = {};
         graphNodes.forEach(node => {
-            originalNodeColors[node.id] = {
-                background: node.type === 'user' ? '#4CAF50' : 
-                           node.type === 'group' ? '#2196F3' :
-                           node.type === 'role' ? '#FF5722' :
-                           node.type === 'servicePrincipal' ? '#9C27B0' :
-                           node.type === 'application' ? '#FF9800' : '#999',
-                border: '#333'
+            const hasIcon = Boolean(nodeIcons[node.type]);
+            const baseColor = node.type === 'user' ? '#4CAF50' : 
+                              node.type === 'group' ? '#2196F3' :
+                              node.type === 'role' ? '#FF5722' :
+                              node.type === 'servicePrincipal' ? '#9C27B0' :
+                              node.type === 'application' ? '#FF9800' : '#999';
+            originalNodeStyles[node.id] = {
+                hasIcon,
+                color: hasIcon ? null : {
+                    background: baseColor,
+                    border: '#333'
+                }
             };
         });
         
@@ -2811,29 +2822,37 @@ function Export-ScEntraReport {
             const updates = [];
             const allNodes = nodes.get();
             allNodes.forEach(node => {
+                const baseStyle = originalNodeStyles[node.id] || {};
                 if (allPathNodes.has(node.id)) {
                     // Highlighted nodes - shown
-                    // Check if this is one of the originally selected nodes
                     const isSelected = selectedNodes.has(node.id);
-                    updates.push({
+                    const update = {
                         id: node.id,
-                        color: {
-                            background: originalNodeColors[node.id].background,
-                            border: isSelected ? '#FFD700' : '#000',  // Gold border for selected nodes
+                        borderWidth: baseStyle.hasIcon ? (isSelected ? 4 : 0) : (isSelected ? 6 : 4),
+                        font: { color: '#000', size: isSelected ? 18 : 16, bold: true },
+                        hidden: false,
+                        shadow: baseStyle.hasIcon && isSelected,
+                        shadowColor: 'rgba(0,0,0,0.4)',
+                        shadowSize: baseStyle.hasIcon && isSelected ? 12 : 0
+                    };
+                    if (baseStyle.color) {
+                        update.color = {
+                            background: baseStyle.color.background,
+                            border: isSelected ? '#FFD700' : '#000',
                             highlight: {
-                                background: originalNodeColors[node.id].background,
+                                background: baseStyle.color.background,
                                 border: isSelected ? '#FFD700' : '#000'
                             }
-                        },
-                        borderWidth: isSelected ? 6 : 4,  // Thicker border for selected nodes
-                        font: { color: '#000', size: isSelected ? 18 : 16, bold: true },
-                        hidden: false
-                    });
+                        };
+                    }
+                    updates.push(update);
                 } else {
                     // Hide nodes not in path
                     updates.push({
                         id: node.id,
-                        hidden: true
+                        hidden: true,
+                        shadow: false,
+                        shadowSize: 0
                     });
                 }
             });
@@ -2940,13 +2959,19 @@ function Export-ScEntraReport {
             
             const updates = [];
             graphNodes.forEach(node => {
-                updates.push({
+                const baseStyle = originalNodeStyles[node.id] || {};
+                const update = {
                     id: node.id,
-                    color: originalNodeColors[node.id],
-                    borderWidth: 2,
+                    borderWidth: baseStyle.hasIcon ? 0 : 2,
                     font: { color: '#333', size: 14 },
-                    hidden: false
-                });
+                    hidden: false,
+                    shadow: false,
+                    shadowSize: 0
+                };
+                if (baseStyle.color) {
+                    update.color = baseStyle.color;
+                }
+                updates.push(update);
             });
             nodes.update(updates);
             
@@ -3063,13 +3088,19 @@ function Export-ScEntraReport {
                 
                 allNodes.forEach(node => {
                     if (matchingIds.has(node.id)) {
-                        nodeUpdates.push({
+                        const baseStyle = originalNodeStyles[node.id] || {};
+                        const update = {
                             id: node.id,
-                            color: originalNodeColors[node.id],
-                            borderWidth: 4,
+                            borderWidth: baseStyle.hasIcon ? 0 : 4,
                             font: { color: '#000', size: 16 },
-                            hidden: false
-                        });
+                            hidden: false,
+                            shadow: false,
+                            shadowSize: 0
+                        };
+                        if (baseStyle.color) {
+                            update.color = baseStyle.color;
+                        }
+                        nodeUpdates.push(update);
                     } else {
                         nodeUpdates.push({
                             id: node.id,
@@ -3105,13 +3136,19 @@ function Export-ScEntraReport {
                     const allNodes = nodes.get();
                     allNodes.forEach(node => {
                         if (matchingIds.has(node.id)) {
-                            updates.push({
+                            const baseStyle = originalNodeStyles[node.id] || {};
+                            const update = {
                                 id: node.id,
-                                color: originalNodeColors[node.id],
-                                borderWidth: 4,
+                                borderWidth: baseStyle.hasIcon ? 0 : 4,
                                 font: { color: '#000', size: 16 },
-                                hidden: false
-                            });
+                                hidden: false,
+                                shadow: false,
+                                shadowSize: 0
+                            };
+                            if (baseStyle.color) {
+                                update.color = baseStyle.color;
+                            }
+                            updates.push(update);
                         } else {
                             updates.push({
                                 id: node.id,
@@ -3446,5 +3483,6 @@ Export-ModuleMember -Function @(
     'Get-ScEntraRoleAssignments'
     'Get-ScEntraPIMAssignments'
     'Get-ScEntraEscalationPaths'
+    'New-ScEntraGraphData'
     'Export-ScEntraReport'
 )

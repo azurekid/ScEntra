@@ -38,6 +38,7 @@
         'Get-ScEntraRoleAssignments'
         'Get-ScEntraPIMAssignments'
         'Get-ScEntraEscalationPaths'
+        'New-ScEntraGraphData'
         'Export-ScEntraReport'
     )
 
