@@ -578,6 +578,7 @@ function Get-ScEntraPIMAssignments {
                     RoleId = $schedule.roleDefinitionId
                     RoleName = if ($schedule.roleDefinition) { $schedule.roleDefinition.displayName } else { 'Unknown' }
                     PrincipalId = $schedule.principalId
+                    PrincipalDisplayName = if ($schedule.principal) { $schedule.principal.displayName } else { 'Unknown' }
                     PrincipalType = if ($schedule.principal -and $schedule.principal.'@odata.type') {
                         $schedule.principal.'@odata.type' -replace '#microsoft.graph.', ''
                     } else {
@@ -607,6 +608,7 @@ function Get-ScEntraPIMAssignments {
                     RoleId = $schedule.roleDefinitionId
                     RoleName = if ($schedule.roleDefinition) { $schedule.roleDefinition.displayName } else { 'Unknown' }
                     PrincipalId = $schedule.principalId
+                    PrincipalDisplayName = if ($schedule.principal) { $schedule.principal.displayName } else { 'Unknown' }
                     PrincipalType = if ($schedule.principal -and $schedule.principal.'@odata.type') {
                         $schedule.principal.'@odata.type' -replace '#microsoft.graph.', ''
                     } else {
@@ -818,9 +820,11 @@ function New-ScEntraGraphData {
     }
     
     # Add nodes and edges for PIM assignments (eligible)
+    Write-Verbose "Processing $($PIMAssignments.Count) PIM assignments..."
     foreach ($pimAssignment in $PIMAssignments) {
         $roleId = "role-$($pimAssignment.RoleName)"
         $assignmentLabel = if ($pimAssignment.AssignmentType -eq 'PIM-Eligible') { 'Eligible' } else { 'PIM Active' }
+        Write-Verbose "  PIM: $($pimAssignment.PrincipalType) $($pimAssignment.PrincipalId) -> $($pimAssignment.RoleName)"
         
         # Determine the principal type and add node
         switch ($pimAssignment.PrincipalType) {
@@ -848,8 +852,10 @@ function New-ScEntraGraphData {
             }
             'group' {
                 $group = $Groups | Where-Object { $_.id -eq $pimAssignment.PrincipalId } | Select-Object -First 1
+                Write-Verbose "    Found group: $($group -ne $null) - $($group.displayName) - ID: $($pimAssignment.PrincipalId)"
                 if ($group) {
                     if (-not $nodeIndex.ContainsKey($group.id)) {
+                        Write-Verbose "      Adding group node: $($group.displayName)"
                         $null = $nodes.Add(@{
                             id = $group.id
                             label = $group.displayName
@@ -858,7 +864,10 @@ function New-ScEntraGraphData {
                             securityEnabled = $group.securityEnabled
                         })
                         $nodeIndex[$group.id] = $nodes.Count - 1
+                    } else {
+                        Write-Verbose "      Group node already exists: $($group.displayName)"
                     }
+                    Write-Verbose "      Adding edge: $($group.displayName) -> $($pimAssignment.RoleName)"
                     $null = $edges.Add(@{
                         from = $group.id
                         to = $roleId
@@ -1328,6 +1337,16 @@ function Get-ScEntraEscalationPaths {
         }
         $requestId++
         
+        # For PIM-enabled groups, also fetch eligible members
+        if ($groupsInPIM -contains $groupId) {
+            $batchRequests += @{
+                id = "$requestId-pim-eligible-$groupId"
+                method = "GET"
+                url = "/identityGovernance/privilegedAccess/group/eligibilityScheduleInstances?`$filter=groupId eq '$groupId'&`$expand=principal"
+            }
+            $requestId++
+        }
+        
         # Owners request (with full details for graph building)
         $batchRequests += @{
             id = "$requestId-owners-$groupId"
@@ -1386,6 +1405,43 @@ function Get-ScEntraEscalationPaths {
             }
             catch {
                 Write-Verbose "Could not fetch members for group ${groupId}: $($_.Exception.Message)"
+            }
+        }
+        
+        # Extract PIM eligible members and add to group memberships
+        $pimEligibleKey = $batchResponses.Keys | Where-Object { $_ -like "*-pim-eligible-$groupId" } | Select-Object -First 1
+        if ($pimEligibleKey) {
+            $pimEligibleResponse = $batchResponses[$pimEligibleKey]
+            if ($pimEligibleResponse -and $pimEligibleResponse.status -eq 200 -and $pimEligibleResponse.body.value) {
+                Write-Verbose "Found $($pimEligibleResponse.body.value.Count) PIM eligible members for group $groupId"
+                
+                # Initialize array if not already present
+                if (-not $groupMemberships.ContainsKey($groupId)) {
+                    $groupMemberships[$groupId] = @()
+                }
+                
+                # Add eligible members (with principal info from expanded query)
+                foreach ($eligibility in $pimEligibleResponse.body.value) {
+                    if ($eligibility.principal -and $eligibility.principal.id) {
+                        # Check if this member is already in the list (to avoid duplicates)
+                        $existingMember = $groupMemberships[$groupId] | Where-Object { $_.id -eq $eligibility.principal.id } | Select-Object -First 1
+                        if (-not $existingMember) {
+                            # Look up the full user object from the Users collection
+                            $fullUser = $Users | Where-Object { $_.id -eq $eligibility.principal.id } | Select-Object -First 1
+                            if ($fullUser) {
+                                # Create a member object with the full user data and @odata.type
+                                $memberObject = @{
+                                    id = $fullUser.id
+                                    displayName = $fullUser.displayName
+                                    userPrincipalName = $fullUser.userPrincipalName
+                                    '@odata.type' = '#microsoft.graph.user'
+                                }
+                                $groupMemberships[$groupId] += $memberObject
+                                Write-Verbose "  Added PIM eligible member: $($fullUser.displayName)"
+                            }
+                        }
+                    }
+                }
             }
         }
         
@@ -2123,10 +2179,43 @@ function Export-ScEntraReport {
             border-radius: 8px;
         }
         
+        .graph-controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 15px;
+            padding: 10px;
+        }
+        
+        .control-btn {
+            padding: 10px 16px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+        
+        .control-btn:hover {
+            background: #5568d3;
+        }
+        
+        .control-btn:active {
+            transform: scale(0.95);
+        }
+        
         .legend-item {
             display: flex;
             align-items: center;
             gap: 8px;
+        }
+        
+        .legend-icon {
+            width: 22px;
+            height: 22px;
         }
         
         .legend-color {
@@ -2256,25 +2345,33 @@ function Export-ScEntraReport {
             </div>
             
             <div id="escalationGraph"></div>
+            
+            <div class="graph-controls">
+                <button id="zoomIn" class="control-btn" title="Zoom In">🔍+</button>
+                <button id="zoomOut" class="control-btn" title="Zoom Out">🔍−</button>
+                <button id="fitGraph" class="control-btn" title="Fit to Screen">⊡</button>
+                <button id="resetView" class="control-btn" title="Reset View">↻</button>
+            </div>
+            
             <div class="graph-legend">
                 <div class="legend-item">
-                    <div class="legend-color user"></div>
+                    <img class="legend-icon" data-icon-type="user" alt="User icon" />
                     <span>User</span>
                 </div>
                 <div class="legend-item">
-                    <div class="legend-color group"></div>
+                    <img class="legend-icon" data-icon-type="group" alt="Group icon" />
                     <span>Group</span>
                 </div>
                 <div class="legend-item">
-                    <div class="legend-color role"></div>
+                    <img class="legend-icon" data-icon-type="role" alt="Role icon" />
                     <span>Role</span>
                 </div>
                 <div class="legend-item">
-                    <div class="legend-color servicePrincipal"></div>
+                    <img class="legend-icon" data-icon-type="servicePrincipal" alt="Service principal icon" />
                     <span>Service Principal</span>
                 </div>
                 <div class="legend-item">
-                    <div class="legend-color application"></div>
+                    <img class="legend-icon" data-icon-type="application" alt="Application icon" />
                     <span>Application</span>
                 </div>
             </div>
@@ -2412,23 +2509,53 @@ function Export-ScEntraReport {
         const graphNodes = $nodesJson;
         const graphEdges = $edgesJson;
         
-        // Transform nodes for vis-network
-        const nodes = new vis.DataSet(graphNodes.map(node => ({
-            id: node.id,
-            label: node.label,
-            group: node.type,
-            title: node.label + ' (' + node.type + ')',
-            shape: node.type === 'role' ? 'diamond' : (node.type === 'group' ? 'box' : 'dot'),
-            color: {
-                background: node.type === 'user' ? '#4CAF50' : 
-                           node.type === 'group' ? '#2196F3' :
-                           node.type === 'role' ? '#FF5722' :
-                           node.type === 'servicePrincipal' ? '#9C27B0' :
-                           node.type === 'application' ? '#FF9800' : '#999',
-                border: '#333'
-            },
-            font: { color: '#333', size: 14 }
-        })));
+        // Helper to create data URIs for inline SVG icons
+        const svgIcon = function(svg) { return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg); };
+        
+        // Microsoft-inspired icon set for each node type
+        const nodeIcons = {
+            user: svgIcon('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="11" r="7" fill="#50E6FF"/><path d="M6 28c0-5.5 4.5-10 10-10s10 4.5 10 10" fill="#0078D4"/></svg>'),
+            group: svgIcon('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="11" cy="12" r="5" fill="#6BB8FF"/><circle cx="21" cy="12" r="5" fill="#005FB8"/><path d="M4 28c0-4.4 3.6-8 8-8h0.5c1.7 0 3.3 0.6 4.5 1.6c1.2-1 2.8-1.6 4.5-1.6H22c4.4 0 8 3.6 8 8" fill="#004578"/></svg>'),
+            role: svgIcon('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M16 3l11 5v8c0 6.2-4.7 11.9-11 13-6.3-1.1-11-6.8-11-13V8l11-5z" fill="#FF8C00"/><path d="M16 7l7 3.2v6.3c0 4.1-2.9 7.9-7 8.8c-4.1-0.9-7-4.7-7-8.8V10.2L16 7z" fill="#FFF4CE"/></svg>'),
+            servicePrincipal: svgIcon('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><polygon points="16,2 29,9.5 29,22.5 16,30 3,22.5 3,9.5" fill="#8A2DA5"/><path d="M16 7l9 5.2v7.6L16 25l-9-5.2v-7.6L16 7z" fill="#E5CCFF"/></svg>'),
+            application: svgIcon('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect x="4" y="6" width="24" height="20" rx="2" fill="#107C10"/><rect x="6" y="10" width="20" height="12" fill="#FFFFFF"/><rect x="6" y="6" width="24" height="4" fill="#5EC85A"/></svg>')
+        };
+        
+        // Transform nodes for vis-network with iconography
+        const nodes = new vis.DataSet(graphNodes.map(node => {
+            const icon = nodeIcons[node.type];
+            const baseColor = node.type === 'user' ? '#4CAF50' :
+                              node.type === 'group' ? '#2196F3' :
+                              node.type === 'role' ? '#FF5722' :
+                              node.type === 'servicePrincipal' ? '#9C27B0' :
+                              node.type === 'application' ? '#FF9800' : '#999';
+            const fallbackShape = node.type === 'role' ? 'diamond' : (node.type === 'group' ? 'box' : 'dot');
+            const config = {
+                id: node.id,
+                label: node.label,
+                group: node.type,
+                title: node.label + ' (' + node.type + ')',
+                shape: icon ? 'circularImage' : fallbackShape,
+                color: {
+                    background: baseColor,
+                    border: '#333'
+                },
+                font: { color: '#333', size: 14 }
+            };
+            if (icon) {
+                config.image = icon;
+                config.shapeProperties = { useBorderWithImage: true };
+            }
+            return config;
+        }));
+        
+        // Update legend imagery to keep it in sync with node icons
+        document.querySelectorAll('.legend-icon').forEach(el => {
+            const type = el.getAttribute('data-icon-type');
+            if (type && nodeIcons[type]) {
+                el.src = nodeIcons[type];
+            }
+        });
         
         // Transform edges for vis-network
         const edges = new vis.DataSet(graphEdges.map((edge, idx) => ({
@@ -2526,18 +2653,25 @@ function Export-ScEntraReport {
             };
         });
         
+        // Track selected nodes for cumulative path highlighting
+        const selectedNodes = new Set();
+        
         // Function to get all connected nodes (directly or through path)
-        function getConnectedNodes(nodeId, visited = new Set(), excludeOtherUsers = false, originNodeId = null) {
+        function getConnectedNodes(nodeId, visited = new Set(), excludeOtherPrincipals = false, originNodeId = null, originNodeType = null, depth = 0) {
             if (visited.has(nodeId)) return visited;
             visited.add(nodeId);
             
-            // If this is the first call, set originNodeId
+            // If this is the first call, set originNodeId and originNodeType
             if (originNodeId === null) {
                 originNodeId = nodeId;
+                const originNode = nodes.get(nodeId);
+                originNodeType = originNode ? originNode.type : null;
             }
             
+            const currentNode = nodes.get(nodeId);
+            const currentType = currentNode ? currentNode.type : null;
+            
             // Get all directly connected nodes by querying edges dataset
-            // Convert DataSet to array first, then iterate
             const allEdges = edges.get();
             const connectedNodes = [];
             allEdges.forEach(edge => {
@@ -2551,15 +2685,85 @@ function Export-ScEntraReport {
             // Recursively traverse connected nodes
             connectedNodes.forEach(connId => {
                 if (!visited.has(connId)) {
-                    // If excludeOtherUsers is true, skip traversal to other user nodes
-                    if (excludeOtherUsers) {
-                        const connNode = nodes.get(connId);
-                        // Skip if it's a user node and not the origin node
-                        if (connNode && connNode.type === 'user' && connId !== originNodeId) {
-                            return;
+                    const connNode = nodes.get(connId);
+                    if (!connNode) return;
+                    
+                    let shouldSkip = false;
+                    let shouldRecurse = true;
+                    
+                    if (excludeOtherPrincipals) {
+                        // Skip other users (not the origin)
+                        if (connNode.type === 'user' && connId !== originNodeId) {
+                            shouldSkip = true;
+                        }
+                        
+                        // If origin is user or group, limit traversal depth
+                        if ((originNodeType === 'user' || originNodeType === 'group') && !shouldSkip) {
+                            // From user: can go to groups (depth 0+), then to roles/SPNs/apps
+                            // From group: can go to roles/SPNs/apps (depth 0) and users (depth 0)
+                            
+                            if (originNodeType === 'user') {
+                                if (depth === 0) {
+                                    // Direct connections from user
+                                    if (connNode.type === 'role' || connNode.type === 'servicePrincipal' || connNode.type === 'application') {
+                                        // Direct role/SPN/app assignments - include but don't recurse
+                                        shouldRecurse = false;
+                                    } else if (connNode.type === 'group') {
+                                        // Groups - recurse to find their role assignments and nested groups
+                                        shouldRecurse = true;
+                                    }
+                                } else if (depth >= 1 && depth <= 2) {
+                                    // Depth 1-2: from groups, can reach roles/SPNs/apps or nested groups
+                                    if (connNode.type === 'role' || connNode.type === 'servicePrincipal' || connNode.type === 'application') {
+                                        // Roles/SPNs/apps - include but don't recurse
+                                        shouldRecurse = false;
+                                    } else if (connNode.type === 'group' && connId !== originNodeId) {
+                                        // Nested groups - recurse one more level
+                                        shouldRecurse = true;
+                                    } else {
+                                        shouldSkip = true;
+                                    }
+                                } else {
+                                    // Depth 3+: stop traversing
+                                    shouldSkip = true;
+                                }
+                            } else if (originNodeType === 'group') {
+                                if (depth === 0) {
+                                    // Direct connections from group: users, roles, SPNs, apps, nested groups
+                                    if (connNode.type === 'role' || connNode.type === 'servicePrincipal' || connNode.type === 'application') {
+                                        // Roles/SPNs/apps - include but don't recurse
+                                        shouldRecurse = false;
+                                    } else if (connNode.type === 'group' && connId !== originNodeId) {
+                                        // Nested groups - recurse to find their assignments
+                                        shouldRecurse = true;
+                                    } else if (connNode.type === 'user' && connId !== originNodeId) {
+                                        // Members - include but don't recurse
+                                        shouldRecurse = false;
+                                    }
+                                } else if (depth === 1) {
+                                    // Depth 1 from group: can reach roles/SPNs/apps from nested groups
+                                    if (connNode.type === 'role' || connNode.type === 'servicePrincipal' || connNode.type === 'application') {
+                                        shouldRecurse = false;
+                                    } else {
+                                        shouldSkip = true;
+                                    }
+                                } else {
+                                    // Depth 2+: stop traversing
+                                    shouldSkip = true;
+                                }
+                            }
                         }
                     }
-                    getConnectedNodes(connId, visited, excludeOtherUsers, originNodeId);
+                    
+                    // Add node to visited if not skipping
+                    if (!shouldSkip) {
+                        visited.add(connId);
+                        
+                        // Recurse if allowed
+                        if (shouldRecurse) {
+                            getConnectedNodes(connId, visited, excludeOtherPrincipals, originNodeId, originNodeType, depth + 1);
+                        }
+                    }
                 }
             });
             
@@ -2567,23 +2771,39 @@ function Export-ScEntraReport {
         }
         
         // Function to highlight escalation path
-        function highlightPath(nodeId) {
-            // Determine if selected node is a user
-            const selectedNode = nodes.get(nodeId);
-            const isUserSelected = selectedNode && selectedNode.type === 'user';
+        function highlightPath(nodeId, additive = false) {
+            // If not additive mode, clear previous selections
+            if (!additive) {
+                selectedNodes.clear();
+            }
             
-            // Get connected nodes, excluding other users if a user is selected
-            const pathNodes = getConnectedNodes(nodeId, new Set(), isUserSelected);
-            const pathEdges = new Set();
+            // Add this node to selected set
+            selectedNodes.add(nodeId);
             
-            // Find all edges in the path
-            pathNodes.forEach(nId => {
-                const connEdges = network.getConnectedEdges(nId);
-                connEdges.forEach(edgeId => {
-                    const edge = edges.get(edgeId);
-                    if (edge && pathNodes.has(edge.from) && pathNodes.has(edge.to)) {
-                        pathEdges.add(edgeId);
-                    }
+            // Collect all path nodes from all selected nodes
+            const allPathNodes = new Set();
+            const allPathEdges = new Set();
+            
+            selectedNodes.forEach(selectedId => {
+                // Determine if selected node is a user or group (principals that should exclude other principals)
+                const selectedNode = nodes.get(selectedId);
+                const isPrincipalSelected = selectedNode && (selectedNode.type === 'user' || selectedNode.type === 'group');
+                
+                // Get connected nodes, excluding other users/groups if a user or group is selected
+                const pathNodes = getConnectedNodes(selectedId, new Set(), isPrincipalSelected);
+                
+                // Add all path nodes to the combined set
+                pathNodes.forEach(nId => allPathNodes.add(nId));
+                
+                // Find all edges in the path
+                pathNodes.forEach(nId => {
+                    const connEdges = network.getConnectedEdges(nId);
+                    connEdges.forEach(edgeId => {
+                        const edge = edges.get(edgeId);
+                        if (edge && pathNodes.has(edge.from) && pathNodes.has(edge.to)) {
+                            allPathEdges.add(edgeId);
+                        }
+                    });
                 });
             });
             
@@ -2591,20 +2811,22 @@ function Export-ScEntraReport {
             const updates = [];
             const allNodes = nodes.get();
             allNodes.forEach(node => {
-                if (pathNodes.has(node.id)) {
+                if (allPathNodes.has(node.id)) {
                     // Highlighted nodes - shown
+                    // Check if this is one of the originally selected nodes
+                    const isSelected = selectedNodes.has(node.id);
                     updates.push({
                         id: node.id,
                         color: {
                             background: originalNodeColors[node.id].background,
-                            border: '#000',
+                            border: isSelected ? '#FFD700' : '#000',  // Gold border for selected nodes
                             highlight: {
                                 background: originalNodeColors[node.id].background,
-                                border: '#000'
+                                border: isSelected ? '#FFD700' : '#000'
                             }
                         },
-                        borderWidth: 4,
-                        font: { color: '#000', size: 16, bold: true },
+                        borderWidth: isSelected ? 6 : 4,  // Thicker border for selected nodes
+                        font: { color: '#000', size: isSelected ? 18 : 16, bold: true },
                         hidden: false
                     });
                 } else {
@@ -2617,30 +2839,46 @@ function Export-ScEntraReport {
             });
             nodes.update(updates);
             
-            // Show edges in path with different styling based on type
+            // Show edges in path with color coding based on relationship type
             const edgeUpdates = [];
             const allEdges = edges.get();
             allEdges.forEach(edge => {
-                if (pathEdges.has(edge.id)) {
-                    // In path - show but style differently based on edge type
-                    if (edge.edgeType === 'has_role') {
-                        // Show role assignment edges but muted (light gray, thin)
-                        edgeUpdates.push({
-                            id: edge.id,
-                            width: 1,
-                            color: { color: '#ddd', opacity: 0.4 },
-                            hidden: false,
-                            dashes: true
-                        });
-                    } else {
-                        // Show relationship edges with emphasis (dark gray, thick)
-                        edgeUpdates.push({
-                            id: edge.id,
-                            width: 3,
-                            color: { color: '#666', opacity: 1 },
-                            hidden: false
-                        });
+                if (allPathEdges.has(edge.id)) {
+                    // Determine edge color based on type and label
+                    let edgeColor = '#999';
+                    let edgeWidth = 2;
+                    let isDashed = false;
+                    const edgeLabel = (edge.label || '').toLowerCase();
+                    
+                    // Color coding based on edge label/type
+                    if (edgeLabel.includes('member')) {
+                        edgeColor = '#2196F3';  // Blue for member relationships
+                        edgeWidth = 2.5;
+                    } else if (edgeLabel.includes('owner')) {
+                        edgeColor = '#FF9800';  // Orange for ownership
+                        edgeWidth = 2.5;
+                    } else if (edgeLabel.includes('eligible')) {
+                        edgeColor = '#9C27B0';  // Purple for PIM eligible
+                        edgeWidth = 2;
+                        isDashed = true;
+                    } else if (edgeLabel.includes('pim active') || edgeLabel.includes('active')) {
+                        edgeColor = '#4CAF50';  // Green for PIM active
+                        edgeWidth = 2.5;
+                    } else if (edgeLabel.includes('direct')) {
+                        edgeColor = '#FF5722';  // Red for direct assignments
+                        edgeWidth = 3;
+                    } else if (edge.edgeType === 'has_role') {
+                        edgeColor = '#FF5722';  // Red for role assignments
+                        edgeWidth = 2.5;
                     }
+                    
+                    edgeUpdates.push({
+                        id: edge.id,
+                        width: edgeWidth,
+                        color: { color: edgeColor, opacity: 1 },
+                        hidden: false,
+                        dashes: isDashed
+                    });
                 } else {
                     // Hide unrelated edges
                     edgeUpdates.push({
@@ -2652,7 +2890,7 @@ function Export-ScEntraReport {
             edges.update(edgeUpdates);
             
             // Filter risk table to show only related risks
-            filterRiskTable(Array.from(pathNodes));
+            filterRiskTable(Array.from(allPathNodes));
         }
         
         // Function to filter risk table based on selected nodes
@@ -2697,6 +2935,9 @@ function Export-ScEntraReport {
         
         // Function to reset highlighting
         function resetHighlight() {
+            // Clear selected nodes set
+            selectedNodes.clear();
+            
             const updates = [];
             graphNodes.forEach(node => {
                 updates.push({
@@ -2746,7 +2987,10 @@ function Export-ScEntraReport {
                 const nodeId = params.nodes[0];
                 const node = nodes.get(nodeId);
                 
-                highlightPath(nodeId);
+                // Check if Ctrl/Cmd key is pressed for additive selection
+                const isAdditive = params.event.srcEvent.ctrlKey || params.event.srcEvent.metaKey;
+                
+                highlightPath(nodeId, isAdditive);
                 
                 // Show selected node info
                 document.getElementById('selectedNodeName').textContent = node.label;
@@ -2761,9 +3005,8 @@ function Export-ScEntraReport {
                         easingFunction: 'easeInOutQuad'
                     }
                 });
-            } else {
-                resetHighlight();
             }
+            // Don't reset on canvas click - keep selections persistent
         });
         
         // Filter functionality
@@ -2912,6 +3155,69 @@ function Export-ScEntraReport {
                     easingFunction: 'easeInOutQuad'
                 }
             });
+        });
+        
+        // Navigation control buttons
+        let initialViewPosition = null;
+        
+        // Store initial view position after stabilization
+        network.once('stabilizationIterationsDone', function() {
+            initialViewPosition = network.getViewPosition();
+        });
+        
+        // Zoom in button
+        document.getElementById('zoomIn').addEventListener('click', function() {
+            const currentScale = network.getScale();
+            network.moveTo({
+                scale: currentScale * 1.2,
+                animation: {
+                    duration: 300,
+                    easingFunction: 'easeInOutQuad'
+                }
+            });
+        });
+        
+        // Zoom out button
+        document.getElementById('zoomOut').addEventListener('click', function() {
+            const currentScale = network.getScale();
+            network.moveTo({
+                scale: currentScale / 1.2,
+                animation: {
+                    duration: 300,
+                    easingFunction: 'easeInOutQuad'
+                }
+            });
+        });
+        
+        // Fit to screen button
+        document.getElementById('fitGraph').addEventListener('click', function() {
+            network.fit({
+                animation: {
+                    duration: 500,
+                    easingFunction: 'easeInOutQuad'
+                }
+            });
+        });
+        
+        // Reset view button
+        document.getElementById('resetView').addEventListener('click', function() {
+            if (initialViewPosition) {
+                network.moveTo({
+                    position: initialViewPosition,
+                    scale: 1.0,
+                    animation: {
+                        duration: 500,
+                        easingFunction: 'easeInOutQuad'
+                    }
+                });
+            } else {
+                network.fit({
+                    animation: {
+                        duration: 500,
+                        easingFunction: 'easeInOutQuad'
+                    }
+                });
+            }
         });
     </script>
 "@
