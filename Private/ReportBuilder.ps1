@@ -1275,6 +1275,17 @@ function New-ScEntraGraphSection {
 
                 // If escalation filter is enabled, show only escalation paths
                 if (escalationFilter) {
+                    const hasSelectedNode = currentSelectedNode && currentSelectedNode.id;
+                    const noAdditionalFilters = !hasSearchTerm && !typeFilter && !assignmentFilter;
+
+                    if (hasSelectedNode && noAdditionalFilters) {
+                        highlightEscalationPathFromNode(currentSelectedNode.id);
+                        document.getElementById('selectedNodeName').textContent = currentSelectedNode.label;
+                        document.getElementById('selectedNodeType').textContent = '(' + currentSelectedNode.type + ')';
+                        document.getElementById('selectedNodeInfo').style.display = 'block';
+                        return;
+                    }
+
                     const allEdges = edges.get();
                     const edgeUpdates = [];
                     const escalationNodeIds = new Set();
