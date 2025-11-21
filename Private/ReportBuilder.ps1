@@ -453,21 +453,16 @@ function New-ScEntraGraphSection {
                 physics: {
                     enabled: true,
                     barnesHut: {
-                        gravitationalConstant: -15000,
-                        centralGravity: 0.25,
-                        springLength: 150,
-                        springConstant: 0.04,
-                        damping: 0.25,
-                        avoidOverlap: 0.5
+                        gravitationalConstant: -20000,
+                        centralGravity: 0.15,
+                        springLength: 200,
+                        springConstant: 0.015,
+                        damping: 0.2,
+                        avoidOverlap: 0.9
                     },
                     minVelocity: 0.75,
                     solver: 'barnesHut',
-                    stabilization: { 
-                        enabled: true, 
-                        iterations: 500, 
-                        updateInterval: 20,
-                        fit: true 
-                    }
+                    stabilization: { enabled: true, iterations: 400, updateInterval: 20 }
                 },
                 interaction: {
                     hover: true,
@@ -483,129 +478,22 @@ function New-ScEntraGraphSection {
             };
 
             const network = new vis.Network(container, data, options);
-            
-            // 3D rotational animation on initial load
-            let rotationAnimationActive = false;
-            let rotationAngle = 0;
-            let animationFrameId = null;
-            
-            function animate3DRotation() {
-                if (!rotationAnimationActive) {
-                    if (animationFrameId) {
-                        cancelAnimationFrame(animationFrameId);
-                        animationFrameId = null;
-                    }
+
+            let initialViewPosition = null;
+            let initialLayoutSettled = false;
+
+            function finalizeInitialLayout() {
+                if (initialLayoutSettled) {
                     return;
                 }
-                
-                rotationAngle += 0.015;
-                
-                // Get current center position of the graph
-                const boundingBox = network.getBoundingBox(network.body.nodeIndices);
-                const graphCenterX = (boundingBox.left + boundingBox.right) / 2;
-                const graphCenterY = (boundingBox.top + boundingBox.bottom) / 2;
-                
-                // Calculate circular orbit around graph center
-                const orbitRadius = 200;
-                const offsetX = Math.cos(rotationAngle) * orbitRadius;
-                const offsetY = Math.sin(rotationAngle) * orbitRadius;
-                
-                // Add subtle zoom pulsing for 3D depth effect
-                const zoomPulse = 1 + Math.sin(rotationAngle * 3) * 0.08;
-                const baseScale = 0.8;
-                
-                // Move camera in circular orbit
-                network.moveTo({
-                    position: { 
-                        x: graphCenterX + offsetX, 
-                        y: graphCenterY + offsetY 
-                    },
-                    scale: baseScale * zoomPulse,
-                    animation: {
-                        duration: 60,
-                        easingFunction: 'linear'
-                    }
-                });
-                
-                animationFrameId = requestAnimationFrame(animate3DRotation);
-            }
-            
-            // Start rotation animation when stabilization completes
-            function startRotationAnimation() {
-                console.log('Graph stabilized, preparing rotation animation...');
+
+                initialLayoutSettled = true;
                 network.setOptions({ physics: false });
-                
-                // Fit the graph first
-                network.fit({ 
-                    animation: { 
-                        duration: 1000, 
-                        easingFunction: 'easeInOutQuad' 
-                    } 
-                });
-                
-                // Start rotation after fit completes
-                setTimeout(() => {
-                    try {
-                        console.log('Starting 3D rotation effect - Active:', rotationAnimationActive);
-                        rotationAnimationActive = true;
-                        rotationAngle = 0;
-                        
-                        // Force first frame
-                        animate3DRotation();
-                        
-                        // Stop rotation after 6 seconds and recenter
-                        setTimeout(() => {
-                            console.log('Stopping rotation animation');
-                            rotationAnimationActive = false;
-                            if (animationFrameId) {
-                                cancelAnimationFrame(animationFrameId);
-                                animationFrameId = null;
-                            }
-                            // Smooth return to centered view
-                            setTimeout(() => {
-                                network.fit({ 
-                                    animation: { 
-                                        duration: 1500, 
-                                        easingFunction: 'easeInOutQuad' 
-                                    } 
-                                });
-                            }, 300);
-                        }, 6000);
-                    } catch (error) {
-                        console.error('Rotation animation error:', error);
-                    }
-                }, 1200);
+                network.fit({ animation: { duration: 800, easingFunction: 'easeInOutQuad' } });
+                initialViewPosition = network.getViewPosition();
             }
-            
-            // Listen to both stabilization events for better compatibility
-            network.once('stabilizationIterationsDone', startRotationAnimation);
-            network.on('afterDrawing', function() {
-                // Backup trigger if stabilizationIterationsDone doesn't fire
-                if (!rotationAnimationActive && network.physics.stabilized) {
-                    network.off('afterDrawing');
-                    console.log('Triggered via afterDrawing');
-                    startRotationAnimation();
-                }
-            });
-            
-            // Stop rotation on user interaction
-            network.on('zoom', function() {
-                if (rotationAnimationActive) {
-                    rotationAnimationActive = false;
-                    if (animationFrameId) {
-                        cancelAnimationFrame(animationFrameId);
-                    }
-                }
-            });
-            
-            network.on('dragStart', function() {
-                if (rotationAnimationActive) {
-                    rotationAnimationActive = false;
-                    if (animationFrameId) {
-                        cancelAnimationFrame(animationFrameId);
-                    }
-                }
-            });
+
+            network.once('stabilizationIterationsDone', finalizeInitialLayout);
 
             // Setup modal event listeners
             document.getElementById('closeModal').addEventListener('click', function() {
@@ -1035,8 +923,8 @@ function New-ScEntraGraphSection {
                     }, 150);
                     
                     // Enable physics temporarily with optimized settings to reduce edge crossings
-                    network.setOptions({ 
-                        physics: { 
+                    network.setOptions({
+                        physics: {
                             enabled: true,
                             barnesHut: {
                                 gravitationalConstant: -12000,
@@ -1050,11 +938,11 @@ function New-ScEntraGraphSection {
                             stabilization: false
                         }
                     });
-                    
+
                     // Let physics adjust the layout briefly to untangle edges with smooth animation
                     setTimeout(() => {
                         network.setOptions({ physics: { enabled: false } });
-                        
+
                         // Smooth focus animation on the selected node and its connections
                         network.fit({
                             nodes: [nodeId, ...connectedNodeIds],
@@ -1350,8 +1238,37 @@ function New-ScEntraGraphSection {
                 edges.update(edgeUpdates);
             }
 
+            function focusOnSearchMatch(candidates, normalizedSearchTerm) {
+                if (!Array.isArray(candidates) || candidates.length === 0) {
+                    return;
+                }
+
+                const sanitizedTerm = (normalizedSearchTerm || '').trim();
+                let target = null;
+
+                if (sanitizedTerm.length > 0) {
+                    const lowerTerm = sanitizedTerm.toLowerCase();
+                    target = candidates.find(node => (node.label || '').toLowerCase() === lowerTerm) ||
+                             candidates.find(node => (node.label || '').toLowerCase().startsWith(lowerTerm)) ||
+                             candidates.find(node => (node.label || '').toLowerCase().includes(lowerTerm));
+                }
+
+                if (!target) {
+                    target = candidates[0];
+                }
+
+                if (target && target.id) {
+                    network.focus(target.id, {
+                        scale: candidates.length === 1 ? 1.5 : 1.25,
+                        animation: { duration: 500, easingFunction: 'easeInOutQuad' }
+                    });
+                }
+            }
+
             function applyFilters() {
-                const searchTerm = document.getElementById('nodeFilter').value.toLowerCase();
+                const rawSearchValue = document.getElementById('nodeFilter').value || '';
+                const normalizedSearchTerm = rawSearchValue.trim().toLowerCase();
+                const hasSearchTerm = normalizedSearchTerm.length > 0;
                 const typeFilter = document.getElementById('typeFilter').value;
                 const assignmentFilter = document.getElementById('assignmentFilter').value;
                 const escalationFilter = document.getElementById('escalationFilter').checked;
@@ -1376,7 +1293,7 @@ function New-ScEntraGraphSection {
                     edges.update(edgeUpdates);
 
                     const matchingNodes = graphNodes.filter(node => {
-                        const matchesSearch = !searchTerm || node.label.toLowerCase().includes(searchTerm);
+                        const matchesSearch = !normalizedSearchTerm || node.label.toLowerCase().includes(normalizedSearchTerm);
                         const matchesType = !typeFilter || node.type === typeFilter;
                         const isInEscalationPath = escalationNodeIds.has(node.id);
                         return matchesSearch && matchesType && isInEscalationPath;
@@ -1420,6 +1337,9 @@ function New-ScEntraGraphSection {
                         }
                     });
                     nodes.update(nodeUpdates);
+                    if (hasSearchTerm && matchingNodes.length > 0) {
+                        focusOnSearchMatch(matchingNodes, normalizedSearchTerm);
+                    }
                     return;
                 }
 
@@ -1451,7 +1371,7 @@ function New-ScEntraGraphSection {
                     edges.update(edgeUpdates);
 
                     const matchingNodes = graphNodes.filter(node => {
-                        const matchesSearch = !searchTerm || node.label.toLowerCase().includes(searchTerm);
+                        const matchesSearch = !normalizedSearchTerm || node.label.toLowerCase().includes(normalizedSearchTerm);
                         const matchesType = !typeFilter || node.type === typeFilter;
                         const matchesAssignment = !assignmentFilter || validNodeIds.has(node.id);
                         return matchesSearch && matchesType && matchesAssignment;
@@ -1481,10 +1401,13 @@ function New-ScEntraGraphSection {
                         }
                     });
                     nodes.update(nodeUpdates);
+                    if (hasSearchTerm && matchingNodes.length > 0) {
+                        focusOnSearchMatch(matchingNodes, normalizedSearchTerm);
+                    }
 
                 } else {
                     const matchingNodes = graphNodes.filter(node => {
-                        const matchesSearch = !searchTerm || node.label.toLowerCase().includes(searchTerm);
+                        const matchesSearch = !normalizedSearchTerm || node.label.toLowerCase().includes(normalizedSearchTerm);
                         const matchesType = !typeFilter || node.type === typeFilter;
                         return matchesSearch && matchesType;
                     });
@@ -1523,7 +1446,10 @@ function New-ScEntraGraphSection {
                             }
                         });
                         nodes.update(updates);
-                    } else if (searchTerm || typeFilter) {
+                        if (hasSearchTerm) {
+                            focusOnSearchMatch(matchingNodes, normalizedSearchTerm);
+                        }
+                    } else if (hasSearchTerm || typeFilter) {
                         const updates = [];
                         const allNodes = nodes.get();
                         allNodes.forEach(node => {
@@ -1550,11 +1476,6 @@ function New-ScEntraGraphSection {
                 network.fit({
                     animation: { duration: 500, easingFunction: 'easeInOutQuad' }
                 });
-            });
-
-            let initialViewPosition = null;
-            network.once('stabilizationIterationsDone', function() {
-                initialViewPosition = network.getViewPosition();
             });
 
             document.getElementById('zoomIn').addEventListener('click', function() {

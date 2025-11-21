@@ -618,8 +618,8 @@ function New-ScEntraGraphData {
         foreach ($sp in $ServicePrincipals) {
             $spHasRole = $allRoleAssignments | Where-Object { $_.MemberId -eq $sp.id }
             if ($spHasRole) {
-                # Ensure both nodes exist
-                if ($nodeIndex.ContainsKey($principalId) -and $nodeIndex.ContainsKey($sp.id)) {
+                # Ensure both nodes exist and principalId is not null
+                if (-not [string]::IsNullOrEmpty($principalId) -and -not [string]::IsNullOrEmpty($sp.id) -and $nodeIndex.ContainsKey($principalId) -and $nodeIndex.ContainsKey($sp.id)) {
                     $null = $edges.Add(@{
                         from = $principalId
                         to = $sp.id
@@ -638,8 +638,8 @@ function New-ScEntraGraphData {
             if ($sp) {
                 $spHasRole = $allRoleAssignments | Where-Object { $_.MemberId -eq $sp.id }
                 if ($spHasRole) {
-                    # Ensure both nodes exist
-                    if ($nodeIndex.ContainsKey($principalId) -and $nodeIndex.ContainsKey($app.id)) {
+                    # Ensure both nodes exist and principalId is not null
+                    if (-not [string]::IsNullOrEmpty($principalId) -and -not [string]::IsNullOrEmpty($app.id) -and $nodeIndex.ContainsKey($principalId) -and $nodeIndex.ContainsKey($app.id)) {
                         $null = $edges.Add(@{
                             from = $principalId
                             to = $app.id

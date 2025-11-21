@@ -42,22 +42,33 @@ function Test-GraphPermissions {
         $payloadJson = [System.Text.Encoding]::UTF8.GetString($payloadBytes)
         $payload = $payloadJson | ConvertFrom-Json
         
-        # Get the scopes from the token
+        # Determine if this is a service principal (app-only) or delegated (user) token
+        $isServicePrincipal = $false
         $tokenScopes = @()
-        if ($payload.scp) {
-            $tokenScopes = $payload.scp -split ' '
-        }
-        elseif ($payload.roles) {
+        
+        if ($payload.roles) {
+            # Application permissions (service principal)
             $tokenScopes = $payload.roles
+            $isServicePrincipal = $true
+            Write-Verbose "Token type: Service Principal (Application permissions)"
         }
+        elseif ($payload.scp) {
+            # Delegated permissions (user)
+            $tokenScopes = $payload.scp -split ' '
+            $isServicePrincipal = $false
+            Write-Verbose "Token type: Delegated (User permissions)"
+        }
+        
+        Write-Verbose "Token permissions: $($tokenScopes -join ', ')"
         
         # Define permission hierarchy - higher-level permissions that satisfy lower-level ones
         $permissionHierarchy = @{
-            'Directory.Read.All' = @('User.Read.All', 'Group.Read.All', 'Application.Read.All', 'ServicePrincipalEndpoint.Read.All')
-            'Directory.ReadWrite.All' = @('User.ReadWrite.All', 'Group.ReadWrite.All', 'Application.ReadWrite.All', 'Directory.Read.All', 'User.Read.All', 'Group.Read.All', 'Application.Read.All')
+            'Directory.Read.All' = @('User.Read.All', 'Group.Read.All', 'Application.Read.All', 'ServicePrincipalEndpoint.Read.All', 'RoleManagement.Read.Directory', 'RoleManagement.Read.All')
+            'Directory.ReadWrite.All' = @('User.ReadWrite.All', 'Group.ReadWrite.All', 'Application.ReadWrite.All', 'Directory.Read.All', 'User.Read.All', 'Group.Read.All', 'Application.Read.All', 'RoleManagement.Read.Directory', 'RoleManagement.Read.All')
             'User.ReadWrite.All' = @('User.Read.All')
             'Group.ReadWrite.All' = @('Group.Read.All')
             'Application.ReadWrite.All' = @('Application.Read.All')
+            'RoleManagement.ReadWrite.Directory' = @('RoleManagement.Read.Directory', 'RoleManagement.Read.All')
         }
         
         # Check if all required permissions are present
@@ -69,6 +80,7 @@ function Test-GraphPermissions {
             foreach ($tokenScope in $tokenScopes) {
                 if ($tokenScope -eq $required -or $tokenScope -like "*.$required" -or $tokenScope -like "$required.*") {
                     $hasPermission = $true
+                    Write-Verbose "Found exact match for '$required': $tokenScope"
                     break
                 }
             }
@@ -91,8 +103,14 @@ function Test-GraphPermissions {
         
         if ($missing.Count -gt 0) {
             $missingList = $missing -join ', '
-            Write-Warning "⚠️  Missing required permissions for $ResourceName : $missingList"
-            Write-Host "   To resolve: Reconnect with required permissions or use an account with higher privileges" -ForegroundColor Yellow
+            $tokenType = if ($isServicePrincipal) { "service principal" } else { "user token" }
+            Write-Warning "⚠️  Missing required permissions for $ResourceName ($tokenType): $missingList"
+            
+            if ($isServicePrincipal) {
+                Write-Host "   Service Principal needs these application permissions granted with admin consent" -ForegroundColor Yellow
+            } else {
+                Write-Host "   To resolve: Reconnect with required permissions or use an account with higher privileges" -ForegroundColor Yellow
+            }
             
             # Track missing permissions for summary
             foreach ($perm in $missing) {
