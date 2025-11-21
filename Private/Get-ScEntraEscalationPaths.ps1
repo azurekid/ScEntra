@@ -50,7 +50,13 @@ function Get-ScEntraEscalationPaths {
     )
 
     if (-not (Test-GraphConnection)) {
-        return
+        return @()
+    }
+
+    # Check required permissions
+    $requiredPermissions = @('PrivilegedAccess.Read.AzureADGroup', 'Group.Read.All')
+    if (-not (Test-GraphPermissions -RequiredPermissions $requiredPermissions -ResourceName "Escalation Paths (PIM for Groups)")) {
+        Write-Warning "Some escalation path analysis may be incomplete due to missing permissions."
     }
 
     Write-Verbose "Analyzing escalation paths..."

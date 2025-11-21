@@ -447,27 +447,34 @@ function New-ScEntraGraphSection {
                 },
                 edges: {
                     smooth: { type: 'continuous', roundness: 0.5 },
-                    width: 2
+                    width: 2,
+                    selectionWidth: 3
                 },
                 physics: {
                     enabled: true,
                     barnesHut: {
                         gravitationalConstant: -15000,
-                        centralGravity: 0.2,
-                        springLength: 250,
-                        springConstant: 0.02,
-                        damping: 0.15,
-                        avoidOverlap: 0.8
+                        centralGravity: 0.25,
+                        springLength: 150,
+                        springConstant: 0.04,
+                        damping: 0.25,
+                        avoidOverlap: 0.5
                     },
                     minVelocity: 0.75,
                     solver: 'barnesHut',
-                    stabilization: { enabled: true, iterations: 300, updateInterval: 25 }
+                    stabilization: { 
+                        enabled: true, 
+                        iterations: 500, 
+                        updateInterval: 20,
+                        fit: true 
+                    }
                 },
                 interaction: {
                     hover: true,
                     tooltipDelay: 100,
                     zoomView: true,
-                    dragView: true
+                    dragView: true,
+                    navigationButtons: true
                 },
                 layout: {
                     improvedLayout: true,
@@ -476,8 +483,128 @@ function New-ScEntraGraphSection {
             };
 
             const network = new vis.Network(container, data, options);
-            network.once('stabilizationIterationsDone', function() {
+            
+            // 3D rotational animation on initial load
+            let rotationAnimationActive = false;
+            let rotationAngle = 0;
+            let animationFrameId = null;
+            
+            function animate3DRotation() {
+                if (!rotationAnimationActive) {
+                    if (animationFrameId) {
+                        cancelAnimationFrame(animationFrameId);
+                        animationFrameId = null;
+                    }
+                    return;
+                }
+                
+                rotationAngle += 0.015;
+                
+                // Get current center position of the graph
+                const boundingBox = network.getBoundingBox(network.body.nodeIndices);
+                const graphCenterX = (boundingBox.left + boundingBox.right) / 2;
+                const graphCenterY = (boundingBox.top + boundingBox.bottom) / 2;
+                
+                // Calculate circular orbit around graph center
+                const orbitRadius = 200;
+                const offsetX = Math.cos(rotationAngle) * orbitRadius;
+                const offsetY = Math.sin(rotationAngle) * orbitRadius;
+                
+                // Add subtle zoom pulsing for 3D depth effect
+                const zoomPulse = 1 + Math.sin(rotationAngle * 3) * 0.08;
+                const baseScale = 0.8;
+                
+                // Move camera in circular orbit
+                network.moveTo({
+                    position: { 
+                        x: graphCenterX + offsetX, 
+                        y: graphCenterY + offsetY 
+                    },
+                    scale: baseScale * zoomPulse,
+                    animation: {
+                        duration: 60,
+                        easingFunction: 'linear'
+                    }
+                });
+                
+                animationFrameId = requestAnimationFrame(animate3DRotation);
+            }
+            
+            // Start rotation animation when stabilization completes
+            function startRotationAnimation() {
+                console.log('Graph stabilized, preparing rotation animation...');
                 network.setOptions({ physics: false });
+                
+                // Fit the graph first
+                network.fit({ 
+                    animation: { 
+                        duration: 1000, 
+                        easingFunction: 'easeInOutQuad' 
+                    } 
+                });
+                
+                // Start rotation after fit completes
+                setTimeout(() => {
+                    try {
+                        console.log('Starting 3D rotation effect - Active:', rotationAnimationActive);
+                        rotationAnimationActive = true;
+                        rotationAngle = 0;
+                        
+                        // Force first frame
+                        animate3DRotation();
+                        
+                        // Stop rotation after 6 seconds and recenter
+                        setTimeout(() => {
+                            console.log('Stopping rotation animation');
+                            rotationAnimationActive = false;
+                            if (animationFrameId) {
+                                cancelAnimationFrame(animationFrameId);
+                                animationFrameId = null;
+                            }
+                            // Smooth return to centered view
+                            setTimeout(() => {
+                                network.fit({ 
+                                    animation: { 
+                                        duration: 1500, 
+                                        easingFunction: 'easeInOutQuad' 
+                                    } 
+                                });
+                            }, 300);
+                        }, 6000);
+                    } catch (error) {
+                        console.error('Rotation animation error:', error);
+                    }
+                }, 1200);
+            }
+            
+            // Listen to both stabilization events for better compatibility
+            network.once('stabilizationIterationsDone', startRotationAnimation);
+            network.on('afterDrawing', function() {
+                // Backup trigger if stabilizationIterationsDone doesn't fire
+                if (!rotationAnimationActive && network.physics.stabilized) {
+                    network.off('afterDrawing');
+                    console.log('Triggered via afterDrawing');
+                    startRotationAnimation();
+                }
+            });
+            
+            // Stop rotation on user interaction
+            network.on('zoom', function() {
+                if (rotationAnimationActive) {
+                    rotationAnimationActive = false;
+                    if (animationFrameId) {
+                        cancelAnimationFrame(animationFrameId);
+                    }
+                }
+            });
+            
+            network.on('dragStart', function() {
+                if (rotationAnimationActive) {
+                    rotationAnimationActive = false;
+                    if (animationFrameId) {
+                        cancelAnimationFrame(animationFrameId);
+                    }
+                }
             });
 
             // Setup modal event listeners
@@ -891,19 +1018,49 @@ function New-ScEntraGraphSection {
                     document.getElementById('selectedNodeType').textContent = '(' + node.type + ')';
                     document.getElementById('selectedNodeInfo').style.display = 'block';
                     
-                    // Focus on node and fit to screen
-                    network.focus(nodeId, {
-                        scale: 1.5,
-                        animation: { duration: 500, easingFunction: 'easeInOutQuad' }
+                    // Get connected nodes to position them optimally
+                    const connectedNodeIds = getConnectedNodes(nodeId);
+                    
+                    // Add pulse animation to selected node
+                    const originalSize = nodes.get(nodeId).size || 25;
+                    let pulseCount = 0;
+                    const pulseInterval = setInterval(() => {
+                        const scale = pulseCount % 2 === 0 ? 1.3 : 1.0;
+                        nodes.update({ id: nodeId, size: originalSize * scale });
+                        pulseCount++;
+                        if (pulseCount >= 4) {
+                            clearInterval(pulseInterval);
+                            nodes.update({ id: nodeId, size: originalSize });
+                        }
+                    }, 150);
+                    
+                    // Enable physics temporarily with optimized settings to reduce edge crossings
+                    network.setOptions({ 
+                        physics: { 
+                            enabled: true,
+                            barnesHut: {
+                                gravitationalConstant: -12000,
+                                centralGravity: 0.2,
+                                springLength: 300,
+                                springConstant: 0.025,
+                                damping: 0.25,
+                                avoidOverlap: 0.8
+                            },
+                            solver: 'barnesHut',
+                            stabilization: false
+                        }
                     });
                     
-                    // Fit the graph to show the selected node and its connections
+                    // Let physics adjust the layout briefly to untangle edges with smooth animation
                     setTimeout(() => {
+                        network.setOptions({ physics: { enabled: false } });
+                        
+                        // Smooth focus animation on the selected node and its connections
                         network.fit({
-                            nodes: [nodeId, ...getConnectedNodes(nodeId)],
-                            animation: { duration: 500, easingFunction: 'easeInOutQuad' }
+                            nodes: [nodeId, ...connectedNodeIds],
+                            animation: { duration: 800, easingFunction: 'easeInOutQuad' }
                         });
-                    }, 100);
+                    }, 1200);
                 }
             });
 

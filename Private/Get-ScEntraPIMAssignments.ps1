@@ -12,66 +12,56 @@ function Get-ScEntraPIMAssignments {
     [CmdletBinding()]
     param()
 
-    if (-not (Test-GraphConnection)) {
-        return
+    if (-not (Test-GraphConnection)) { return @() }
+
+    # Check required permissions
+    $requiredPermissions = @('RoleEligibilitySchedule.Read.Directory', 'RoleAssignmentSchedule.Read.Directory')
+    if (-not (Test-GraphPermissions -RequiredPermissions $requiredPermissions -ResourceName "PIM Assignments")) {
+        Write-Warning "Cannot retrieve PIM assignments without required permissions. PIM-eligible users/groups will not appear in the graph."
+        return @()
     }
 
-    Write-Verbose "Retrieving PIM role assignments..."
+    # Helper function to convert schedule to assignment object
+    function ConvertTo-PIMAssignment {
+        param($Schedule, $AssignmentType)
+        
+        [PSCustomObject]@{
+            AssignmentId = $Schedule.id
+            RoleId = $Schedule.roleDefinitionId
+            RoleName = if ($Schedule.roleDefinition) { $Schedule.roleDefinition.displayName } else { 'Unknown' }
+            PrincipalId = $Schedule.principalId
+            PrincipalDisplayName = if ($Schedule.principal) { $Schedule.principal.displayName } else { 'Unknown' }
+            PrincipalType = if ($Schedule.principal -and $Schedule.principal.'@odata.type') {
+                $Schedule.principal.'@odata.type' -replace '#microsoft.graph.', ''
+            } else {
+                'unknown'
+            }
+            AssignmentType = $AssignmentType
+            Status = $Schedule.status
+            CreatedDateTime = $Schedule.createdDateTime
+        }
+    }
+
+    $allPIMAssignments = @()
 
     try {
-        $eligibleAssignments = @()
+        # Fetch eligible assignments
+        Write-Progress -Activity "Retrieving PIM assignments" -Status "Fetching eligible role assignments" -PercentComplete 25 -Id 4
         try {
-            Write-Progress -Activity "Retrieving PIM assignments" -Status "Fetching eligible role assignments" -PercentComplete 25 -Id 4
             $eligibleUri = "$script:GraphBaseUrl/roleManagement/directory/roleEligibilitySchedules?`$expand=principal,roleDefinition"
             $eligibleSchedules = Get-AllGraphItems -Uri $eligibleUri -ErrorAction SilentlyContinue
-
-            foreach ($schedule in $eligibleSchedules) {
-                $assignment = [PSCustomObject]@{
-                    AssignmentId = $schedule.id
-                    RoleId = $schedule.roleDefinitionId
-                    RoleName = if ($schedule.roleDefinition) { $schedule.roleDefinition.displayName } else { 'Unknown' }
-                    PrincipalId = $schedule.principalId
-                    PrincipalDisplayName = if ($schedule.principal) { $schedule.principal.displayName } else { 'Unknown' }
-                    PrincipalType = if ($schedule.principal -and $schedule.principal.'@odata.type') {
-                        $schedule.principal.'@odata.type' -replace '#microsoft.graph.', ''
-                    } else {
-                        'unknown'
-                    }
-                    AssignmentType = 'PIM-Eligible'
-                    Status = $schedule.status
-                    CreatedDateTime = $schedule.createdDateTime
-                }
-                $eligibleAssignments += $assignment
-            }
+            $allPIMAssignments += $eligibleSchedules | ForEach-Object { ConvertTo-PIMAssignment -Schedule $_ -AssignmentType 'PIM-Eligible' }
         }
         catch {
             Write-Verbose "Could not retrieve PIM eligible assignments: $_"
         }
 
-        $activeAssignments = @()
+        # Fetch active assignments
+        Write-Progress -Activity "Retrieving PIM assignments" -Status "Fetching active role assignments" -PercentComplete 75 -Id 4
         try {
-            Write-Progress -Activity "Retrieving PIM assignments" -Status "Fetching active role assignments" -PercentComplete 75 -Id 4
             $activeUri = "$script:GraphBaseUrl/roleManagement/directory/roleAssignmentSchedules?`$expand=principal,roleDefinition"
             $activeSchedules = Get-AllGraphItems -Uri $activeUri -ErrorAction SilentlyContinue
-
-            foreach ($schedule in $activeSchedules) {
-                $assignment = [PSCustomObject]@{
-                    AssignmentId = $schedule.id
-                    RoleId = $schedule.roleDefinitionId
-                    RoleName = if ($schedule.roleDefinition) { $schedule.roleDefinition.displayName } else { 'Unknown' }
-                    PrincipalId = $schedule.principalId
-                    PrincipalDisplayName = if ($schedule.principal) { $schedule.principal.displayName } else { 'Unknown' }
-                    PrincipalType = if ($schedule.principal -and $schedule.principal.'@odata.type') {
-                        $schedule.principal.'@odata.type' -replace '#microsoft.graph.', ''
-                    } else {
-                        'unknown'
-                    }
-                    AssignmentType = 'PIM-Active'
-                    Status = $schedule.status
-                    CreatedDateTime = $schedule.createdDateTime
-                }
-                $activeAssignments += $assignment
-            }
+            $allPIMAssignments += $activeSchedules | ForEach-Object { ConvertTo-PIMAssignment -Schedule $_ -AssignmentType 'PIM-Active' }
         }
         catch {
             Write-Verbose "Could not retrieve PIM active assignments: $_"
@@ -79,9 +69,10 @@ function Get-ScEntraPIMAssignments {
 
         Write-Progress -Activity "Retrieving PIM assignments" -Completed -Id 4
 
-        $allPIMAssignments = $eligibleAssignments + $activeAssignments
-
-        Write-Host "Retrieved $($allPIMAssignments.Count) PIM assignments ($($eligibleAssignments.Count) eligible, $($activeAssignments.Count) active)" -ForegroundColor Green
+        $eligibleCount = ($allPIMAssignments | Where-Object { $_.AssignmentType -eq 'PIM-Eligible' }).Count
+        $activeCount = ($allPIMAssignments | Where-Object { $_.AssignmentType -eq 'PIM-Active' }).Count
+        
+        Write-Host "Retrieved $($allPIMAssignments.Count) PIM assignments ($eligibleCount eligible, $activeCount active)" -ForegroundColor Green
         return $allPIMAssignments
     }
     catch {

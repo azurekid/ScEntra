@@ -192,6 +192,15 @@ $sampleEscalationRisks = @(
     }
 )
 
+# Build sample graph data so the report renders the escalation graph
+$graphData = New-ScEntraGraphData `
+    -Users $sampleUsers `
+    -Groups $sampleGroups `
+    -ServicePrincipals $sampleServicePrincipals `
+    -AppRegistrations $sampleApps `
+    -RoleAssignments $sampleRoleAssignments `
+    -PIMAssignments $samplePIMAssignments
+
 # Generate report
 Write-Host "Calling Export-ScEntraReport..." -ForegroundColor Yellow
 
@@ -203,6 +212,7 @@ Export-ScEntraReport `
     -RoleAssignments $sampleRoleAssignments `
     -PIMAssignments $samplePIMAssignments `
     -EscalationRisks $sampleEscalationRisks `
+    -GraphData $graphData `
     -OutputPath "./ScEntra-Sample-Report.html"
 
 Write-Host "`n✓ Sample report generated: ScEntra-Sample-Report.html" -ForegroundColor Green

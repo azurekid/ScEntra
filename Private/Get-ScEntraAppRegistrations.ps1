@@ -12,18 +12,20 @@ function Get-ScEntraAppRegistrations {
     [CmdletBinding()]
     param()
 
-    if (-not (Test-GraphConnection)) {
-        return
+    if (-not (Test-GraphConnection)) { return @() }
+
+    # Check required permissions
+    $requiredPermissions = @('Application.Read.All')
+    if (-not (Test-GraphPermissions -RequiredPermissions $requiredPermissions -ResourceName "App Registrations")) {
+        Write-Warning "Cannot retrieve app registrations without required permissions."
+        return @()
     }
 
-    Write-Verbose "Retrieving all app registrations from Entra ID..."
+    $select = "id,displayName,appId,createdDateTime,signInAudience,publisherDomain"
+    $uri = "$script:GraphBaseUrl/applications?`$top=999&`$select=$select"
 
     try {
-        $select = "id,displayName,appId,createdDateTime,signInAudience,publisherDomain"
-        $uri = "$script:GraphBaseUrl/applications?`$top=999&`$select=$select"
-
         $apps = Get-AllGraphItems -Uri $uri -ProgressActivity "Retrieving app registrations from Entra ID"
-
         Write-Host "Retrieved $($apps.Count) app registrations" -ForegroundColor Green
         return $apps
     }

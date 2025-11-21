@@ -86,8 +86,9 @@ function Invoke-ScEntraAnalysis {
 
     Write-Host "[1/5] 📋 Collecting Inventory..." -ForegroundColor Cyan
 
-    $users = Get-ScEntraUsers
-    $groups = Get-ScEntraGroups
+    $inventory = Get-ScEntraUsersAndGroups
+    $users = $inventory.Users
+    $groups = $inventory.Groups
     $servicePrincipals = Get-ScEntraServicePrincipals
     $appRegistrations = Get-ScEntraAppRegistrations
 
@@ -138,6 +139,20 @@ function Invoke-ScEntraAnalysis {
     Write-Host "  • Role Assignments: $($roleAssignments.Count)" -ForegroundColor White
     Write-Host "  • PIM Assignments: $($pimAssignments.Count)" -ForegroundColor White
     Write-Host "  • Escalation Risks: $($escalationRisks.Count)" -ForegroundColor Yellow
+    
+    # Show missing permissions summary if any were encountered
+    $missingPermissions = Get-MissingPermissionsSummary
+    if ($missingPermissions.Count -gt 0) {
+        Write-Host "`n⚠️  Missing Permissions Detected:" -ForegroundColor Yellow
+        foreach ($perm in $missingPermissions) {
+            Write-Host "  • $perm" -ForegroundColor Yellow
+        }
+        Write-Host "`nTo resolve: Disconnect and reconnect with required permissions:" -ForegroundColor Cyan
+        Write-Host "  Disconnect-AzAccount" -ForegroundColor Gray
+        Write-Host "  Connect-AzAccount" -ForegroundColor Gray
+        Write-Host "  Then grant the missing permissions when prompted." -ForegroundColor Gray
+    }
+    
     Write-Host "`nReport Location: $reportPath" -ForegroundColor Cyan
     Write-Host "Duration: $($duration.ToString('mm\:ss'))" -ForegroundColor Gray
 

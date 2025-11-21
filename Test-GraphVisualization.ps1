@@ -22,9 +22,9 @@ $users = @(
 
 # Mock Groups  
 $groups = @(
-    [PSCustomObject]@{ id = "group1"; displayName = "Global Administrators"; isAssignableToRole = $true; securityEnabled = $true; memberCount = 2 }
-    [PSCustomObject]@{ id = "group2"; displayName = "IT Admins"; isAssignableToRole = $false; securityEnabled = $true; memberCount = 3 }
-    [PSCustomObject]@{ id = "group3"; displayName = "App Owners"; isAssignableToRole = $false; securityEnabled = $true; memberCount = 2 }
+    [PSCustomObject]@{ id = "group1"; displayName = "Global Administrators"; isAssignableToRole = $true; isPIMEnabled = $true; securityEnabled = $true; memberCount = 2 }
+    [PSCustomObject]@{ id = "group2"; displayName = "IT Admins"; isAssignableToRole = $false; isPIMEnabled = $false; securityEnabled = $true; memberCount = 3 }
+    [PSCustomObject]@{ id = "group3"; displayName = "App Owners"; isAssignableToRole = $false; isPIMEnabled = $true; securityEnabled = $true; memberCount = 2 }
 )
 
 # Mock Service Principals
@@ -117,7 +117,7 @@ foreach ($user in $users) {
 
 # Add group nodes
 foreach ($group in $groups) {
-    $null = $nodes.Add(@{ id = $group.id; label = $group.displayName; type = "group"; isAssignableToRole = $group.isAssignableToRole; securityEnabled = $group.securityEnabled })
+    $null = $nodes.Add(@{ id = $group.id; label = $group.displayName; type = "group"; isAssignableToRole = $group.isAssignableToRole; isPIMEnabled = $group.isPIMEnabled; securityEnabled = $group.securityEnabled })
 }
 
 # Add SP nodes

@@ -13,7 +13,14 @@ function Get-ScEntraRoleAssignments {
     param()
 
     if (-not (Test-GraphConnection)) {
-        return
+        return @()
+    }
+
+    # Check required permissions
+    $requiredPermissions = @('RoleManagement.Read.Directory')
+    if (-not (Test-GraphPermissions -RequiredPermissions $requiredPermissions -ResourceName "Role Assignments")) {
+        Write-Warning "Cannot retrieve role assignments without required permissions."
+        return @()
     }
 
     Write-Verbose "Retrieving directory role assignments..."
