@@ -262,9 +262,19 @@ function New-ScEntraGraphSection {
                 <button id="resetGraph" style="padding: 8px 16px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 600;">Reset View</button>
             </div>
 
-            <div id="selectedNodeInfo" style="display: none; margin-bottom: 15px; padding: 12px; background: #f8f9fa; border-left: 4px solid #667eea; border-radius: 4px;">
+            <div id="selectedNodeInfo" style="display: none; margin-bottom: 15px; padding: 12px; background: #f8f9fa; border-left: 4px solid #667eea; border-radius: 4px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='#e8eaf6'; this.style.borderLeftColor='#5e6ad2';" onmouseout="this.style.background='#f8f9fa'; this.style.borderLeftColor='#667eea';">
                 <strong>Selected:</strong> <span id="selectedNodeName"></span> <span id="selectedNodeType" style="color: #666; font-size: 0.9em;"></span>
+                <div style="margin-top: 8px; font-size: 0.85em; color: #667eea; font-weight: 600;">🔍 Click here for detailed information</div>
             </div>
+
+            <div id="nodeDetailsModal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 0; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); z-index: 1000; max-width: 600px; width: 90%; max-height: 80vh; overflow: hidden;">
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; display: flex; justify-content: space-between; align-items: center;">
+                    <h3 style="margin: 0; font-size: 1.3em;" id="modalTitle">Node Details</h3>
+                    <button id="closeModal" style="background: rgba(255,255,255,0.2); border: none; color: white; font-size: 24px; cursor: pointer; width: 32px; height: 32px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">&times;</button>
+                </div>
+                <div id="modalContent" style="padding: 20px; overflow-y: auto; max-height: calc(80vh - 80px);"></div>
+            </div>
+            <div id="modalOverlay" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 999;"></div>
 
             <div id="escalationGraph"></div>
 
@@ -316,6 +326,12 @@ function New-ScEntraGraphSection {
         <script>
             const graphNodes = $nodesJson;
             const graphEdges = $edgesJson;
+
+            // Create a lookup map for original node data
+            const originalNodeData = {};
+            graphNodes.forEach(node => {
+                originalNodeData[node.id] = node;
+            });
             const svgIcon = function(svg) { return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg); };
             const defaultUserIconSvg = '<svg id="e24671f6-f501-4952-a2db-8b0b1d329c17" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="be92901b-ec33-4c65-adf1-9b0eed06d677" x1="9" y1="6.88" x2="9" y2="20.45" gradientUnits="userSpaceOnUse"><stop offset="0.22" stop-color="#32d4f5"/><stop offset="1" stop-color="#198ab3"/></linearGradient><linearGradient id="b46fc246-25d8-4398-8779-1042e8cacae7" x1="8.61" y1="-0.4" x2="9.6" y2="11.92" gradientUnits="userSpaceOnUse"><stop offset="0.22" stop-color="#32d4f5"/><stop offset="1" stop-color="#198ab3"/></linearGradient></defs><title>Icon-identity-230</title><path d="M15.72,18a1.45,1.45,0,0,0,1.45-1.45.47.47,0,0,0,0-.17C16.59,11.81,14,8.09,9,8.09S1.34,11.24.83,16.39A1.46,1.46,0,0,0,2.14,18H15.72Z" fill="url(#be92901b-ec33-4c65-adf1-9b0eed06d677)"/><path d="M9,9.17a4.59,4.59,0,0,1-2.48-.73L9,14.86l2.44-6.38A4.53,4.53,0,0,1,9,9.17Z" fill="#fff" opacity="0.8"/><circle cx="9.01" cy="4.58" r="4.58" fill="url(#b46fc246-25d8-4398-8779-1042e8cacae7)"/></svg>';
             const userIconOverride = 'data:image/svg+xml;base64,PHN2ZyBpZD0iZTI0NjcxZjYtZjUwMS00OTUyLWEyZGItOGIwYjFkMzI5YzE3IiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOCAxOCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJiZTkyOTAxYi1lYzMzLTRjNjUtYWRmMS05YjBlZWQwNmQ2NzciIHgxPSI5IiB5MT0iNi44OCIgeDI9IjkiIHkyPSIyMC40NSIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPjxzdG9wIG9mZnNldD0iMC4yMiIgc3RvcC1jb2xvcj0iIzMyZDRmNSIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzE5OGFiMyIvPjwvbGluZWFyR3JhZGllbnQ+PGxpbmVhckdyYWRpZW50IGlkPSJiNDZmYzI0Ni0yNWQ4LTQzOTgtODc3OS0xMDQyZThjYWNhZTciIHgxPSI4LjYxIiB5MT0iLTAuNCIgeDI9IjkuNiIgeTI9IjExLjkyIiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHN0b3Agb2Zmc2V0PSIwLjIyIiBzdG9wLWNvbG9yPSIjMzJkNGY1Ii8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjMTk4YWIzIi8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PHRpdGxlPkljb24taWRlbnRpdHktMjMwPC90aXRsZT48cGF0aCBkPSJNMTUuNzIsMThhMS40NSwxLjQ1LDAsMCwwLDEuNDUtMS40NS40Ny40NywwLDAsMCwwLS4xN0MxNi41OSwxMS44MSwxNCw4LjA5LDksOC4wOVMxLjM0LDExLjI0LjgzLDE2LjM5QTEuNDYsMS40NiwwLDAsMCwyLjE0LDE4SDE1LjcyWiIgZmlsbD0idXJsKCNiZTkyOTAxYi1lYzMzLTRjNjUtYWRmMS05YjBlZWQwNmQ2NzcpIi8+PHBhdGggZD0iTTksOS4xN2E0LjU5LDQuNTksMCwwLDEtMi40OC0uNzNMOSwxNC44NmwyLjQ0LTYuMzhBNC41Myw0LjUzLDAsMCwxLDksOS4xN1oiIGZpbGw9IiNmZmYiIG9wYWNpdHk9IjAuOCIvPjxjaXJjbGUgY3g9IjkuMDEiIGN5PSI0LjU4IiByPSI0LjU4IiBmaWxsPSJ1cmwoI2I0NmZjMjQ2LTI1ZDgtNDM5OC04Nzc5LTEwNDJlOGNhY2FlNykiLz48L3N2Zz4=';
@@ -436,14 +452,16 @@ function New-ScEntraGraphSection {
                 physics: {
                     enabled: true,
                     barnesHut: {
-                        gravitationalConstant: -8000,
-                        centralGravity: 0.3,
-                        springLength: 200,
-                        springConstant: 0.04,
-                        damping: 0.09,
-                        avoidOverlap: 0.1
+                        gravitationalConstant: -15000,
+                        centralGravity: 0.2,
+                        springLength: 250,
+                        springConstant: 0.02,
+                        damping: 0.15,
+                        avoidOverlap: 0.8
                     },
-                    stabilization: { enabled: true, iterations: 200, updateInterval: 25 }
+                    minVelocity: 0.75,
+                    solver: 'barnesHut',
+                    stabilization: { enabled: true, iterations: 300, updateInterval: 25 }
                 },
                 interaction: {
                     hover: true,
@@ -461,6 +479,20 @@ function New-ScEntraGraphSection {
             network.once('stabilizationIterationsDone', function() {
                 network.setOptions({ physics: false });
             });
+
+            // Setup modal event listeners
+            document.getElementById('closeModal').addEventListener('click', function() {
+                document.getElementById('nodeDetailsModal').style.display = 'none';
+                document.getElementById('modalOverlay').style.display = 'none';
+            });
+
+            document.getElementById('modalOverlay').addEventListener('click', function() {
+                document.getElementById('nodeDetailsModal').style.display = 'none';
+                document.getElementById('modalOverlay').style.display = 'none';
+            });
+
+            // Variable to store currently selected node for detail view
+            let currentSelectedNode = null;
 
             const originalNodeStyles = {};
             graphNodes.forEach(node => {
@@ -834,9 +866,16 @@ function New-ScEntraGraphSection {
             network.on('click', function(params) {
                 if (params.nodes.length > 0) {
                     const nodeId = params.nodes[0];
-                    const node = nodes.get(nodeId);
+                    const node = originalNodeData[nodeId];
                     const isAdditive = params.event.srcEvent.ctrlKey || params.event.srcEvent.metaKey;
                     
+                    console.log('Node clicked:', nodeId);
+                    console.log('Node data from originalNodeData:', node);
+                    console.log('Node type:', node ? node.type : 'undefined');
+
+                    // Store the currently selected node for the info panel click handler
+                    currentSelectedNode = node;
+
                     // Check if escalation filter is enabled
                     const escalationFilter = document.getElementById('escalationFilter').checked;
                     
@@ -848,16 +887,182 @@ function New-ScEntraGraphSection {
                         highlightPath(nodeId, isAdditive);
                     }
                     
-                    // Group visible nodes by type
-                    groupVisibleNodesByType();
-                    
                     document.getElementById('selectedNodeName').textContent = node.label;
                     document.getElementById('selectedNodeType').textContent = '(' + node.type + ')';
                     document.getElementById('selectedNodeInfo').style.display = 'block';
+                    
+                    // Focus on node and fit to screen
                     network.focus(nodeId, {
                         scale: 1.5,
                         animation: { duration: 500, easingFunction: 'easeInOutQuad' }
                     });
+                    
+                    // Fit the graph to show the selected node and its connections
+                    setTimeout(() => {
+                        network.fit({
+                            nodes: [nodeId, ...getConnectedNodes(nodeId)],
+                            animation: { duration: 500, easingFunction: 'easeInOutQuad' }
+                        });
+                    }, 100);
+                }
+            });
+
+            function showNodeDetails(node) {
+                console.log('showNodeDetails called with:', node);
+                console.log('Node properties:', Object.keys(node || {}));
+                console.log('Node type:', node ? node.type : 'NO NODE');
+
+                if (!node || !node.type) {
+                    console.error('Invalid node object:', node);
+                    alert('Error: Invalid node data. Please try selecting the node again.');
+                    return;
+                }
+
+                const modal = document.getElementById('nodeDetailsModal');
+                const overlay = document.getElementById('modalOverlay');
+                const modalTitle = document.getElementById('modalTitle');
+                const modalContent = document.getElementById('modalContent');
+
+                console.log('Modal elements:', { modal, overlay, modalTitle, modalContent });
+
+                if (!modal || !overlay || !modalTitle || !modalContent) {
+                    console.error('Modal elements not found!');
+                    return;
+                }
+
+                modalTitle.textContent = node.label || node.id || 'Unknown';
+
+                let detailsHtml = '<div style="display: flex; flex-direction: column; gap: 15px;">';
+
+                // Add type badge
+                const typeColors = {
+                    'user': '#4CAF50',
+                    'group': '#2196F3',
+                    'role': '#FF5722',
+                    'servicePrincipal': '#9C27B0',
+                    'application': '#FF9800'
+                };
+                const typeColor = typeColors[node.type] || '#999';
+                detailsHtml += '<div><span style="background: ' + typeColor + '; color: white; padding: 4px 12px; border-radius: 12px; font-size: 0.85em; font-weight: 600;">' + node.type.toUpperCase() + '</span></div>';
+
+                // Common properties
+                detailsHtml += '<div style="background: #f8f9fa; padding: 15px; border-radius: 6px;">';
+                detailsHtml += '<h4 style="margin: 0 0 10px 0; color: #333;">Basic Information</h4>';
+                detailsHtml += '<table style="width: 100%; border-collapse: collapse;">';
+
+                if (node.id) {
+                    detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600; width: 40%;">ID:</td><td style="padding: 6px 0; word-break: break-all; font-family: monospace; font-size: 0.9em;">' + node.id + '</td></tr>';
+                }
+
+                // Type-specific properties
+                if (node.type === 'user') {
+                    if (node.userPrincipalName) {
+                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">UPN:</td><td style="padding: 6px 0; word-break: break-all;">' + node.userPrincipalName + '</td></tr>';
+                    }
+                    if (node.accountEnabled !== undefined) {
+                        const statusColor = node.accountEnabled ? '#4CAF50' : '#f44336';
+                        const statusText = node.accountEnabled ? 'Enabled' : 'Disabled';
+                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Account Status:</td><td style="padding: 6px 0;"><span style="color: ' + statusColor + '; font-weight: 600;">' + statusText + '</span></td></tr>';
+                    }
+                    if (node.mail) {
+                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Email:</td><td style="padding: 6px 0;">' + node.mail + '</td></tr>';
+                    }
+                    if (node.userType) {
+                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">User Type:</td><td style="padding: 6px 0;">' + node.userType + '</td></tr>';
+                    }
+                } else if (node.type === 'group') {
+                    if (node.isAssignableToRole !== undefined) {
+                        const roleAssignable = node.isAssignableToRole ? 'Yes' : 'No';
+                        const roleColor = node.isAssignableToRole ? '#4CAF50' : '#999';
+                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Role Assignable:</td><td style="padding: 6px 0;"><span style="color: ' + roleColor + '; font-weight: 600;">' + roleAssignable + '</span></td></tr>';
+                    }
+                    if (node.isPIMEnabled !== undefined) {
+                        const pimEnabled = node.isPIMEnabled ? 'Yes' : 'No';
+                        const pimColor = node.isPIMEnabled ? '#9C27B0' : '#999';
+                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">PIM Enabled:</td><td style="padding: 6px 0;"><span style="color: ' + pimColor + '; font-weight: 600;">' + pimEnabled + '</span></td></tr>';
+                    }
+                    if (node.securityEnabled !== undefined) {
+                        const secEnabled = node.securityEnabled ? 'Yes' : 'No';
+                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Security Enabled:</td><td style="padding: 6px 0;">' + secEnabled + '</td></tr>';
+                    }
+                    if (node.memberCount !== undefined) {
+                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Member Count:</td><td style="padding: 6px 0;">' + node.memberCount + '</td></tr>';
+                    }
+                    if (node.description) {
+                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Description:</td><td style="padding: 6px 0;">' + node.description + '</td></tr>';
+                    }
+                } else if (node.type === 'servicePrincipal' || node.type === 'application') {
+                    if (node.appId) {
+                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">App ID:</td><td style="padding: 6px 0; word-break: break-all; font-family: monospace; font-size: 0.9em;">' + node.appId + '</td></tr>';
+                    }
+                    if (node.accountEnabled !== undefined) {
+                        const statusColor = node.accountEnabled ? '#4CAF50' : '#f44336';
+                        const statusText = node.accountEnabled ? 'Enabled' : 'Disabled';
+                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Status:</td><td style="padding: 6px 0;"><span style="color: ' + statusColor + '; font-weight: 600;">' + statusText + '</span></td></tr>';
+                    }
+                } else if (node.type === 'role') {
+                    if (node.isPrivileged !== undefined) {
+                        const privText = node.isPrivileged ? 'Yes' : 'No';
+                        const privColor = node.isPrivileged ? '#FF5722' : '#999';
+                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Privileged:</td><td style="padding: 6px 0;"><span style="color: ' + privColor + '; font-weight: 600;">' + privText + '</span></td></tr>';
+                    }
+                    if (node.description) {
+                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Description:</td><td style="padding: 6px 0;">' + node.description + '</td></tr>';
+                    }
+                }
+
+                detailsHtml += '</table></div>';
+
+                // Connection statistics
+                const connectedEdges = network.getConnectedEdges(node.id);
+                const connectedNodes = network.getConnectedNodes(node.id);
+
+                detailsHtml += '<div style="background: #f8f9fa; padding: 15px; border-radius: 6px;">';
+                detailsHtml += '<h4 style="margin: 0 0 10px 0; color: #333;">Connections</h4>';
+                detailsHtml += '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">';
+                detailsHtml += '<div style="text-align: center; padding: 10px; background: white; border-radius: 4px;"><div style="font-size: 1.5em; font-weight: bold; color: #667eea;">' + connectedEdges.length + '</div><div style="font-size: 0.85em; color: #666;">Relationships</div></div>';
+                detailsHtml += '<div style="text-align: center; padding: 10px; background: white; border-radius: 4px;"><div style="font-size: 1.5em; font-weight: bold; color: #667eea;">' + connectedNodes.length + '</div><div style="font-size: 0.85em; color: #666;">Connected Nodes</div></div>';
+                detailsHtml += '</div></div>';
+
+                // Relationship breakdown
+                if (connectedEdges.length > 0) {
+                    const edgeTypes = {};
+                    connectedEdges.forEach(edgeId => {
+                        const edge = edges.get(edgeId);
+                        if (edge) {
+                            const label = edge.label || edge.type || 'Unknown';
+                            edgeTypes[label] = (edgeTypes[label] || 0) + 1;
+                        }
+                    });
+
+                    detailsHtml += '<div style="background: #f8f9fa; padding: 15px; border-radius: 6px;">';
+                    detailsHtml += '<h4 style="margin: 0 0 10px 0; color: #333;">Relationship Breakdown</h4>';
+                    detailsHtml += '<div style="display: flex; flex-direction: column; gap: 8px;">';
+
+                    for (const [label, count] of Object.entries(edgeTypes).sort((a, b) => b[1] - a[1])) {
+                        const percentage = Math.round((count / connectedEdges.length) * 100);
+                        detailsHtml += '<div><div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span style="font-size: 0.9em; color: #666;">' + label + '</span><span style="font-size: 0.9em; font-weight: 600;">' + count + '</span></div><div style="background: #e0e0e0; height: 6px; border-radius: 3px; overflow: hidden;"><div style="background: #667eea; height: 100%; width: ' + percentage + '%; transition: width 0.3s;"></div></div></div>';
+                    }
+
+                    detailsHtml += '</div></div>';
+                }
+
+                detailsHtml += '</div>';
+
+                modalContent.innerHTML = detailsHtml;
+                modal.style.display = 'block';
+                overlay.style.display = 'block';
+            }
+
+            // Add click listener to selected node info panel (after showNodeDetails is defined)
+            document.getElementById('selectedNodeInfo').addEventListener('click', function() {
+                console.log('Selected node info clicked');
+                console.log('Current selected node:', currentSelectedNode);
+                if (currentSelectedNode) {
+                    console.log('Calling showNodeDetails');
+                    showNodeDetails(currentSelectedNode);
+                } else {
+                    console.log('No node selected');
                 }
             });
 
