@@ -263,7 +263,7 @@ function New-ScEntraGraphSection {
                         Show Only Critical Escalation Paths
                     </label>
                 </div>
-                <button id="resetGraph" style="padding: 8px 16px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 600;">Reset View</button>
+                <button id="resetGraph" class="button-primary">Reset View</button>
             </div>
 
             <div id="selectedNodeInfo">
@@ -1064,7 +1064,8 @@ function New-ScEntraGraphSection {
                     'group': '#2196F3',
                     'role': '#FF5722',
                     'servicePrincipal': '#9C27B0',
-                    'application': '#FF9800'
+                    'application': '#FF9800',
+                    'apiPermission': '#6A5ACD'
                 };
                 const typeColor = typeColors[node.type] || '#999';
                 detailsHtml += '<div><span style="background: ' + typeColor + '; color: white; padding: 4px 12px; border-radius: 12px; font-size: 0.85em; font-weight: 600;">' + node.type.toUpperCase() + '</span></div>';
@@ -1124,6 +1125,29 @@ function New-ScEntraGraphSection {
                         const statusText = node.accountEnabled ? 'Enabled' : 'Disabled';
                         detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Status:</td><td style="padding: 6px 0;"><span style="color: ' + statusColor + '; font-weight: 600;">' + statusText + '</span></td></tr>';
                     }
+                } else if (node.type === 'apiPermission') {
+                    if (node.resource) {
+                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Resource:</td><td style="padding: 6px 0;">' + node.resource + '</td></tr>';
+                    }
+                    if (node.permissionValue) {
+                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Permission:</td><td style="padding: 6px 0; word-break: break-all; font-family: monospace; font-size: 0.95em;">' + node.permissionValue + '</td></tr>';
+                    }
+                    if (node.permissionDisplayName && node.permissionDisplayName !== node.permissionValue) {
+                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Display Text:</td><td style="padding: 6px 0;">' + node.permissionDisplayName + '</td></tr>';
+                    }
+                    if (node.permissionKind) {
+                        const kindLabel = node.permissionKind === 'Scope' ? 'Delegated' : (node.permissionKind === 'Role' ? 'Application' : node.permissionKind);
+                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Grant Type:</td><td style="padding: 6px 0;">' + kindLabel + '</td></tr>';
+                    }
+                    if (node.permissionAudience) {
+                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Audience:</td><td style="padding: 6px 0;">' + node.permissionAudience + '</td></tr>';
+                    }
+                    if (node.adminConsentRequired) {
+                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Admin Consent:</td><td style="padding: 6px 0;">' + node.adminConsentRequired + '</td></tr>';
+                    }
+                    if (node.severity) {
+                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Severity:</td><td style="padding: 6px 0;">' + node.severity + '</td></tr>';
+                    }
                 } else if (node.type === 'role') {
                     if (node.isPrivileged !== undefined) {
                         const privText = node.isPrivileged ? 'Yes' : 'No';
@@ -1136,6 +1160,20 @@ function New-ScEntraGraphSection {
                 }
 
                 detailsHtml += '</table></div>';
+
+                if (node.type === 'apiPermission' && (node.permissionDescription || node.escalationDescription)) {
+                    detailsHtml += '<div style="background: #fefefe; padding: 15px; border-radius: 6px; border: 1px solid #e0e0e0;">';
+                    detailsHtml += '<h4 style="margin: 0 0 10px 0; color: #333;">Permission Details</h4>';
+                    if (node.permissionDescription) {
+                        detailsHtml += '<p style="margin: 0 0 10px 0; line-height: 1.4;">' + node.permissionDescription + '</p>';
+                    }
+                    if (node.escalationDescription) {
+                        detailsHtml += '<div style="background: #fff4e5; border-left: 4px solid #ff9800; padding: 10px 12px; border-radius: 4px;">';
+                        detailsHtml += '<strong style="display: block; margin-bottom: 6px;">Escalation Impact</strong>' + node.escalationDescription;
+                        detailsHtml += '</div>';
+                    }
+                    detailsHtml += '</div>';
+                }
 
                 // Connection statistics
                 const connectedEdges = network.getConnectedEdges(node.id);
@@ -1835,6 +1873,19 @@ function New-ScEntraReportDocument {
             box-shadow: 0 2px 12px var(--card-shadow);
         }
         .chart-box h3 { color: var(--text-color); margin-bottom: 15px; text-align: center; }
+        .button-primary {
+            padding: 10px 16px;
+            background: var(--control-btn-bg);
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background 0.2s ease, transform 0.1s ease;
+        }
+        .button-primary:hover { background: var(--control-btn-bg-hover); }
+        .button-primary:active { transform: scale(0.97); }
         table {
             width: 100%;
             border-collapse: collapse;
