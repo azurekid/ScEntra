@@ -21,11 +21,39 @@ function Get-ScEntraAppRegistrations {
         return @()
     }
 
-    $select = "id,displayName,appId,createdDateTime,signInAudience,publisherDomain"
+    $select = "id,displayName,appId,createdDateTime,signInAudience,publisherDomain,requiredResourceAccess"
     $uri = "$script:GraphBaseUrl/applications?`$top=999&`$select=$select"
 
     try {
         $apps = Get-AllGraphItems -Uri $uri -ProgressActivity "Retrieving app registrations from Entra ID"
+
+        foreach ($app in $apps) {
+            $apiPermissions = @()
+
+            if ($app.requiredResourceAccess) {
+                foreach ($resource in $app.requiredResourceAccess) {
+                    if (-not $resource.resourceAppId) { continue }
+
+                    $resourceAccess = @()
+                    if ($resource.resourceAccess) {
+                        foreach ($access in $resource.resourceAccess) {
+                            $resourceAccess += [PSCustomObject]@{
+                                Id   = $access.id
+                                Type = $access.type
+                            }
+                        }
+                    }
+
+                    $apiPermissions += [PSCustomObject]@{
+                        ResourceAppId   = $resource.resourceAppId
+                        ResourceAccess  = $resourceAccess
+                    }
+                }
+            }
+
+            $app | Add-Member -NotePropertyName 'ApiPermissions' -NotePropertyValue $apiPermissions -Force
+        }
+
         Write-Host "Retrieved $($apps.Count) app registrations" -ForegroundColor Green
         return $apps
     }

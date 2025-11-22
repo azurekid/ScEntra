@@ -80,7 +80,149 @@ function New-ScEntraGraphData {
     )
     
     Write-Verbose "Building graph data structure..."
-    
+
+    $servicePrincipalsById = @{}
+    $servicePrincipalsByAppId = @{}
+    foreach ($sp in $ServicePrincipals) {
+        if ($sp.id -and -not $servicePrincipalsById.ContainsKey($sp.id)) {
+            $servicePrincipalsById[$sp.id] = $sp
+        }
+        if ($sp.appId -and -not $servicePrincipalsByAppId.ContainsKey($sp.appId)) {
+            $servicePrincipalsByAppId[$sp.appId] = $sp
+        }
+    }
+
+    $permissionEscalationTargets = @{
+        'Application.ReadWrite.All' = @{
+            Roles       = @('Application Administrator', 'Cloud Application Administrator')
+            Severity    = 'High'
+            Description = 'Full application CRUD enables creation of malicious service principals.'
+        }
+        'AppRoleAssignment.ReadWrite.All' = @{
+            Roles       = @('Privileged Role Administrator')
+            Severity    = 'High'
+            Description = 'Can assign any app role, including privileged service principals.'
+        }
+        'RoleManagement.ReadWrite.Directory' = @{
+            Roles       = @('Privileged Role Administrator')
+            Severity    = 'High'
+            Description = 'Can manage directory roles and activate privileged admins.'
+        }
+        'Directory.AccessAsUser.All' = @{
+            Roles       = @('Global Administrator')
+            Severity    = 'High'
+            Description = 'Full delegated access to all APIs as any user grants total tenant control.'
+        }
+        'Directory.ReadWrite.All' = @{
+            Roles       = @('Global Administrator')
+            Severity    = 'High'
+            Description = 'Write access to directory objects allows privilege escalation through owners.'
+        }
+        'PrivilegedAccess.ReadWrite.AzureAD' = @{
+            Roles       = @('Privileged Role Administrator')
+            Severity    = 'High'
+            Description = 'Can administer PIM objects and activate privileged assignments.'
+        }
+        'Group.ReadWrite.All' = @{
+            Roles       = @('User Administrator')
+            Severity    = 'Medium'
+            Description = 'Can modify role-assignable groups and pivot into privileged memberships.'
+        }
+        'User.ReadWrite.All' = @{
+            Roles       = @('User Administrator')
+            Severity    = 'Medium'
+            Description = 'Can change privileged user credentials and MFA configurations.'
+        }
+    }
+
+    $permissionIconSvg = @'
+<svg id="uuid-431a759c-a29d-4678-89ee-5b1b2666f890" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="uuid-10478e68-1009-47b7-9e5e-1dad26a11858" x1="9" y1="18" x2="9" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#198ab3"/><stop offset="1" stop-color="#32bedd"/></linearGradient><linearGradient id="uuid-7623d8a9-ce5d-405d-98e0-ff8e832bdf61" x1="7.203" y1="11.089" x2="7.203" y2="3.888" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#6f4bb2"/><stop offset="1" stop-color="#c69aeb"/></linearGradient></defs><path d="m11.844,12.791c-.316-.081-.641-.073-.947.015l-1.295-2.124c-.04-.065-.124-.087-.19-.049l-.536.309c-.068.039-.091.128-.05.195l1.296,2.127c-.667.668-.737,1.797.01,2.551.12.121.259.223.41.302.276.143.568.213.857.213.463,0,.916-.18,1.273-.527.125-.121.23-.263.31-.417.302-.579.28-1.233-.037-1.769-.245-.413-.636-.707-1.102-.826Zm.424,1.965c-.06.232-.207.428-.414.55-.207.122-.449.156-.682.097-.278-.071-.503-.267-.614-.541-.141-.349-.041-.762.245-1.007.171-.147.379-.222.592-.222.075,0,.151.009.225.029.233.06.428.206.551.413h0c.122.207.157.448.097.681Zm3.555-9.443c-1.012,0-1.863.695-2.106,1.631h-2.54c-.078,0-.141.063-.141.141v.806c0,.078.063.141.141.141h2.54c.243.937,1.093,1.631,2.106,1.631,1.201,0,2.177-.976,2.177-2.175s-.977-2.175-2.177-2.175Zm1.068,2.388c-.082.428-.427.772-.854.854-.766.146-1.428-.515-1.282-1.28.082-.428.426-.772.854-.854.766-.147,1.429.515,1.283,1.28ZM2.978,2.953c.121.03.244.045.366.045.144,0,.286-.022.423-.063l.884,1.447c.04.065.124.087.19.049l.406-.234c.068-.039.091-.128.05-.195l-.887-1.453c.468-.475.577-1.224.218-1.821-.206-.343-.534-.585-.923-.682-.445-.111-.909-.016-1.28.267-.547.417-.737,1.18-.45,1.805.195.424.559.725,1.004.835Zm-.083-2.056c.133-.097.288-.148.445-.148.061,0,.122.008.183.023.232.058.42.219.514.446.13.315.02.691-.258.889-.182.13-.405.172-.619.118-.232-.058-.42-.219-.514-.446-.129-.312-.023-.683.249-.883Zm2.717,10.093l-.828-.477c-.067-.039-.154-.016-.192.052l-1.473,2.577c-1.227-.327-2.587.325-3.009,1.668-.091.289-.125.595-.1.897.071.849.537,1.569,1.253,1.973.377.212.793.321,1.214.321.374,0,.752-.086,1.109-.259.289-.14.549-.34.758-.583.56-.652.743-1.497.522-2.293-.12-.432-.352-.813-.668-1.116l1.468-2.567c.038-.067.015-.153-.052-.192Zm-2.055,5.145l-.213.234c-.161.177-.367.315-.601.366-.298.065-.605.02-.873-.131-.288-.162-.495-.427-.584-.745-.089-.318-.048-.652.115-.939.227-.402.648-.628,1.08-.628.206,0,.415.051.606.16.288.162.495.427.584.745.089.318.048.652-.115.939Z" fill="url(#uuid-10478e68-1009-47b7-9e5e-1dad26a11858)"/><path d="m9.921,5.287l-2.172-1.253c-.339-.195-.757-.195-1.096,0l-2.172,1.253c-.339.196-.548.557-.548.948v2.505c0,.391.209.753.548.949l2.174,1.253c.339.195.757.195,1.096,0l2.174-1.253c.339-.196.548-.557.548-.949v-2.505c-.001-.392-.212-.754-.552-.948Z" fill="url(#uuid-7623d8a9-ce5d-405d-98e0-ff8e832bdf61)"/></svg>
+'@
+
+    $buildPermissionNodeId = {
+        param(
+            [string]$ResourceKey,
+            [string]$Identifier
+        )
+        if (-not $ResourceKey) { $ResourceKey = 'unknown' }
+        if (-not $Identifier) { $Identifier = ([Guid]::NewGuid().ToString('N')) }
+        $safeIdentifier = $Identifier -replace '[^A-Za-z0-9]', '_'
+        return "permission-$ResourceKey-$safeIdentifier"
+    }
+
+    $permissionAssociationTracker = [System.Collections.Generic.HashSet[string]]::new()
+    $permissionEscalationEdgeTracker = [System.Collections.Generic.HashSet[string]]::new()
+
+    $ensurePermissionNode = {
+        param(
+            [string]$NodeId,
+            [string]$Label,
+            [string]$ResourceName,
+            [string]$PermissionValue,
+            [string]$PermissionKind
+        )
+
+        if (-not $nodeIndex.ContainsKey($NodeId)) {
+            $severity = 'Informational'
+            $description = $null
+            if ($PermissionValue -and $permissionEscalationTargets.ContainsKey($PermissionValue)) {
+                $severity = $permissionEscalationTargets[$PermissionValue].Severity
+                $description = $permissionEscalationTargets[$PermissionValue].Description
+            }
+
+            $null = $nodes.Add(@{
+                id = $NodeId
+                label = $Label
+                type = 'apiPermission'
+                resource = $ResourceName
+                permissionValue = $PermissionValue
+                permissionKind = $PermissionKind
+                severity = $severity
+                escalationDescription = $description
+                iconSvg = $permissionIconSvg
+            })
+            $nodeIndex[$NodeId] = $nodes.Count - 1
+        }
+    }
+
+    $linkPermissionToRoles = {
+        param(
+            [string]$NodeId,
+            [string]$PermissionValue
+        )
+
+        if (-not $PermissionValue) { return }
+        if (-not $permissionEscalationTargets.ContainsKey($PermissionValue)) { return }
+
+        $mapping = $permissionEscalationTargets[$PermissionValue]
+        foreach ($roleName in $mapping.Roles) {
+            $roleNodeId = "role-$roleName"
+            if (-not $nodeIndex.ContainsKey($roleNodeId)) {
+                $isHighPrivilege = $highPrivilegeRoles -contains $roleName
+                $null = $nodes.Add(@{
+                    id = $roleNodeId
+                    label = $roleName
+                    type = 'role'
+                    isPrivileged = $true
+                    isHighPrivilege = $isHighPrivilege
+                })
+                $nodeIndex[$roleNodeId] = $nodes.Count - 1
+            }
+
+            $edgeKey = "perm-escalation::$NodeId->$roleNodeId"
+            if (-not $permissionEscalationEdgeTracker.Contains($edgeKey)) {
+                $null = $edges.Add(@{
+                    from = $NodeId
+                    to = $roleNodeId
+                    type = 'escalates_to'
+                    label = 'Enables Privilege'
+                    description = $mapping.Description
+                })
+                [void]$permissionEscalationEdgeTracker.Add($edgeKey)
+            }
+        }
+    }
+
     $nodes = [System.Collections.ArrayList]::new()
     $edges = [System.Collections.ArrayList]::new()
     $nodeIndex = @{}
@@ -599,6 +741,165 @@ function New-ScEntraGraphData {
             })
         }
     }
+
+    # Visualize requested API permissions on app registrations
+    foreach ($app in $AppRegistrations) {
+        if (-not $nodeIndex.ContainsKey($app.id)) {
+            $null = $nodes.Add(@{
+                id = $app.id
+                label = $app.displayName
+                type = 'application'
+                appId = $app.appId
+            })
+            $nodeIndex[$app.id] = $nodes.Count - 1
+        }
+
+        if (-not $app.ApiPermissions) { continue }
+
+        foreach ($resource in $app.ApiPermissions) {
+            if (-not $resource.ResourceAppId) { continue }
+            $resourceSp = $null
+            if ($servicePrincipalsByAppId.ContainsKey($resource.ResourceAppId)) {
+                $resourceSp = $servicePrincipalsByAppId[$resource.ResourceAppId]
+            }
+            $resourceName = if ($resourceSp) { $resourceSp.displayName } else { $resource.ResourceAppId }
+
+            foreach ($permission in $resource.ResourceAccess) {
+                $permissionType = if ($permission.type) { $permission.type } else { 'Unknown' }
+                $permissionDefinition = $null
+                if ($resourceSp) {
+                    if ($permissionType -eq 'Scope' -and $resourceSp.oauth2PermissionScopes) {
+                        $permissionDefinition = $resourceSp.oauth2PermissionScopes | Where-Object { $_.id -eq $permission.id } | Select-Object -First 1
+                    }
+                    elseif ($permissionType -eq 'Role' -and $resourceSp.appRoles) {
+                        $permissionDefinition = $resourceSp.appRoles | Where-Object { $_.id -eq $permission.id } | Select-Object -First 1
+                    }
+                }
+
+                $permissionValue = if ($permissionDefinition) { $permissionDefinition.value } else { $permission.id }
+                $permissionLabel = if ($permissionDefinition) {
+                    $displayText = if ($permissionType -eq 'Scope') { $permissionDefinition.adminConsentDisplayName } else { $permissionDefinition.displayName }
+                    if ($displayText) { "$($resourceName): $displayText" } else { "$($resourceName): $permissionValue" }
+                }
+                else {
+                    "$($resourceName): $permissionValue"
+                }
+
+                $identifier = if ($permissionDefinition -and $permissionDefinition.id) { $permissionDefinition.id } elseif ($permission.id) { $permission.id } else { $permissionValue }
+                $permissionNodeId = & $buildPermissionNodeId $resource.ResourceAppId $identifier
+
+                & $ensurePermissionNode $permissionNodeId $permissionLabel $resourceName $permissionValue $permissionType
+
+                $edgeKey = "requests::$($app.id)->$permissionNodeId"
+                if (-not $permissionAssociationTracker.Contains($edgeKey)) {
+                    $null = $edges.Add(@{
+                        from = $app.id
+                        to = $permissionNodeId
+                        type = 'requests_permission'
+                        label = if ($permissionType -eq 'Scope') { 'Delegated' } else { 'Application' }
+                    })
+                    [void]$permissionAssociationTracker.Add($edgeKey)
+                }
+            }
+        }
+    }
+
+    # Visualize granted API permissions on service principals
+    foreach ($sp in $ServicePrincipals) {
+        $hasAppPerms = $sp.PSObject.Properties.Name -contains 'GrantedApplicationPermissions' -and $sp.GrantedApplicationPermissions.Count -gt 0
+        $hasDelegatedPerms = $sp.PSObject.Properties.Name -contains 'GrantedDelegatedPermissions' -and $sp.GrantedDelegatedPermissions.Count -gt 0
+        if (-not ($hasAppPerms -or $hasDelegatedPerms)) { continue }
+
+        if (-not $nodeIndex.ContainsKey($sp.id)) {
+            $null = $nodes.Add(@{
+                id = $sp.id
+                label = $sp.displayName
+                type = 'servicePrincipal'
+                appId = $sp.appId
+                accountEnabled = $sp.accountEnabled
+            })
+            $nodeIndex[$sp.id] = $nodes.Count - 1
+        }
+
+        if ($hasAppPerms) {
+            foreach ($assignment in $sp.GrantedApplicationPermissions) {
+                $resourceSp = if ($servicePrincipalsById.ContainsKey($assignment.ResourceId)) {
+                    $servicePrincipalsById[$assignment.ResourceId]
+                } else { $null }
+                $resourceName = if ($assignment.ResourceDisplayName) { $assignment.ResourceDisplayName } elseif ($resourceSp) { $resourceSp.displayName } else { $assignment.ResourceId }
+                $resourceKey = if ($resourceSp -and $resourceSp.appId) { $resourceSp.appId } else { $assignment.ResourceId }
+
+                $permissionValue = if ($assignment.AppRoleValue) { $assignment.AppRoleValue } else { $assignment.AppRoleId }
+                $permissionLabel = if ($assignment.AppRoleDisplayName) { "$($resourceName): $($assignment.AppRoleDisplayName)" } else { "$($resourceName): $permissionValue" }
+
+                $identifier = if ($assignment.AppRoleId) { $assignment.AppRoleId } else { $permissionValue }
+                $permissionNodeId = & $buildPermissionNodeId $resourceKey $identifier
+
+                & $ensurePermissionNode $permissionNodeId $permissionLabel $resourceName $permissionValue 'Role'
+                & $linkPermissionToRoles $permissionNodeId $permissionValue
+
+                $edgeKey = "grant-app::$($sp.id)->$permissionNodeId::$($assignment.AssignmentId)"
+                if (-not $permissionAssociationTracker.Contains($edgeKey)) {
+                    $null = $edges.Add(@{
+                        from = $sp.id
+                        to = $permissionNodeId
+                        type = 'has_permission'
+                        label = 'Application Grant'
+                        grantId = $assignment.AssignmentId
+                    })
+                    [void]$permissionAssociationTracker.Add($edgeKey)
+                }
+            }
+        }
+
+        if ($hasDelegatedPerms) {
+            foreach ($grant in $sp.GrantedDelegatedPermissions) {
+                $resourceSp = if ($servicePrincipalsById.ContainsKey($grant.ResourceId)) {
+                    $servicePrincipalsById[$grant.ResourceId]
+                } else { $null }
+                $resourceName = if ($grant.ResourceDisplayName) { $grant.ResourceDisplayName } elseif ($resourceSp) { $resourceSp.displayName } else { $grant.ResourceId }
+                $resourceKey = if ($resourceSp -and $resourceSp.appId) { $resourceSp.appId } else { $grant.ResourceId }
+
+                $scopeEntries = if ($grant.ResolvedScopes) { $grant.ResolvedScopes } else { @() }
+                if ($scopeEntries.Count -eq 0 -and $grant.RawScope) {
+                    $scopeEntries = @([PSCustomObject]@{ ScopeId = $null; ScopeName = $grant.RawScope; ScopeDisplayName = $grant.RawScope; ScopeDescription = $null })
+                }
+
+                foreach ($scopeEntry in $scopeEntries) {
+                    $identifier = if ($scopeEntry.ScopeId) { $scopeEntry.ScopeId } else { $scopeEntry.ScopeName }
+                    if (-not $identifier -and $grant.GrantId) { $identifier = "$($grant.GrantId)-scope" }
+                    $permissionNodeId = & $buildPermissionNodeId $resourceKey $identifier
+
+                    $displayName = if ($scopeEntry.ScopeDisplayName) { $scopeEntry.ScopeDisplayName } elseif ($scopeEntry.ScopeName) { $scopeEntry.ScopeName } else { 'Delegated Scope' }
+                    $permissionLabel = "$($resourceName): $displayName"
+                    $permissionValue = if ($scopeEntry.ScopeName) { $scopeEntry.ScopeName } else { $displayName }
+
+                    & $ensurePermissionNode $permissionNodeId $permissionLabel $resourceName $permissionValue 'Scope'
+                    & $linkPermissionToRoles $permissionNodeId $permissionValue
+
+                    $consentLabel = switch ($grant.ConsentType) {
+                        'AllPrincipals' { 'Delegated (Tenant-wide)' }
+                        'Principal' { 'Delegated (Per-user)' }
+                        Default { 'Delegated' }
+                    }
+
+                    $edgeKey = "grant-delegated::$($sp.id)->$permissionNodeId::$($grant.GrantId)::$($scopeEntry.ScopeName)"
+                    if (-not $permissionAssociationTracker.Contains($edgeKey)) {
+                        $null = $edges.Add(@{
+                            from = $sp.id
+                            to = $permissionNodeId
+                            type = 'has_permission'
+                            label = $consentLabel
+                            grantId = $grant.GrantId
+                            consentType = $grant.ConsentType
+                            principalId = $grant.PrincipalId
+                        })
+                        [void]$permissionAssociationTracker.Add($edgeKey)
+                    }
+                }
+            }
+        }
+    }
     
     # Add "can_manage" edges for administrative roles with app/SP management capabilities
     $appManagementRoles = @(
@@ -611,43 +912,48 @@ function New-ScEntraGraphData {
     $allRoleAssignments = @($RoleAssignments; $PIMAssignments)
     $appAdmins = $allRoleAssignments | Where-Object { $appManagementRoles -contains $_.RoleName }
 
-    foreach ($admin in $appAdmins) {
-        $principalId = if ($admin.MemberId) { $admin.MemberId } else { $admin.PrincipalId }
+    foreach ($roleName in $appManagementRoles) {
+        $roleAssignments = $appAdmins | Where-Object { $_.RoleName -eq $roleName }
+        if (-not $roleAssignments) { continue }
 
-        # Add can_manage edges to all service principals with roles
+        $roleNodeId = "role-$roleName"
+        if (-not $nodeIndex.ContainsKey($roleNodeId)) {
+            $isHighPrivilege = $highPrivilegeRoles -contains $roleName
+            $null = $nodes.Add(@{
+                id = $roleNodeId
+                label = $roleName
+                type = 'role'
+                isPrivileged = $true
+                isHighPrivilege = $isHighPrivilege
+            })
+            $nodeIndex[$roleNodeId] = $nodes.Count - 1
+        }
+
         foreach ($sp in $ServicePrincipals) {
             $spHasRole = $allRoleAssignments | Where-Object { $_.MemberId -eq $sp.id }
-            if ($spHasRole) {
-                # Ensure both nodes exist and principalId is not null
-                if (-not [string]::IsNullOrEmpty($principalId) -and -not [string]::IsNullOrEmpty($sp.id) -and $nodeIndex.ContainsKey($principalId) -and $nodeIndex.ContainsKey($sp.id)) {
-                    $null = $edges.Add(@{
-                        from = $principalId
-                        to = $sp.id
-                        type = 'can_manage'
-                        label = 'Can Manage'
-                        isPIM = $admin.PSObject.Properties.Name -contains 'AssignmentType'
-                    })
-                }
+            if ($spHasRole -and $nodeIndex.ContainsKey($sp.id)) {
+                $null = $edges.Add(@{
+                    from = $roleNodeId
+                    to = $sp.id
+                    type = 'can_manage'
+                    label = 'Can Manage'
+                    sourceRole = $roleName
+                })
             }
         }
 
-        # Add can_manage edges to all app registrations
         foreach ($app in $AppRegistrations) {
-            # Only add if app is linked to a privileged SP
             $sp = $ServicePrincipals | Where-Object { $_.appId -eq $app.appId } | Select-Object -First 1
             if ($sp) {
                 $spHasRole = $allRoleAssignments | Where-Object { $_.MemberId -eq $sp.id }
-                if ($spHasRole) {
-                    # Ensure both nodes exist and principalId is not null
-                    if (-not [string]::IsNullOrEmpty($principalId) -and -not [string]::IsNullOrEmpty($app.id) -and $nodeIndex.ContainsKey($principalId) -and $nodeIndex.ContainsKey($app.id)) {
-                        $null = $edges.Add(@{
-                            from = $principalId
-                            to = $app.id
-                            type = 'can_manage'
-                            label = 'Can Manage'
-                            isPIM = $admin.PSObject.Properties.Name -contains 'AssignmentType'
-                        })
-                    }
+                if ($spHasRole -and $nodeIndex.ContainsKey($app.id)) {
+                    $null = $edges.Add(@{
+                        from = $roleNodeId
+                        to = $app.id
+                        type = 'can_manage'
+                        label = 'Can Manage'
+                        sourceRole = $roleName
+                    })
                 }
             }
         }
