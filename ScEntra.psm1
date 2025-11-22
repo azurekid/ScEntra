@@ -32,5 +32,6 @@ Export-ModuleMember -Function @(
     'Get-ScEntraRoleAssignments'
     'Get-ScEntraPIMAssignments'
     'Get-ScEntraEscalationPaths'
-    'Export-ScEntraReport'
+    'Export-ScEntraReport',
+    'Invoke-JsonAnonymizer'
 )
