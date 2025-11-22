@@ -317,8 +317,24 @@ function New-ScEntraGraphData {
         }
     }
     
+    # Build a quick lookup of principals that currently have an active PIM assignment
+    $activePIMAssignmentMap = @{}
+    foreach ($pimAssignment in ($PIMAssignments | Where-Object { $_.AssignmentType -eq 'PIM-Active' })) {
+        if ($pimAssignment.PrincipalId -and $pimAssignment.RoleId) {
+            $key = "$($pimAssignment.PrincipalId)|$($pimAssignment.RoleId)"
+            $activePIMAssignmentMap[$key] = $true
+        }
+    }
+
     # Add nodes and edges for direct role assignments
     foreach ($assignment in $RoleAssignments) {
+        $assignmentKey = if ($assignment.MemberId -and $assignment.RoleId) { "$($assignment.MemberId)|$($assignment.RoleId)" } else { $null }
+
+        # Skip direct connections that represent an active PIM assignment to avoid duplicate labels
+        if ($assignmentKey -and $activePIMAssignmentMap.ContainsKey($assignmentKey)) {
+            continue
+        }
+
         $roleId = "role-$($assignment.RoleName)"
         
         # Determine the principal type and add node

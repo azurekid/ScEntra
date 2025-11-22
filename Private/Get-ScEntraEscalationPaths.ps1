@@ -69,6 +69,20 @@ function Get-ScEntraEscalationPaths {
     $spAppRoleAssignments = @{}
     $appOwners = @{}
 
+    $permissionEscalationMap = @(
+        @{ Permission = 'Domain.ReadWrite.All'; Severity = 'Critical'; AttackPath = 'Can add/verify federated domains and forge SAML tokens for any hybrid user, including Global Administrator, if misused'; Recommendation = 'Restrict to trusted workloads only, enforce app instance property locks, prefer cloud-only privileged accounts'; Reference = 'Federated domain backdoor (Datadog Security Labs, 2025)'; },
+        @{ Permission = 'RoleManagement.ReadWrite.Directory'; Severity = 'Critical'; AttackPath = 'Allows modification of privileged role assignments, effectively equivalent to Privileged Role Administrator'; Recommendation = 'Limit to break-glass workloads, monitor assignment events'; Reference = 'Microsoft Graph role management permissions'; },
+        @{ Permission = 'AppRoleAssignment.ReadWrite.All'; Severity = 'High'; AttackPath = 'Can grant application permissions to any service principal, enabling lateral movement into higher-privileged apps'; Recommendation = 'Require justification and PIM for workloads with this permission'; Reference = 'Microsoft Graph application assignments'; },
+        @{ Permission = 'Application.ReadWrite.All'; Severity = 'High'; AttackPath = 'Can add credentials and modify any application/service principal which enables service principal hijacking for privileged apps'; Recommendation = 'Enforce app instance property locks, move to managed identities with scoped permissions'; Reference = 'Semperis UnOAuthorized + Datadog first-party SP research'; },
+        @{ Permission = 'Group.ReadWrite.All'; Severity = 'High'; AttackPath = 'Can modify membership of any Microsoft 365/role assignable group, enabling indirect elevation to platform roles'; Recommendation = 'Use administrative units and least privilege scopes; avoid granting to unattended apps'; Reference = 'Nested group escalation patterns'; },
+        @{ Permission = 'Directory.ReadWrite.All'; Severity = 'Medium'; AttackPath = 'Broad ability to modify directory objects including users and devices which can be chained with other misconfigurations'; Recommendation = 'Swap for granular scopes or partition into administrative units'; Reference = 'Microsoft Graph directory write guidance'; },
+        @{ Permission = 'DeviceManagementConfiguration.ReadWrite.All'; Severity = 'High'; AttackPath = 'Authorizes writing Intune device management scripts that run as SYSTEM on PAWs, enabling capture of Global Administrator sessions'; Recommendation = 'Require multi-admin approval for Intune changes and lock down workload identity usage'; Reference = 'Mandiant Intune lateral movement (2024)'; }
+    )
+    $permissionEscalationLookup = @{}
+    foreach ($entry in $permissionEscalationMap) {
+        $permissionEscalationLookup[$entry.Permission] = $entry
+    }
+
     $groupsWithRoles = $RoleAssignments | Where-Object { $_.MemberType -eq 'group' } | Select-Object -ExpandProperty MemberId -Unique
     $pimEnabledGroupIds = $Groups | Where-Object { $_.isPIMEnabled -eq $true } | Select-Object -ExpandProperty id -Unique
     $roleEnabledGroups = $Groups | Where-Object { $_.isAssignableToRole -eq $true } | Select-Object -ExpandProperty id
@@ -438,6 +452,40 @@ function Get-ScEntraEscalationPaths {
             }
         }
         $spCount++
+    }
+
+    if ($ServicePrincipals.Count -gt 0 -and $permissionEscalationLookup.Count -gt 0) {
+        Write-Verbose "Analyzing workload identity API permissions for escalation risk..."
+
+        foreach ($sp in $ServicePrincipals) {
+            if (-not $sp.GrantedApplicationPermissions) { continue }
+
+            $graphPermissions = $sp.GrantedApplicationPermissions | Where-Object {
+                ($_.ResourceDisplayName -eq 'Microsoft Graph' -or $_.ResourceDisplayName -eq 'Microsoft Graph API' -or $_.ResourceId -eq '00000003-0000-0000-c000-000000000000') -and $_.AppRoleValue
+            }
+
+            foreach ($grant in $graphPermissions) {
+                $permValue = $grant.AppRoleValue
+                if (-not $permValue) { continue }
+
+                if ($permissionEscalationLookup.ContainsKey($permValue)) {
+                    $metadata = $permissionEscalationLookup[$permValue]
+
+                    $risk = [PSCustomObject]@{
+                        RiskType             = 'AppPermissionEscalation'
+                        Severity             = $metadata.Severity
+                        ServicePrincipalId   = $sp.id
+                        ServicePrincipalName = $sp.displayName
+                        Permission           = $permValue
+                        AttackPath           = $metadata.AttackPath
+                        Recommendation       = $metadata.Recommendation
+                        Reference            = $metadata.Reference
+                        Description          = "Service Principal '$($sp.displayName)' has Microsoft Graph permission '$permValue' which $($metadata.AttackPath.ToLower())"
+                    }
+                    $escalationRisks += $risk
+                }
+            }
+        }
     }
 
     Write-Verbose "Analyzing app registration ownership..."

@@ -282,13 +282,6 @@ function New-ScEntraGraphSection {
 
             <div id="escalationGraph"></div>
 
-            <div class="graph-controls">
-                <button id="zoomIn" class="control-btn" title="Zoom In">🔍+</button>
-                <button id="zoomOut" class="control-btn" title="Zoom Out">🔍−</button>
-                <button id="fitGraph" class="control-btn" title="Fit to Screen">⊡</button>
-                <button id="resetView" class="control-btn" title="Reset View">↻</button>
-            </div>
-
             <div class="graph-legend">
                 <div class="legend-item">
                     <img class="legend-icon" data-icon-type="user" alt="User icon" />
@@ -301,12 +294,6 @@ function New-ScEntraGraphSection {
                 <div class="legend-item">
                     <img class="legend-icon" data-icon-type="securityGroup" alt="Security group icon" />
                     <span>Security Group</span>
-                </div>
-                <div class="legend-item">
-                    <svg width="24" height="24" style="margin-right: 8px;">
-                        <rect x="4" y="4" width="16" height="16" fill="#2196F3" stroke="#333" stroke-width="1.5"/>
-                    </svg>
-                    <span>Other Group</span>
                 </div>
                 <div class="legend-item">
                     <img class="legend-icon" data-icon-type="role" alt="Role icon" />
@@ -325,20 +312,28 @@ function New-ScEntraGraphSection {
                     <span>API Permission</span>
                 </div>
                 <div class="legend-item">
-                    <span class="legend-line" style="background:#34d399;"></span>
-                    <span>Delegated Request</span>
+                    <span class="legend-line" style="background:#667eea;"></span>
+                    <span>Role Assignment</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-line" style="background:#10b981;"></span>
+                    <span>Group Membership</span>
                 </div>
                 <div class="legend-item">
                     <span class="legend-line" style="background:#f59e0b;"></span>
-                    <span>Application Request</span>
+                    <span>Ownership</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-line" style="background:#06b6d4;"></span>
+                    <span>Service Principal Assignment</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-line" style="background:#34d399;"></span>
+                    <span>Delegated Permission</span>
                 </div>
                 <div class="legend-item">
                     <span class="legend-line" style="background:#ef5350;"></span>
-                    <span>Application Grant</span>
-                </div>
-                <div class="legend-item">
-                    <span class="legend-line" style="background:#3b82f6;"></span>
-                    <span>Delegated Grant</span>
+                    <span>Application Permission</span>
                 </div>
                 <div class="legend-item">
                     <div style="width: 30px; height: 3px; background: #dc3545; margin-right: 8px;"></div>
@@ -440,17 +435,20 @@ function New-ScEntraGraphSection {
                 applicationGrant: '#ef5350',
                 delegatedGrant: '#3b82f6'
             };
+            const escalationEdgeColor = '#dc3545';
+            const escalationEdgeOpacity = 0.95;
+            const escalationEdgeWidth = 4;
 
             const edges = new vis.DataSet(graphEdges.map((edge, idx) => {
-                // Determine color based on escalation path status
-                let edgeColor = edge.isEscalationPath ? '#dc3545' : (
-                    edge.type === 'has_role' ? '#FF5722' :
-                    edge.type === 'member_of' ? '#2196F3' :
-                    edge.type === 'owns' ? '#FF9800' :
-                    edge.type === 'assigned_to' ? '#00BCD4' :
-                    edge.type === 'can_manage' ? '#E91E63' :
-                    edge.isPIM ? '#9C27B0' : '#999'
+                let edgeColor = (
+                    edge.type === 'has_role' ? '#667eea' :
+                    edge.type === 'member_of' ? '#10b981' :
+                    edge.type === 'owns' ? '#f59e0b' :
+                    edge.type === 'assigned_to' ? '#06b6d4' :
+                    edge.type === 'can_manage' ? '#a855f7' :
+                    edge.isPIM ? '#8b5cf6' : '#6b7280'
                 );
+
                 if (!edge.isEscalationPath) {
                     const label = (edge.label || '').toLowerCase();
                     if (edge.type === 'requests_permission') {
@@ -470,12 +468,10 @@ function New-ScEntraGraphSection {
                         }
                     }
                 }
-                
-                let edgeWidth = edge.isEscalationPath ? 4 : (
-                    edge.type === 'has_role' ? 3 : 
-                    (edge.type === 'can_manage' ? 2 : 1.5)
-                );
-                
+
+                let edgeWidth = edge.type === 'has_role' ? 3 :
+                                edge.type === 'can_manage' ? 2 : 1.5;
+
                 return {
                     id: edge.from + '-' + edge.to + '-' + idx,
                     from: edge.from,
@@ -484,7 +480,7 @@ function New-ScEntraGraphSection {
                     arrows: 'to',
                     color: {
                         color: edgeColor,
-                        opacity: edge.isEscalationPath ? 0.9 : 0.7
+                        opacity: edge.type === 'has_role' ? 0.9 : 0.7
                     },
                     dashes: edge.isPIM || edge.type === 'owns' || edge.type === 'can_manage',
                     width: edgeWidth,
@@ -786,9 +782,13 @@ function New-ScEntraGraphSection {
                     if (allPathEdges.has(edge.id)) {
                         const baseStyle = originalEdgeStyles[edge.id] || {};
                         const baseColor = cloneColor(baseStyle.color) || { color: '#999', opacity: 0.7 };
-                        const highlightColor = Object.assign({}, baseColor, { opacity: 1 });
+                        let highlightColor = Object.assign({}, baseColor, { opacity: 1 });
                         let edgeWidth = baseStyle.width ?? edge.width ?? 2;
-                        if (edge.edgeType === 'has_role') {
+
+                        if (edge.isEscalationPath) {
+                            highlightColor = { color: escalationEdgeColor, opacity: escalationEdgeOpacity };
+                            edgeWidth = Math.max(edgeWidth, escalationEdgeWidth);
+                        } else if (edge.edgeType === 'has_role') {
                             edgeWidth = Math.max(edgeWidth, 3);
                         }
 
@@ -1344,10 +1344,25 @@ function New-ScEntraGraphSection {
                 
                 const edgeUpdates = [];
                 const allEdges = edges.get();
-                
+
                 allEdges.forEach(edge => {
                     if (edgeIds.has(edge.id)) {
-                        edgeUpdates.push({ id: edge.id, hidden: false });
+                        const baseStyle = originalEdgeStyles[edge.id] || {};
+                        let color = cloneColor(baseStyle.color) || { color: '#999', opacity: 0.7 };
+                        let width = baseStyle.width ?? edge.width ?? 1.5;
+
+                        if (edge.isEscalationPath) {
+                            color = { color: escalationEdgeColor, opacity: escalationEdgeOpacity };
+                            width = Math.max(width, escalationEdgeWidth);
+                        }
+
+                        edgeUpdates.push({
+                            id: edge.id,
+                            hidden: false,
+                            color,
+                            width,
+                            dashes: baseStyle.dashes ?? edge.dashes ?? false
+                        });
                     } else {
                         edgeUpdates.push({ id: edge.id, hidden: true });
                     }
@@ -1410,10 +1425,17 @@ function New-ScEntraGraphSection {
 
                     allEdges.forEach(edge => {
                         if (edge.isEscalationPath) {
+                            const baseStyle = originalEdgeStyles[edge.id] || {};
                             escalationNodeIds.add(edge.from);
                             escalationNodeIds.add(edge.to);
                             escalationEdgeIds.add(edge.id);
-                            edgeUpdates.push({ id: edge.id, hidden: false });
+                            edgeUpdates.push({
+                                id: edge.id,
+                                hidden: false,
+                                color: { color: escalationEdgeColor, opacity: escalationEdgeOpacity },
+                                width: Math.max(baseStyle.width ?? edge.width ?? 1.5, escalationEdgeWidth),
+                                dashes: baseStyle.dashes ?? edge.dashes ?? false
+                            });
                         } else {
                             edgeUpdates.push({ id: edge.id, hidden: true });
                         }
@@ -1604,42 +1626,6 @@ function New-ScEntraGraphSection {
                 network.fit({
                     animation: { duration: 500, easingFunction: 'easeInOutQuad' }
                 });
-            });
-
-            document.getElementById('zoomIn').addEventListener('click', function() {
-                const currentScale = network.getScale();
-                network.moveTo({
-                    scale: currentScale * 1.2,
-                    animation: { duration: 300, easingFunction: 'easeInOutQuad' }
-                });
-            });
-
-            document.getElementById('zoomOut').addEventListener('click', function() {
-                const currentScale = network.getScale();
-                network.moveTo({
-                    scale: currentScale / 1.2,
-                    animation: { duration: 300, easingFunction: 'easeInOutQuad' }
-                });
-            });
-
-            document.getElementById('fitGraph').addEventListener('click', function() {
-                network.fit({
-                    animation: { duration: 500, easingFunction: 'easeInOutQuad' }
-                });
-            });
-
-            document.getElementById('resetView').addEventListener('click', function() {
-                if (initialViewPosition) {
-                    network.moveTo({
-                        position: initialViewPosition,
-                        scale: 1.0,
-                        animation: { duration: 500, easingFunction: 'easeInOutQuad' }
-                    });
-                } else {
-                    network.fit({
-                        animation: { duration: 500, easingFunction: 'easeInOutQuad' }
-                    });
-                }
             });
         </script>
 "@
@@ -1985,6 +1971,51 @@ function New-ScEntraReportDocument {
             height: 4px;
             border-radius: 999px;
             display: inline-block;
+        }
+        
+        /* Override vis-network navigation buttons - blue icons without circles */
+        div.vis-network div.vis-navigation div.vis-button {
+            background-color: rgba(102, 126, 234, 0.15) !important;
+            background-image: none !important;
+            box-shadow: none !important;
+            border-radius: 4px !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+        }
+        div.vis-network div.vis-navigation div.vis-button:hover {
+            background-color: rgba(102, 126, 234, 0.25) !important;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3) !important;
+        }
+        div.vis-network div.vis-navigation div.vis-button.vis-up::after,
+        div.vis-network div.vis-navigation div.vis-button.vis-down::after,
+        div.vis-network div.vis-navigation div.vis-button.vis-left::after,
+        div.vis-network div.vis-navigation div.vis-button.vis-right::after,
+        div.vis-network div.vis-navigation div.vis-button.vis-zoomIn::after,
+        div.vis-network div.vis-navigation div.vis-button.vis-zoomOut::after,
+        div.vis-network div.vis-navigation div.vis-button.vis-zoomExtends::after {
+            color: #667eea !important;
+            font-size: 24px !important;
+            font-weight: bold !important;
+            line-height: 30px !important;
+        }
+        div.vis-network div.vis-navigation div.vis-button.vis-up::after { content: '↑' !important; }
+        div.vis-network div.vis-navigation div.vis-button.vis-down::after { content: '↓' !important; }
+        div.vis-network div.vis-navigation div.vis-button.vis-left::after { content: '←' !important; }
+        div.vis-network div.vis-navigation div.vis-button.vis-right::after { content: '→' !important; }
+        div.vis-network div.vis-navigation div.vis-button.vis-zoomIn::after { content: '+' !important; }
+        div.vis-network div.vis-navigation div.vis-button.vis-zoomOut::after { content: '−' !important; }
+        div.vis-network div.vis-navigation div.vis-button.vis-zoomExtends::after { content: '⊡' !important; }
+        
+        body[data-theme="dark"] div.vis-network div.vis-navigation div.vis-button {
+            background-color: rgba(165, 180, 252, 0.15) !important;
+        }
+        body[data-theme="dark"] div.vis-network div.vis-navigation div.vis-button:hover {
+            background-color: rgba(165, 180, 252, 0.25) !important;
+            box-shadow: 0 2px 8px rgba(165, 180, 252, 0.3) !important;
+        }
+        body[data-theme="dark"] div.vis-network div.vis-navigation div.vis-button::after {
+            color: #a5b4fc !important;
         }
     </style>
 </head>
