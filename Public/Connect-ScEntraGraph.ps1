@@ -34,7 +34,8 @@ function Connect-ScEntraGraph {
             "RoleManagement.Read.Directory",
             "RoleEligibilitySchedule.Read.Directory",
             "RoleAssignmentSchedule.Read.Directory",
-            "PrivilegedAccess.Read.AzureADGroup"
+            "PrivilegedAccess.Read.AzureADGroup",
+            "DelegatedPermissionGrant.Read.All"
         ),
 
         [Parameter(Mandatory = $false)]

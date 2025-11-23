@@ -82,6 +82,29 @@ function Invoke-ScEntraAnalysis {
         }
     }
 
+    $mapCriticalPermissions = @(
+        'Group.Read.All'
+        'Application.Read.All'
+        'RoleManagement.Read.Directory'
+        'PrivilegedAccess.Read.AzureADGroup'
+    )
+
+    $tokenInfo = Get-GraphTokenScopeInfo
+    if ($tokenInfo) {
+        $mapCoverage = Get-GraphPermissionCoverage -RequiredPermissions $mapCriticalPermissions -TokenInfo $tokenInfo
+        if ($mapCoverage -and -not $mapCoverage.HasAny) {
+            Write-Error "Cannot run Invoke-ScEntraAnalysis because none of the map-critical permissions are granted ($($mapCriticalPermissions -join ', ')). Reconnect with at least one of these scopes before retrying."
+            return
+        }
+        elseif ($mapCoverage -and -not $mapCoverage.HasAll) {
+            $missingMapPermissions = $mapCoverage.MissingPermissions -join ', '
+            Write-Warning "Proceeding with limited map data. Missing permissions: $missingMapPermissions"
+        }
+    }
+    else {
+        Write-Verbose "Unable to decode token for permission pre-checks. Continuing without early gating."
+    }
+
     $startTime = Get-Date
 
     Write-Host "[1/5] 📋 Collecting Inventory..." -ForegroundColor Cyan
@@ -89,41 +112,98 @@ function Invoke-ScEntraAnalysis {
     $inventory = Get-ScEntraUsersAndGroups
     $users = $inventory.Users
     $groups = $inventory.Groups
-    $servicePrincipals = Get-ScEntraServicePrincipals
-    $appRegistrations = Get-ScEntraAppRegistrations
+
+    $servicePrincipals = @()
+    try {
+        $servicePrincipals = Get-ScEntraServicePrincipals
+    }
+    catch {
+        Write-Error "Failed to retrieve service principals: $($_.Exception.Message)"
+        $servicePrincipals = @()
+    }
+
+    $appRegistrations = @()
+    try {
+        $appRegistrations = Get-ScEntraAppRegistrations
+    }
+    catch {
+        Write-Error "Failed to retrieve app registrations: $($_.Exception.Message)"
+        $appRegistrations = @()
+    }
 
     Write-Host "[2/5] 👑 Enumerating Role Assignments..." -ForegroundColor Cyan
 
-    $roleAssignments = Get-ScEntraRoleAssignments
+    $roleAssignments = @()
+    try {
+        $roleAssignments = Get-ScEntraRoleAssignments
+    }
+    catch {
+        Write-Error "Failed to retrieve role assignments: $($_.Exception.Message)"
+        $roleAssignments = @()
+    }
     Write-Host "[3/5] 🔐 Checking PIM Assignments..." -ForegroundColor Cyan
 
-    $pimAssignments = Get-ScEntraPIMAssignments
+    $pimAssignments = @()
+    try {
+        $pimAssignments = Get-ScEntraPIMAssignments
+    }
+    catch {
+        Write-Error "Failed to retrieve PIM assignments: $($_.Exception.Message)"
+        $pimAssignments = @()
+    }
+
+    $missingPermissions = Get-MissingPermissionsSummary
+
+    if (-not $roleAssignments -or $roleAssignments.Count -eq 0) {
+        if ($missingPermissions -and ($missingPermissions -contains 'RoleManagement.Read.Directory')) {
+            Write-Error "Role assignments could not be collected because RoleManagement.Read.Directory is missing. Cannot analyze escalation paths without this dataset."
+            return
+        }
+
+        Write-Warning "No role assignments were returned. Escalation map may be empty."
+    }
     Write-Host "[4/5] 🔍 Analyzing Escalation Paths..." -ForegroundColor Cyan
 
+    try {
+        $escalationResult = Get-ScEntraEscalationPaths `
+            -Users $users `
+            -Groups $groups `
+            -RoleAssignments $roleAssignments `
+            -PIMAssignments $pimAssignments `
+            -ServicePrincipals $servicePrincipals `
+            -AppRegistrations $appRegistrations
+    }
+    catch {
+        Write-Error "Failed to analyze escalation paths: $($_.Exception.Message)"
+        throw
+    }
 
-    $escalationResult = Get-ScEntraEscalationPaths `
-        -Users $users `
-        -Groups $groups `
-        -RoleAssignments $roleAssignments `
-        -PIMAssignments $pimAssignments `
-        -ServicePrincipals $servicePrincipals `
-        -AppRegistrations $appRegistrations
+    if (-not $escalationResult) {
+        Write-Error "Escalation analysis returned no data. Unable to continue without graph insights."
+        return
+    }
 
     $escalationRisks = $escalationResult.Risks
     $graphData = $escalationResult.GraphData
 
     Write-Host "`n[5/5] 📊 Generating Report..." -ForegroundColor Cyan
 
-    $reportPath = Export-ScEntraReport `
-        -Users $users `
-        -Groups $groups `
-        -ServicePrincipals $servicePrincipals `
-        -AppRegistrations $appRegistrations `
-        -RoleAssignments $roleAssignments `
-        -PIMAssignments $pimAssignments `
-        -EscalationRisks $escalationRisks `
-        -GraphData $graphData `
-        -OutputPath $OutputPath
+    try {
+        $reportPath = Export-ScEntraReport `
+            -Users $users `
+            -Groups $groups `
+            -ServicePrincipals $servicePrincipals `
+            -AppRegistrations $appRegistrations `
+            -RoleAssignments $roleAssignments `
+            -PIMAssignments $pimAssignments `
+            -EscalationRisks $escalationRisks `
+            -GraphData $graphData `
+            -OutputPath $OutputPath
+    }
+    catch {
+        Write-Error "Failed to generate the report output: $($_.Exception.Message)"
+        throw
+    }
 
     $endTime = Get-Date
     $duration = $endTime - $startTime

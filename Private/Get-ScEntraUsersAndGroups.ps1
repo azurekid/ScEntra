@@ -22,10 +22,20 @@ function Get-ScEntraUsersAndGroups {
         }
     }
 
-    # Check required permissions
-    $requiredPermissions = @('User.Read.All', 'Group.Read.All', 'RoleEligibilitySchedule.Read.Directory')
-    if (-not (Test-GraphPermissions -RequiredPermissions $requiredPermissions -ResourceName "Users and Groups")) {
-        Write-Warning "Some data may be incomplete due to missing permissions."
+    # Check core permissions for users and groups
+    $corePermissions = @('User.Read.All', 'Group.Read.All')
+    if (-not (Test-GraphPermissions -RequiredPermissions $corePermissions -ResourceName "Users and Groups")) {
+        Write-Error "Cannot retrieve users and groups without User.Read.All and Group.Read.All permissions."
+        return @{
+            Users = @()
+            Groups = @()
+        }
+    }
+
+    $pimDiscoveryPermission = 'RoleEligibilitySchedule.Read.Directory'
+    $hasPimDiscovery = Test-GraphPermissions -RequiredPermissions @($pimDiscoveryPermission) -ResourceName "Users and Groups (PIM discovery)"
+    if (-not $hasPimDiscovery) {
+        Write-Warning "Skipping PIM-enabled group discovery because RoleEligibilitySchedule.Read.Directory is missing."
     }
 
     $result = @{
@@ -45,28 +55,32 @@ function Get-ScEntraUsersAndGroups {
         $groupUri = "$script:GraphBaseUrl/groups?`$top=999&`$select=$groupSelect"
         $result.Groups = Get-AllGraphItems -Uri $groupUri -ProgressActivity "Retrieving groups from Entra ID"
 
-        # Discover PIM-enabled groups via role eligibility schedules
-        # PIM enablement is independent from the isAssignableToRole flag
-        # (see https://learn.microsoft.com/entra/id-governance/privileged-identity-management/concept-pim-for-groups#relationship-between-role-assignable-groups-and-pim-for-groups)
-        $pimEnabledGroupIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-        
-        try {
-            $pimRoleAssignments = Get-AllGraphItems -Uri "$script:GraphBaseUrl/roleManagement/directory/roleEligibilityScheduleInstances?`$expand=principal" -ProgressActivity "Discovering PIM-enabled groups via role assignments"
-            
-            $pimRoleAssignments | Where-Object { $_.principal.'@odata.type' -eq '#microsoft.graph.group' -and $_.principal.id } | 
-                ForEach-Object { $null = $pimEnabledGroupIds.Add($_.principal.id) }
-        }
-        catch {
-            Write-Verbose "Unable to retrieve PIM role assignments for group discovery: $_"
-        }
+        # Discover PIM-enabled groups only if we have the needed scope
+        if ($hasPimDiscovery) {
+            $pimEnabledGroupIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            try {
+                $pimRoleAssignments = Get-AllGraphItems -Uri "$script:GraphBaseUrl/roleManagement/directory/roleEligibilityScheduleInstances?`$expand=principal" -ProgressActivity "Discovering PIM-enabled groups via role assignments"
+                $pimRoleAssignments | Where-Object { $_.principal.'@odata.type' -eq '#microsoft.graph.group' -and $_.principal.id } |
+                    ForEach-Object { $null = $pimEnabledGroupIds.Add($_.principal.id) }
+            }
+            catch {
+                Write-Verbose "Unable to retrieve PIM role assignments for group discovery: $_"
+            }
 
-        # Add PIM status to groups
-        $result.Groups | ForEach-Object {
-            $_ | Add-Member -NotePropertyName 'isPIMEnabled' -NotePropertyValue ($pimEnabledGroupIds.Contains($_.id)) -Force
-        }
+            $result.Groups | ForEach-Object {
+                $_ | Add-Member -NotePropertyName 'isPIMEnabled' -NotePropertyValue ($pimEnabledGroupIds.Contains($_.id)) -Force
+            }
 
-        if ($pimEnabledGroupIds.Count -gt 0) {
-            Write-Host "Detected $($pimEnabledGroupIds.Count) PIM-enabled groups via role eligibility schedules" -ForegroundColor Yellow
+            if ($pimEnabledGroupIds.Count -gt 0) {
+                Write-Host "Detected $($pimEnabledGroupIds.Count) PIM-enabled groups via role eligibility schedules" -ForegroundColor Yellow
+            }
+        }
+        else {
+            $result.Groups | ForEach-Object {
+                if (-not ($_.PSObject.Properties.Name -contains 'isPIMEnabled')) {
+                    $_ | Add-Member -NotePropertyName 'isPIMEnabled' -NotePropertyValue $false -Force
+                }
+            }
         }
 
         Write-Host "Retrieved $($result.Groups.Count) groups" -ForegroundColor Green

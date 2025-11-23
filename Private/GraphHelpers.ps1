@@ -5,6 +5,145 @@ $script:GraphAccessToken = $null
 $script:GraphApiVersion = 'beta'
 $script:GraphBaseUrl = "https://graph.microsoft.com/$script:GraphApiVersion"
 $script:MissingPermissions = @()
+$script:GraphPermissionHierarchy = @{
+    'Directory.Read.All'            = @('User.Read.All', 'Group.Read.All', 'Application.Read.All', 'ServicePrincipalEndpoint.Read.All', 'RoleManagement.Read.Directory', 'RoleManagement.Read.All')
+    'Directory.ReadWrite.All'       = @('User.ReadWrite.All', 'Group.ReadWrite.All', 'Application.ReadWrite.All', 'Directory.Read.All', 'User.Read.All', 'Group.Read.All', 'Application.Read.All', 'RoleManagement.Read.Directory', 'RoleManagement.Read.All')
+    'User.ReadWrite.All'            = @('User.Read.All')
+    'Group.ReadWrite.All'           = @('Group.Read.All')
+    'Application.ReadWrite.All'     = @('Application.Read.All')
+    'RoleManagement.ReadWrite.Directory' = @('RoleManagement.Read.Directory', 'RoleManagement.Read.All')
+}
+
+function Get-GraphTokenScopeInfo {
+    <#
+    .SYNOPSIS
+        Returns decoded token metadata including scopes and token type
+    #>
+    [CmdletBinding()]
+    param()
+
+    if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
+        return $null
+    }
+
+    try {
+        $tokenParts = $script:GraphAccessToken.Split('.')
+        if ($tokenParts.Count -lt 2) {
+            return $null
+        }
+
+        $tokenPayload = $tokenParts[1]
+        while ($tokenPayload.Length % 4 -ne 0) {
+            $tokenPayload += '='
+        }
+
+        $payloadBytes = [System.Convert]::FromBase64String($tokenPayload)
+        $payloadJson = [System.Text.Encoding]::UTF8.GetString($payloadBytes)
+        $payload = $payloadJson | ConvertFrom-Json
+
+        $isServicePrincipal = $false
+        $tokenScopes = @()
+
+        if ($payload.roles) {
+            $tokenScopes = @($payload.roles)
+            $isServicePrincipal = $true
+            Write-Verbose "Token type: Service Principal (Application permissions)"
+        }
+        elseif ($payload.scp) {
+            $tokenScopes = $payload.scp -split ' '
+            Write-Verbose "Token type: Delegated (User permissions)"
+        }
+
+        if ($tokenScopes.Count -gt 0) {
+            Write-Verbose "Token permissions: $($tokenScopes -join ', ')"
+        }
+
+        return [pscustomobject]@{
+            IsServicePrincipal = $isServicePrincipal
+            Scopes             = $tokenScopes
+            Payload            = $payload
+        }
+    }
+    catch {
+        Write-Verbose "Could not decode token to inspect permissions: $_"
+        return $null
+    }
+}
+
+function Get-GraphPermissionCoverage {
+    <#
+    .SYNOPSIS
+        Evaluates whether the current token satisfies the requested permissions
+    .PARAMETER RequiredPermissions
+        Array of permissions to validate
+    .PARAMETER TokenInfo
+        Optional pre-decoded token metadata
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$RequiredPermissions,
+
+        [Parameter(Mandatory = $false)]
+        [pscustomobject]$TokenInfo
+    )
+
+    if (-not $TokenInfo) {
+        $TokenInfo = Get-GraphTokenScopeInfo
+        if (-not $TokenInfo) {
+            return $null
+        }
+    }
+
+    $tokenScopes = $TokenInfo.Scopes
+    $missing = @()
+    $satisfied = @()
+    $matchMap = @{}
+
+    foreach ($required in $RequiredPermissions) {
+        $hasPermission = $false
+        $matchSource = $null
+
+        foreach ($tokenScope in $tokenScopes) {
+            if ($tokenScope -eq $required -or $tokenScope -like "*.$required" -or $tokenScope -like "$required.*") {
+                $hasPermission = $true
+                $matchSource = $tokenScope
+                Write-Verbose "Found exact match for '$required': $tokenScope"
+                break
+            }
+        }
+
+        if (-not $hasPermission) {
+            foreach ($higherPermission in $script:GraphPermissionHierarchy.Keys) {
+                if ($tokenScopes -contains $higherPermission -and $script:GraphPermissionHierarchy[$higherPermission] -contains $required) {
+                    $hasPermission = $true
+                    $matchSource = $higherPermission
+                    Write-Verbose "Permission '$required' satisfied by higher-level permission '$higherPermission'"
+                    break
+                }
+            }
+        }
+
+        if ($hasPermission) {
+            $satisfied += $required
+            if ($matchSource) {
+                $matchMap[$required] = $matchSource
+            }
+        }
+        else {
+            $missing += $required
+        }
+    }
+
+    return [pscustomobject]@{
+        TokenInfo            = $TokenInfo
+        MissingPermissions   = $missing
+        SatisfiedPermissions = $satisfied
+        HasAll               = ($missing.Count -eq 0)
+        HasAny               = ($satisfied.Count -gt 0)
+        MatchMap             = $matchMap
+    }
+}
 
 function Test-GraphPermissions {
     <#
@@ -28,107 +167,44 @@ function Test-GraphPermissions {
         return $false
     }
 
-    # Decode JWT token to check permissions
-    try {
-        $tokenParts = $script:GraphAccessToken.Split('.')
-        $tokenPayload = $tokenParts[1]
-        
-        # Add padding if needed
-        while ($tokenPayload.Length % 4 -ne 0) {
-            $tokenPayload += '='
+    $tokenInfo = Get-GraphTokenScopeInfo
+    if (-not $tokenInfo) {
+        Write-Verbose "Could not decode token to check permissions. Allowing API call to proceed."
+        return $true
+    }
+
+    $coverage = Get-GraphPermissionCoverage -RequiredPermissions $RequiredPermissions -TokenInfo $tokenInfo
+    if (-not $coverage) {
+        return $true
+    }
+
+    if ($coverage.HasAll) {
+        return $true
+    }
+
+    $missing = $coverage.MissingPermissions
+    if ($missing.Count -gt 0) {
+        $missingList = $missing -join ', '
+        $tokenType = if ($tokenInfo.IsServicePrincipal) { "service principal" } else { "user token" }
+        Write-Warning "⚠️  Missing required permissions for $ResourceName ($tokenType): $missingList"
+
+        if ($tokenInfo.IsServicePrincipal) {
+            Write-Host "   Service Principal needs these application permissions granted with admin consent" -ForegroundColor Yellow
         }
-        
-        $payloadBytes = [System.Convert]::FromBase64String($tokenPayload)
-        $payloadJson = [System.Text.Encoding]::UTF8.GetString($payloadBytes)
-        $payload = $payloadJson | ConvertFrom-Json
-        
-        # Determine if this is a service principal (app-only) or delegated (user) token
-        $isServicePrincipal = $false
-        $tokenScopes = @()
-        
-        if ($payload.roles) {
-            # Application permissions (service principal)
-            $tokenScopes = $payload.roles
-            $isServicePrincipal = $true
-            Write-Verbose "Token type: Service Principal (Application permissions)"
-        }
-        elseif ($payload.scp) {
-            # Delegated permissions (user)
-            $tokenScopes = $payload.scp -split ' '
-            $isServicePrincipal = $false
-            Write-Verbose "Token type: Delegated (User permissions)"
-        }
-        
-        Write-Verbose "Token permissions: $($tokenScopes -join ', ')"
-        
-        # Define permission hierarchy - higher-level permissions that satisfy lower-level ones
-        $permissionHierarchy = @{
-            'Directory.Read.All' = @('User.Read.All', 'Group.Read.All', 'Application.Read.All', 'ServicePrincipalEndpoint.Read.All', 'RoleManagement.Read.Directory', 'RoleManagement.Read.All')
-            'Directory.ReadWrite.All' = @('User.ReadWrite.All', 'Group.ReadWrite.All', 'Application.ReadWrite.All', 'Directory.Read.All', 'User.Read.All', 'Group.Read.All', 'Application.Read.All', 'RoleManagement.Read.Directory', 'RoleManagement.Read.All')
-            'User.ReadWrite.All' = @('User.Read.All')
-            'Group.ReadWrite.All' = @('Group.Read.All')
-            'Application.ReadWrite.All' = @('Application.Read.All')
-            'RoleManagement.ReadWrite.Directory' = @('RoleManagement.Read.Directory', 'RoleManagement.Read.All')
-        }
-        
-        # Check if all required permissions are present
-        $missing = @()
-        foreach ($required in $RequiredPermissions) {
-            $hasPermission = $false
-            
-            # Check for exact match or pattern match
-            foreach ($tokenScope in $tokenScopes) {
-                if ($tokenScope -eq $required -or $tokenScope -like "*.$required" -or $tokenScope -like "$required.*") {
-                    $hasPermission = $true
-                    Write-Verbose "Found exact match for '$required': $tokenScope"
-                    break
-                }
-            }
-            
-            # If not found, check if a higher-level permission satisfies this requirement
-            if (-not $hasPermission) {
-                foreach ($higherPermission in $permissionHierarchy.Keys) {
-                    if ($tokenScopes -contains $higherPermission -and $permissionHierarchy[$higherPermission] -contains $required) {
-                        $hasPermission = $true
-                        Write-Verbose "Permission '$required' satisfied by higher-level permission '$higherPermission'"
-                        break
-                    }
-                }
-            }
-            
-            if (-not $hasPermission) {
-                $missing += $required
-            }
-        }
-        
-        if ($missing.Count -gt 0) {
-            $missingList = $missing -join ', '
-            $tokenType = if ($isServicePrincipal) { "service principal" } else { "user token" }
-            Write-Warning "⚠️  Missing required permissions for $ResourceName ($tokenType): $missingList"
-            
-            if ($isServicePrincipal) {
-                Write-Host "   Service Principal needs these application permissions granted with admin consent" -ForegroundColor Yellow
-            } else {
-                Write-Host "   To resolve: Reconnect with required permissions or use an account with higher privileges" -ForegroundColor Yellow
-            }
-            
-            # Track missing permissions for summary
-            foreach ($perm in $missing) {
-                if ($script:MissingPermissions -notcontains $perm) {
-                    $script:MissingPermissions += $perm
-                }
-            }
-            
-            return $false
+        else {
+            Write-Host "   To resolve: Reconnect with required permissions or use an account with higher privileges" -ForegroundColor Yellow
         }
 
-        return $true
+        foreach ($perm in $missing) {
+            if ($script:MissingPermissions -notcontains $perm) {
+                $script:MissingPermissions += $perm
+            }
+        }
+
+        return $false
     }
-    catch {
-        Write-Verbose "Could not decode token to check permissions: $_"
-        # If we can't decode, allow the operation to proceed and let the API return an error
-        return $true
-    }
+
+    return $true
 }
 
 function Get-MissingPermissionsSummary {
