@@ -27,11 +27,4 @@ if (Test-Path $publicFolder) {
 Export-ModuleMember -Function @(
     'Connect-ScEntraGraph'
     'Invoke-ScEntraAnalysis'
-    'Get-ScEntraServicePrincipals'
-    'Get-ScEntraAppRegistrations'
-    'Get-ScEntraRoleAssignments'
-    'Get-ScEntraPIMAssignments'
-    'Get-ScEntraEscalationPaths'
-    'Export-ScEntraReport',
-    'Invoke-JsonAnonymizer'
 )

@@ -1,297 +1,159 @@
-# ScEntra Quick Start Guide
+git clone https://github.com/azurekid/ScEntra.git
+# ScEntra Operations & Quick Start Guide
+
+ScEntra inventories Entra ID objects, models escalation paths, and generates interactive reports that default to dark mode, highlight user metadata (UPN, creation time, password history), and emphasize selected entities. This guide rebuilds the documentation around the current experience and links to the deeper maintenance notes for contributors.
+
+## Table of Contents
+1. [Prerequisites](#prerequisites)
+2. [Installation](#installation)
+3. [Authentication Options](#authentication-options)
+4. [Running Analyses](#running-analyses)
+5. [Working with Output Files](#working-with-output-files)
+6. [Sample and Offline Data](#sample-and-offline-data)
+7. [Common Operational Tasks](#common-operational-tasks)
+8. [Troubleshooting](#troubleshooting)
+9. [Maintainer Notes](#maintainer-notes)
 
 ## Prerequisites
-
-Before using ScEntra, ensure you have:
-- PowerShell 7.0 or later
-- Azure PowerShell module (`Az`) or Azure CLI for authentication
+- PowerShell 7.0+ on macOS, Linux, or Windows.
+- Microsoft Graph credentials with, at minimum, `User.Read.All`, `Group.Read.All`, `Application.Read.All`, `RoleManagement.Read.Directory`, `RoleEligibilitySchedule.Read.Directory`, and `RoleAssignmentSchedule.Read.Directory`.
+- Optional but recommended: `Az` PowerShell module or Azure CLI for acquiring tokens.
 
 ## Installation
-
 ```powershell
-# Clone the repository
 git clone https://github.com/azurekid/ScEntra.git
 cd ScEntra
-
-# Import the module
 Import-Module ./ScEntra.psd1
 ```
+Re-import with `-Force` after pulling changes.
 
-## Authentication
+## Authentication Options
+ScEntra uses Microsoft Graph REST endpoints directly. Pick one of the following before running any workflow:
 
-ScEntra uses Microsoft Graph REST API and requires authentication via Azure PowerShell or Azure CLI.
-
-### Option 1: Azure PowerShell (Recommended)
-
+### Azure PowerShell Context (recommended)
 ```powershell
-# Install Azure PowerShell (if not already installed)
-Install-Module -Name Az -Scope CurrentUser
-
-# Authenticate
-Connect-AzAccount
+Install-Module Az -Scope CurrentUser   # once per machine
+Connect-AzAccount                      # interactive device or browser flow
 ```
 
-### Option 2: Azure CLI
-
+### Azure CLI Context
 ```bash
-# Install Azure CLI (if not already installed)
-# See: https://docs.microsoft.com/cli/azure/install-azure-cli
-
-# Authenticate
 az login
 ```
 
-## Quick Analysis
-
-### 1️⃣ Run Complete Analysis (Recommended)
-
+### Device Code Flow via `Connect-ScEntraGraph`
 ```powershell
-# After authenticating with Connect-AzAccount or az login:
-Import-Module ./ScEntra.psd1
+Connect-ScEntraGraph -UseDeviceCode    # requests only the scopes ScEntra needs
+```
 
-# This will:
-# - Use your existing Azure authentication
-# - Collect all inventory data
-# - Analyze escalation paths
-# - Generate HTML and JSON reports
+Provide `-AccessToken` to `Connect-ScEntraGraph` if you already have an app-only Graph token that includes the required scopes.
+
+## Running Analyses
+
+### Full pipeline (inventory → analysis → report)
+```powershell
+Import-Module ./ScEntra.psd1
 Invoke-ScEntraAnalysis
 ```
+Generates timestamped HTML and JSON in the repo root. Use `-OutputPath` to write the HTML elsewhere or `-OutputJsonPath` for custom JSON locations.
 
-### 2️⃣ Custom Output Location
-
+### Skipping the connection check
+If you already authenticated with Az or Azure CLI and do not want the module to re-check:
 ```powershell
-Invoke-ScEntraAnalysis -OutputPath "C:\Reports\MyEntraAnalysis.html"
-```
-
-### 3️⃣ Pre-authenticated Connection
-
-```powershell
-# Authenticate first
-Connect-AzAccount
-# or: az login
-
-# Import module
-Import-Module ./ScEntra.psd1
-
-# Run analysis without checking connection again
 Invoke-ScEntraAnalysis -SkipConnection
 ```
 
-## Common Scenarios
-
-### Find Role-Enabled Groups
-
+### Using existing JSON (no new Graph calls)
 ```powershell
-Import-Module ./ScEntra.psd1
-
-# Authenticate first
-Connect-AzAccount
-
-# Get all groups
-$groups = Get-ScEntraGroups
-
-# Filter to role-enabled groups
-$roleEnabledGroups = $groups | Where-Object { $_.isAssignableToRole -eq $true }
-
-# Display
-$roleEnabledGroups | Select-Object displayName, memberCount, isAssignableToRole | Format-Table
+./Generate-ReportFromJson.ps1 -JsonPath ./ScEntra-Report-20251123-111337.json
 ```
+This rebuilds an HTML report with the latest UI code (dark theme default, enlarged selection halo, expanded user metadata).
 
-### Identify High-Risk Users
-
+### Sharing or sanitizing output
 ```powershell
-# Get all data
-$users = Get-ScEntraUsers
-$roles = Get-ScEntraRoleAssignments
-
-# Find users with multiple roles
-$userRoles = $roles | Where-Object { $_.MemberType -eq 'user' } | 
-    Group-Object -Property MemberId
-
-$highRiskUsers = $userRoles | Where-Object { $_.Count -gt 2 }
-
-foreach ($userRole in $highRiskUsers) {
-    $user = $users | Where-Object { $_.id -eq $userRole.Name }
-    if ($user) {
-        Write-Host "$($user.displayName): $($userRole.Count) roles" -ForegroundColor Yellow
-        $userRole.Group | ForEach-Object { Write-Host "  - $($_.RoleName)" }
-    }
-}
+./Invoke-JsonAnonymizer.ps1 -InputPath ./ScEntra-Report-20251123-111337.json -OutputPath ./anonymized.json
 ```
+Use the anonymized JSON with `Generate-ReportFromJson.ps1` to produce a sanitized HTML artifact for demos.
 
-### Analyze Service Principal Risks
+## Working with Output Files
+- **HTML** (`ScEntra-Report-YYYYMMDD-HHMMSS.html`): interactive, dark by default, includes filters, grouping, escalation focus modes, and a modal showing per-node metadata (UPN, account status, source sync flag, created time, last password change).
+- **JSON** (`ScEntra-Report-YYYYMMDD-HHMMSS.json`): structured data, consumable by custom tooling or for regenerating HTML later.
+- Both files share the same timestamp stem. Keep pairs together for forensic or diff workflows.
 
-```powershell
-$sps = Get-ScEntraServicePrincipals
-$roles = Get-ScEntraRoleAssignments
+## Sample and Offline Data
 
-# Find service principals with role assignments
-$spRoles = $roles | Where-Object { $_.MemberType -match 'servicePrincipal' }
+| Script | Purpose | Key Facts |
+| --- | --- | --- |
+| `Generate-LargeSampleReport.ps1` | Builds a 200-user, 150+ risk synthetic tenant | Exercises every visualization and escalation rule. |
+| `Generate-ReportFromJson.ps1` | Converts any saved JSON into HTML | Handy when testing UI changes with a frozen dataset. |
 
-foreach ($spRole in $spRoles) {
-    $sp = $sps | Where-Object { $_.id -eq $spRole.MemberId }
-    if ($sp) {
-        Write-Host "Service Principal: $($sp.displayName)" -ForegroundColor Cyan
-        Write-Host "  Role: $($spRole.RoleName)" -ForegroundColor Yellow
-    }
-}
-```
+These flows require no Entra access. Use them for training, UI regression testing, or community demos.
 
-### Export Specific Data
+## Common Operational Tasks
 
+### Analyze and filter results
 ```powershell
 # Run full analysis
 $results = Invoke-ScEntraAnalysis
 
-# Export high severity risks to CSV
-$results.EscalationRisks | 
-    Where-Object { $_.Severity -eq 'High' } |
-    Export-Csv -Path "./high-risks.csv" -NoTypeInformation
-
-# Export all role assignments to JSON
-$results.RoleAssignments | 
-    ConvertTo-Json -Depth 10 | 
-    Out-File "./role-assignments.json"
-
-# Export PIM assignments to CSV
-$results.PIMAssignments | 
-    Export-Csv -Path "./pim-assignments.csv" -NoTypeInformation
+# Access collected data
+$results.Users           # All users
+$results.Groups          # All groups
+$results.ServicePrincipals
+$results.AppRegistrations
+$results.RoleAssignments
+$results.PIMAssignments
+$results.EscalationRisks
 ```
 
-### Check PIM Eligible Assignments
-
+### Export high-severity risks
 ```powershell
-$pim = Get-ScEntraPIMAssignments
-
-# Filter eligible assignments
-$eligible = $pim | Where-Object { $_.AssignmentType -eq 'PIM-Eligible' }
-
-Write-Host "Eligible PIM Assignments: $($eligible.Count)" -ForegroundColor Cyan
-
-# Group by principal
-$byPrincipal = $eligible | Group-Object -Property PrincipalId
-
-foreach ($group in $byPrincipal) {
-    Write-Host "`nPrincipal: $($group.Name)" -ForegroundColor Yellow
-    $group.Group | ForEach-Object {
-        Write-Host "  - $($_.RoleName)" -ForegroundColor White
-    }
-}
-```
-
-### Find Nested Group Memberships
-
-```powershell
-# Note: You can check nested memberships using the REST API
-# The module's escalation path analysis already includes this check
-
-# Run full analysis to see nested group risks
 $results = Invoke-ScEntraAnalysis
-
-# Filter for nested group membership risks
-$nestedRisks = $results.EscalationRisks | 
-    Where-Object { $_.RiskType -eq 'NestedGroupMembership' }
-
-foreach ($risk in $nestedRisks) {
-    Write-Host "Group: $($risk.GroupName)" -ForegroundColor Yellow
-    Write-Host "  Role: $($risk.RoleName)" -ForegroundColor Cyan
-    Write-Host "  Direct Members: $($risk.DirectMembers)" -ForegroundColor Green
-    Write-Host "  Nested Members: $($risk.NestedMembers)" -ForegroundColor Yellow
-}
+$results.EscalationRisks | Where-Object Severity -eq 'High' |
+    Export-Csv ./high-risks.csv -NoTypeInformation
 ```
 
-## Generate Sample Report (No Authentication Needed)
-
+### Filter role-enabled groups
 ```powershell
-# Generate a sample report with mock data
-./Generate-SampleReport.ps1
+$results = Invoke-ScEntraAnalysis
+$results.Groups | Where-Object { $_.isAssignableToRole } |
+    Select-Object displayName, memberCount, isAssignableToRole
+```
 
-# Open the generated report
-Invoke-Item ./ScEntra-Sample-Report.html
+### Find users with multiple privileged roles
+```powershell
+$results = Invoke-ScEntraAnalysis
+$results.RoleAssignments | Where-Object { $_.MemberType -eq 'user' } |
+    Group-Object MemberId | Where-Object { $_.Count -gt 2 } |
+    ForEach-Object {
+        $userId = $_.Name
+        $user = $results.Users | Where-Object { $_.id -eq $userId }
+        [PSCustomObject]@{
+            User = $user.displayName
+            UPN = $user.userPrincipalName
+            RoleCount = $_.Count
+            Roles = ($_.Group.RoleName -join ', ')
+        }
+    }
 ```
 
 ## Troubleshooting
 
-### Module Won't Load
+| Symptom | Resolution |
+| --- | --- |
+| Module fails to import | `Remove-Module ScEntra -ErrorAction SilentlyContinue; Import-Module ./ScEntra.psd1 -Force` |
+| Authentication errors | Re-run `Connect-AzAccount` (or `az login`), then `Connect-ScEntraGraph -UseDeviceCode -SkipScopesCheck:$false` to re-validate permissions. |
+| Missing Graph scopes | **ScEntra continues running with partial data when permissions are missing.** At the end of analysis, it displays a summary of missing permissions (e.g., PIM assignments skipped if `RoleEligibilitySchedule.Read.Directory` is unavailable). To collect complete data, ensure the signed-in principal has consented to `User.Read.All`, `Group.Read.All`, `Application.Read.All`, `RoleManagement.Read.Directory`, `RoleEligibilitySchedule.Read.Directory`, `RoleAssignmentSchedule.Read.Directory`, and `PrivilegedAccess.Read.AzureADGroup`. Sign in with Global Reader or higher and accept the consent prompt displayed by `Connect-ScEntraGraph -UseDeviceCode`. |
+| Report shows stale UI | Re-run `Generate-ReportFromJson.ps1` against the existing JSON so the latest `ReportBuilder` template (dark mode, enhanced node sizing) is embedded. |
+| JSON too sensitive to share | Run `Invoke-JsonAnonymizer.ps1` to replace identifiers; regenerate HTML from the sanitized JSON. |
 
-```powershell
-# Ensure you're in the correct directory
-cd /path/to/ScEntra
+For more intricate debugging (Graph throttling, pagination, etc.) see `docs/MAINTENANCE.md`.
 
-# Force reload
-Remove-Module ScEntra -ErrorAction SilentlyContinue
-Import-Module ./ScEntra.psd1 -Force
-```
+## Maintainer Notes
+Community contributors should read `docs/MAINTENANCE.md` for:
+- Module architecture maps (data collection, analysis, visualization).
+- Function-by-function expectations and testing hooks.
+- Guidance for adding new Graph fields, risk heuristics, or UI affordances.
+- Validation checklists and release hygiene.
 
-### Authentication Issues
-
-**Azure PowerShell:**
-```powershell
-# Disconnect and reconnect
-Disconnect-AzAccount
-Connect-AzAccount
-
-# Verify connection
-Get-AzContext
-```
-
-**Azure CLI:**
-```bash
-# Logout and login again
-az logout
-az login
-
-# Verify connection
-az account show
-```
-
-### Missing Permissions
-
-If you get permission errors, ensure your account has the required Microsoft Graph API permissions:
-- `User.Read.All` - Read all users
-- `Group.Read.All` - Read all groups
-- `Application.Read.All` - Read applications and service principals
-- `RoleManagement.Read.Directory` - Read directory role assignments
-- `RoleEligibilitySchedule.Read.Directory` - Read PIM eligible assignments
-- `RoleAssignmentSchedule.Read.Directory` - Read PIM active assignments
-
-Your account typically needs Global Reader role or equivalent permissions.
-
-## Output Files
-
-After running `Invoke-ScEntraAnalysis`, you'll get:
-
-1. **HTML Report** (`ScEntra-Report-YYYYMMDD-HHMMSS.html`)
-   - Interactive dashboard with charts
-   - Risk tables with severity indicators
-   - Statistics cards
-
-2. **JSON Data** (`ScEntra-Report-YYYYMMDD-HHMMSS.json`)
-   - Complete structured data
-   - All collected inventory
-   - All identified risks
-
-## Next Steps
-
-1. Review the generated HTML report
-2. Focus on high-severity risks first
-3. Investigate role-enabled groups
-4. Review service principal ownerships
-5. Audit PIM assignments
-6. Check nested group memberships
-
-## Getting Help
-
-```powershell
-# Get help for any function
-Get-Help Invoke-ScEntraAnalysis -Detailed
-Get-Help Get-ScEntraUsers -Examples
-Get-Help Export-ScEntraReport -Full
-
-# List all available functions
-Get-Command -Module ScEntra
-```
-
-## Examples
-
-See `Examples.ps1` for more detailed usage examples.
+Use `Get-Command -Module ScEntra` for a live list of exported functions (currently `Connect-ScEntraGraph` and `Invoke-ScEntraAnalysis`) and `Get-Help <FunctionName> -Detailed` for inline documentation.

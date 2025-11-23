@@ -35,7 +35,7 @@ function Get-ScEntraUsersAndGroups {
 
     try {
         # Fetch users
-        $userSelect = "id,displayName,userPrincipalName,mail,accountEnabled,createdDateTime,userType,onPremisesSyncEnabled"
+        $userSelect = "id,displayName,userPrincipalName,mail,accountEnabled,createdDateTime,userType,onPremisesSyncEnabled,lastPasswordChangeDateTime,signInSessionsValidFromDateTime"
         $userUri = "$script:GraphBaseUrl/users?`$top=999&`$select=$userSelect"
         $result.Users = Get-AllGraphItems -Uri $userUri -ProgressActivity "Retrieving users from Entra ID"
         Write-Host "Retrieved $($result.Users.Count) users" -ForegroundColor Green

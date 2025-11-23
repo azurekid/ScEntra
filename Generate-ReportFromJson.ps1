@@ -63,7 +63,8 @@ if ($reportPath) {
     
     # Open in browser
     Invoke-Item $reportPath
-} else {
+}
+else {
     Write-Error "Failed to regenerate report"
     exit 1
 }

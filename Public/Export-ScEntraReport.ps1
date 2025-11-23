@@ -47,6 +47,7 @@ function Export-ScEntraReport {
         [Parameter(Mandatory = $false)][array]$PIMAssignments = @(),
         [Parameter(Mandatory = $false)][array]$EscalationRisks = @(),
         [Parameter(Mandatory = $false)][hashtable]$GraphData = $null,
+        [Parameter(Mandatory = $false)][hashtable]$GroupMemberships = @{},
         [Parameter(Mandatory = $false)][string]$OutputPath = "./ScEntra-Report-$(Get-Date -Format 'yyyyMMdd-HHmmss').html"
     )
 
@@ -73,6 +74,7 @@ function Export-ScEntraReport {
             AppRegistrations = $AppRegistrations | Select-Object id, displayName, appId
             RoleAssignments = $RoleAssignments
             PIMAssignments = $PIMAssignments
+            GroupMemberships = $GroupMemberships
             EscalationRisks = $EscalationRisks
             GraphData = $GraphData
         }

@@ -172,14 +172,36 @@ function New-ScEntraGraphData {
         return $null
     }
 
+    $normalizeResourceName = {
+        param(
+            [string]$ResourceName,
+            [string]$ResourceAppId
+        )
+
+        $legacyAppId = '00000002-0000-0000-c000-000000000000'
+        if (($ResourceAppId -and $ResourceAppId -eq $legacyAppId) -or ($ResourceName -and $ResourceName -eq 'Windows Azure Active Directory')) {
+            return 'Azure AD Graph (Legacy)'
+        }
+        return $ResourceName
+    }
+
     $buildPermissionNodeId = {
         param(
             [string]$ResourceKey,
-            [string]$Identifier
+            [string]$Identifier,
+            [string]$PermissionValue
         )
         if (-not $ResourceKey) { $ResourceKey = 'unknown' }
-        if (-not $Identifier) { $Identifier = ([Guid]::NewGuid().ToString('N')) }
-        $safeIdentifier = $Identifier -replace '[^A-Za-z0-9]', '_'
+        $baseIdentifier = if ($PermissionValue) {
+            $PermissionValue
+        }
+        elseif ($Identifier) {
+            $Identifier
+        }
+        else {
+            [Guid]::NewGuid().ToString('N')
+        }
+        $safeIdentifier = $baseIdentifier -replace '[^A-Za-z0-9]', '_'
         return "permission-$ResourceKey-$safeIdentifier"
     }
 
@@ -207,13 +229,17 @@ function New-ScEntraGraphData {
                 $description = $permissionEscalationTargets[$PermissionValue].Description
             }
 
+            $grantTypes = @()
+            if ($PermissionKind) { $grantTypes += $PermissionKind }
+            $resolvedKind = if ($grantTypes.Count -eq 1) { $grantTypes[0] } elseif ($grantTypes.Count -gt 1) { 'Mixed' } else { $null }
+
             $null = $nodes.Add(@{
                 id = $NodeId
                 label = $Label
                 type = 'apiPermission'
                 resource = $ResourceName
                 permissionValue = $PermissionValue
-                permissionKind = $PermissionKind
+                permissionKind = $resolvedKind
                 permissionDisplayName = $PermissionDisplayName
                 permissionDescription = $PermissionDescription
                 permissionAudience = $PermissionAudience
@@ -221,8 +247,39 @@ function New-ScEntraGraphData {
                 severity = $severity
                 escalationDescription = $description
                 iconSvg = $permissionIconSvg
+                grantTypes = $grantTypes
             })
             $nodeIndex[$NodeId] = $nodes.Count - 1
+        }
+        else {
+            $existingIndex = $nodeIndex[$NodeId]
+            $existingNode = $nodes[$existingIndex]
+            if ($PermissionKind) {
+                if (-not $existingNode.ContainsKey('grantTypes') -or -not $existingNode.grantTypes) {
+                    $existingNode.grantTypes = @()
+                }
+                if ($existingNode.grantTypes -notcontains $PermissionKind) {
+                    $existingNode.grantTypes += $PermissionKind
+                }
+                if ($existingNode.grantTypes.Count -gt 1) {
+                    $existingNode.permissionKind = 'Mixed'
+                }
+                else {
+                    $existingNode.permissionKind = $existingNode.grantTypes[0]
+                }
+            }
+            if (-not $existingNode.permissionDisplayName -and $PermissionDisplayName) {
+                $existingNode.permissionDisplayName = $PermissionDisplayName
+            }
+            if (-not $existingNode.permissionDescription -and $PermissionDescription) {
+                $existingNode.permissionDescription = $PermissionDescription
+            }
+            if (-not $existingNode.permissionAudience -and $PermissionAudience) {
+                $existingNode.permissionAudience = $PermissionAudience
+            }
+            if (-not $existingNode.adminConsentRequired -and $AdminConsentRequired) {
+                $existingNode.adminConsentRequired = $AdminConsentRequired
+            }
         }
     }
 
@@ -281,6 +338,49 @@ function New-ScEntraGraphData {
         }
 
         return 'box'
+    }
+
+    $ensureUserNode = {
+        param($user)
+
+        if (-not $user -or -not $user.id) {
+            return
+        }
+
+        $displayLabel = if ([string]::IsNullOrWhiteSpace($user.displayName)) {
+            $user.userPrincipalName
+        }
+        else {
+            $user.displayName
+        }
+
+        $baseNodeData = [ordered]@{
+            id = $user.id
+            label = $displayLabel
+            type = 'user'
+            userPrincipalName = $user.userPrincipalName
+            accountEnabled = $user.accountEnabled
+            mail = $user.mail
+            userType = $user.userType
+            onPremisesSyncEnabled = $user.onPremisesSyncEnabled
+            createdDateTime = $user.createdDateTime
+            lastPasswordChangeDateTime = $user.lastPasswordChangeDateTime
+        }
+
+        if ($user.PSObject.Properties.Name -contains 'signInSessionsValidFromDateTime') {
+            $baseNodeData['signInSessionsValidFromDateTime'] = $user.signInSessionsValidFromDateTime
+        }
+
+        if (-not $nodeIndex.ContainsKey($user.id)) {
+            $null = $nodes.Add($baseNodeData)
+            $nodeIndex[$user.id] = $nodes.Count - 1
+        }
+        else {
+            $existingNode = $nodes[$nodeIndex[$user.id]]
+            foreach ($key in $baseNodeData.Keys) {
+                $existingNode[$key] = $baseNodeData[$key]
+            }
+        }
     }
     
     # Define high-privilege roles for escalation path analysis
@@ -342,16 +442,7 @@ function New-ScEntraGraphData {
             'user' {
                 $user = $Users | Where-Object { $_.id -eq $assignment.MemberId } | Select-Object -First 1
                 if ($user) {
-                    if (-not $nodeIndex.ContainsKey($user.id)) {
-                        $null = $nodes.Add(@{
-                            id = $user.id
-                            label = $user.displayName
-                            type = 'user'
-                            userPrincipalName = $user.userPrincipalName
-                            accountEnabled = $user.accountEnabled
-                        })
-                        $nodeIndex[$user.id] = $nodes.Count - 1
-                    }
+                    & $ensureUserNode $user
                     $null = $edges.Add(@{
                         from = $user.id
                         to = $roleId
@@ -420,16 +511,7 @@ function New-ScEntraGraphData {
             'user' {
                 $user = $Users | Where-Object { $_.id -eq $pimAssignment.PrincipalId } | Select-Object -First 1
                 if ($user) {
-                    if (-not $nodeIndex.ContainsKey($user.id)) {
-                        $null = $nodes.Add(@{
-                            id = $user.id
-                            label = $user.displayName
-                            type = 'user'
-                            userPrincipalName = $user.userPrincipalName
-                            accountEnabled = $user.accountEnabled
-                        })
-                        $nodeIndex[$user.id] = $nodes.Count - 1
-                    }
+                    & $ensureUserNode $user
                     $null = $edges.Add(@{
                         from = $user.id
                         to = $roleId
@@ -533,16 +615,7 @@ function New-ScEntraGraphData {
                     'user' {
                         $user = $Users | Where-Object { $_.id -eq $member.id } | Select-Object -First 1
                         if ($user) {
-                            if (-not $nodeIndex.ContainsKey($user.id)) {
-                                $null = $nodes.Add(@{
-                                    id = $user.id
-                                    label = $user.displayName
-                                    type = 'user'
-                                    userPrincipalName = $user.userPrincipalName
-                                    accountEnabled = $user.accountEnabled
-                                })
-                                $nodeIndex[$user.id] = $nodes.Count - 1
-                            }
+                            & $ensureUserNode $user
                             $null = $edges.Add(@{
                                 from = $user.id
                                 to = $group.id
@@ -602,16 +675,7 @@ function New-ScEntraGraphData {
             foreach ($owner in $GroupOwners[$groupId]) {
                 $user = $Users | Where-Object { $_.id -eq $owner.id } | Select-Object -First 1
                 if ($user) {
-                    if (-not $nodeIndex.ContainsKey($user.id)) {
-                        $null = $nodes.Add(@{
-                            id = $user.id
-                            label = $user.displayName
-                            type = 'user'
-                            userPrincipalName = $user.userPrincipalName
-                            accountEnabled = $user.accountEnabled
-                        })
-                        $nodeIndex[$user.id] = $nodes.Count - 1
-                    }
+                    & $ensureUserNode $user
                     $null = $edges.Add(@{
                         from = $user.id
                         to = $group.id
@@ -641,16 +705,7 @@ function New-ScEntraGraphData {
             foreach ($owner in $SPOwners[$spId]) {
                 $user = $Users | Where-Object { $_.id -eq $owner.id } | Select-Object -First 1
                 if ($user) {
-                    if (-not $nodeIndex.ContainsKey($user.id)) {
-                        $null = $nodes.Add(@{
-                            id = $user.id
-                            label = $user.displayName
-                            type = 'user'
-                            userPrincipalName = $user.userPrincipalName
-                            accountEnabled = $user.accountEnabled
-                        })
-                        $nodeIndex[$user.id] = $nodes.Count - 1
-                    }
+                    & $ensureUserNode $user
                     $null = $edges.Add(@{
                         from = $user.id
                         to = $sp.id
@@ -683,16 +738,7 @@ function New-ScEntraGraphData {
                 if ($principalType -eq 'User') {
                     $user = $Users | Where-Object { $_.id -eq $assignment.principalId } | Select-Object -First 1
                     if ($user) {
-                        if (-not $nodeIndex.ContainsKey($user.id)) {
-                            $null = $nodes.Add(@{
-                                id = $user.id
-                                label = $user.displayName
-                                type = 'user'
-                                userPrincipalName = $user.userPrincipalName
-                                accountEnabled = $user.accountEnabled
-                            })
-                            $nodeIndex[$user.id] = $nodes.Count - 1
-                        }
+                        & $ensureUserNode $user
                         $null = $edges.Add(@{
                             from = $user.id
                             to = $sp.id
@@ -746,16 +792,7 @@ function New-ScEntraGraphData {
             foreach ($owner in $AppOwners[$appId]) {
                 $user = $Users | Where-Object { $_.id -eq $owner.id } | Select-Object -First 1
                 if ($user) {
-                    if (-not $nodeIndex.ContainsKey($user.id)) {
-                        $null = $nodes.Add(@{
-                            id = $user.id
-                            label = $user.displayName
-                            type = 'user'
-                            userPrincipalName = $user.userPrincipalName
-                            accountEnabled = $user.accountEnabled
-                        })
-                        $nodeIndex[$user.id] = $nodes.Count - 1
-                    }
+                    & $ensureUserNode $user
                     $null = $edges.Add(@{
                         from = $user.id
                         to = $app.id
@@ -799,6 +836,48 @@ function New-ScEntraGraphData {
         }
     }
 
+    # First pass: Track all granted permissions to avoid duplicate edges
+    $grantedPermissions = @{}
+    foreach ($sp in $ServicePrincipals) {
+        $hasAppPerms = $sp.PSObject.Properties.Name -contains 'GrantedApplicationPermissions' -and $sp.GrantedApplicationPermissions.Count -gt 0
+        $hasDelegatedPerms = $sp.PSObject.Properties.Name -contains 'GrantedDelegatedPermissions' -and $sp.GrantedDelegatedPermissions.Count -gt 0
+        
+        if ($hasAppPerms) {
+            foreach ($assignment in $sp.GrantedApplicationPermissions) {
+                $resourceKey = if ($servicePrincipalsById.ContainsKey($assignment.ResourceId) -and $servicePrincipalsById[$assignment.ResourceId].appId) {
+                    $servicePrincipalsById[$assignment.ResourceId].appId
+                } else {
+                    $assignment.ResourceId
+                }
+                $identifier = if ($assignment.AppRoleId) { $assignment.AppRoleId } else { $assignment.AppRoleValue }
+                $permissionNodeId = & $buildPermissionNodeId $resourceKey $identifier
+                $grantedPermissions["$($sp.appId)::$permissionNodeId"] = $true
+            }
+        }
+        
+        if ($hasDelegatedPerms) {
+            foreach ($grant in $sp.GrantedDelegatedPermissions) {
+                $resourceKey = if ($servicePrincipalsById.ContainsKey($grant.ResourceId) -and $servicePrincipalsById[$grant.ResourceId].appId) {
+                    $servicePrincipalsById[$grant.ResourceId].appId
+                } else {
+                    $grant.ResourceId
+                }
+                
+                $scopeEntries = if ($grant.ResolvedScopes) { $grant.ResolvedScopes } else { @() }
+                if ($scopeEntries.Count -eq 0 -and $grant.RawScope) {
+                    $scopeEntries = @([PSCustomObject]@{ ScopeId = $null; ScopeName = $grant.RawScope })
+                }
+                
+                foreach ($scopeEntry in $scopeEntries) {
+                    $identifier = if ($scopeEntry.ScopeId) { $scopeEntry.ScopeId } else { $scopeEntry.ScopeName }
+                    if (-not $identifier -and $grant.GrantId) { $identifier = "$($grant.GrantId)-scope" }
+                    $permissionNodeId = & $buildPermissionNodeId $resourceKey $identifier
+                    $grantedPermissions["$($sp.appId)::$permissionNodeId"] = $true
+                }
+            }
+        }
+    }
+
     # Visualize requested API permissions on app registrations
     foreach ($app in $AppRegistrations) {
         if (-not $nodeIndex.ContainsKey($app.id)) {
@@ -820,6 +899,7 @@ function New-ScEntraGraphData {
                 $resourceSp = $servicePrincipalsByAppId[$resource.ResourceAppId]
             }
             $resourceName = if ($resourceSp) { $resourceSp.displayName } else { $resource.ResourceAppId }
+            $resourceName = & $normalizeResourceName $resourceName $resource.ResourceAppId
 
             foreach ($permission in $resource.ResourceAccess) {
                 $permissionType = if ($permission.type) { $permission.type } else { 'Unknown' }
@@ -877,19 +957,24 @@ function New-ScEntraGraphData {
                 $permissionLabel = "$($resourceName): $labelValue"
 
                 $identifier = if ($permissionDefinition -and $permissionDefinition.id) { $permissionDefinition.id } elseif ($permission.id) { $permission.id } else { $permissionValue }
-                $permissionNodeId = & $buildPermissionNodeId $resource.ResourceAppId $identifier
+                $permissionNodeId = & $buildPermissionNodeId $resource.ResourceAppId $identifier $permissionValue
 
                 & $ensurePermissionNode $permissionNodeId $permissionLabel $resourceName $permissionValue $permissionType $displayText $permissionDescription ($permissionMetadata.Audience) ($permissionMetadata.AdminConsentRequired)
 
-                $edgeKey = "requests::$($app.id)->$permissionNodeId"
-                if (-not $permissionAssociationTracker.Contains($edgeKey)) {
-                    $null = $edges.Add(@{
-                        from = $app.id
-                        to = $permissionNodeId
-                        type = 'requests_permission'
-                        label = if ($permissionType -eq 'Scope') { 'Delegated' } else { 'Application' }
-                    })
-                    [void]$permissionAssociationTracker.Add($edgeKey)
+                # Only add requests_permission edge if this permission is NOT granted
+                $isGranted = $grantedPermissions.ContainsKey("$($app.appId)::$permissionNodeId")
+                if (-not $isGranted) {
+                    $edgeKey = "requests::$($app.id)->$permissionNodeId"
+                    if (-not $permissionAssociationTracker.Contains($edgeKey)) {
+                        $null = $edges.Add(@{
+                            from = $app.id
+                            to = $permissionNodeId
+                            type = 'requests_permission'
+                            label = if ($permissionType -eq 'Scope') { 'Delegated' } else { 'Application' }
+                            grantType = if ($permissionType -eq 'Scope') { 'Delegated' } else { 'Application' }
+                        })
+                        [void]$permissionAssociationTracker.Add($edgeKey)
+                    }
                 }
             }
         }
@@ -919,6 +1004,7 @@ function New-ScEntraGraphData {
                 } else { $null }
                 $resourceName = if ($assignment.ResourceDisplayName) { $assignment.ResourceDisplayName } elseif ($resourceSp) { $resourceSp.displayName } else { $assignment.ResourceId }
                 $resourceKey = if ($resourceSp -and $resourceSp.appId) { $resourceSp.appId } else { $assignment.ResourceId }
+                $resourceName = & $normalizeResourceName $resourceName $resourceKey
 
                 $permissionMetadata = if ($assignment.AppRoleId) { & $resolvePermissionMetadata $assignment.AppRoleId } else { $null }
                 $permissionValue = if ($assignment.AppRoleValue) {
@@ -957,7 +1043,7 @@ function New-ScEntraGraphData {
                 $permissionLabel = "$($resourceName): $permissionValue"
 
                 $identifier = if ($assignment.AppRoleId) { $assignment.AppRoleId } else { $permissionValue }
-                $permissionNodeId = & $buildPermissionNodeId $resourceKey $identifier
+                $permissionNodeId = & $buildPermissionNodeId $resourceKey $identifier $permissionValue
 
                 & $ensurePermissionNode $permissionNodeId $permissionLabel $resourceName $permissionValue 'Role' $displayGrantName $permissionDescription ($permissionMetadata.Audience) ($permissionMetadata.AdminConsentRequired)
                 & $linkPermissionToRoles $permissionNodeId $permissionValue
@@ -970,6 +1056,7 @@ function New-ScEntraGraphData {
                         type = 'has_permission'
                         label = 'Application Grant'
                         grantId = $assignment.AssignmentId
+                        grantType = 'Application'
                     })
                     [void]$permissionAssociationTracker.Add($edgeKey)
                 }
@@ -983,6 +1070,7 @@ function New-ScEntraGraphData {
                 } else { $null }
                 $resourceName = if ($grant.ResourceDisplayName) { $grant.ResourceDisplayName } elseif ($resourceSp) { $resourceSp.displayName } else { $grant.ResourceId }
                 $resourceKey = if ($resourceSp -and $resourceSp.appId) { $resourceSp.appId } else { $grant.ResourceId }
+                $resourceName = & $normalizeResourceName $resourceName $resourceKey
 
                 $scopeEntries = if ($grant.ResolvedScopes) { $grant.ResolvedScopes } else { @() }
                 if ($scopeEntries.Count -eq 0 -and $grant.RawScope) {
@@ -992,7 +1080,7 @@ function New-ScEntraGraphData {
                 foreach ($scopeEntry in $scopeEntries) {
                     $identifier = if ($scopeEntry.ScopeId) { $scopeEntry.ScopeId } else { $scopeEntry.ScopeName }
                     if (-not $identifier -and $grant.GrantId) { $identifier = "$($grant.GrantId)-scope" }
-                    $permissionNodeId = & $buildPermissionNodeId $resourceKey $identifier
+                    $permissionNodeId = & $buildPermissionNodeId $resourceKey $identifier $permissionValue
 
                     $permissionMetadata = if ($scopeEntry.ScopeId) { & $resolvePermissionMetadata $scopeEntry.ScopeId } else { $null }
                     $displayName = if ($scopeEntry.ScopeDisplayName) {
@@ -1047,6 +1135,7 @@ function New-ScEntraGraphData {
                             grantId = $grant.GrantId
                             consentType = $grant.ConsentType
                             principalId = $grant.PrincipalId
+                            grantType = 'Delegated'
                         })
                         [void]$permissionAssociationTracker.Add($edgeKey)
                     }

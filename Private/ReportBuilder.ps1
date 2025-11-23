@@ -271,14 +271,14 @@ function New-ScEntraGraphSection {
                 <div style="margin-top: 8px; font-size: 0.85em; color: var(--accent-color); font-weight: 600;">🔍 Click here for detailed information</div>
             </div>
 
-            <div id="nodeDetailsModal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 0; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); z-index: 1000; max-width: 600px; width: 90%; max-height: 80vh; overflow: hidden;">
-                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; display: flex; justify-content: space-between; align-items: center;">
-                    <h3 style="margin: 0; font-size: 1.3em;" id="modalTitle">Node Details</h3>
-                    <button id="closeModal" style="background: rgba(255,255,255,0.2); border: none; color: white; font-size: 24px; cursor: pointer; width: 32px; height: 32px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">&times;</button>
+            <div id="nodeDetailsModal" class="node-details-modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+                <div class="modal-header">
+                    <h3 id="modalTitle">Node Details</h3>
+                    <button id="closeModal" class="modal-close" aria-label="Close details">&times;</button>
                 </div>
-                <div id="modalContent" style="padding: 20px; overflow-y: auto; max-height: calc(80vh - 80px);"></div>
+                <div id="modalContent" class="modal-body"></div>
             </div>
-            <div id="modalOverlay" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 999;"></div>
+            <div id="modalOverlay" class="modal-overlay" style="display: none;"></div>
 
             <div id="escalationGraph"></div>
 
@@ -316,24 +316,12 @@ function New-ScEntraGraphSection {
                     <span>Role Assignment</span>
                 </div>
                 <div class="legend-item">
-                    <span class="legend-line" style="background:#10b981;"></span>
+                    <span class="legend-line" style="background:#2563eb;"></span>
                     <span>Group Membership</span>
                 </div>
                 <div class="legend-item">
                     <span class="legend-line" style="background:#f59e0b;"></span>
                     <span>Ownership</span>
-                </div>
-                <div class="legend-item">
-                    <span class="legend-line" style="background:#06b6d4;"></span>
-                    <span>Service Principal Assignment</span>
-                </div>
-                <div class="legend-item">
-                    <span class="legend-line" style="background:#34d399;"></span>
-                    <span>Delegated Permission</span>
-                </div>
-                <div class="legend-item">
-                    <span class="legend-line" style="background:#ef5350;"></span>
-                    <span>Application Permission</span>
                 </div>
                 <div class="legend-item">
                     <div style="width: 30px; height: 3px; background: #dc3545; margin-right: 8px;"></div>
@@ -345,10 +333,55 @@ function New-ScEntraGraphSection {
         <script>
             const graphNodes = $nodesJson;
             const graphEdges = $edgesJson;
+            
+            // Filter out service principals, applications, and roles without connections
+            const relevantEdgeTypes = ['requests_permission', 'has_permission', 'isEscalationPath'];
+            const assignmentEdgeTypes = ['has_role', 'pim_active', 'pim_eligible', 'eligible'];
+            const connectedSPandAppIds = new Set();
+            const connectedRoleIds = new Set();
+            const criticalPathNodeIds = new Set();
+            
+            graphEdges.forEach(edge => {
+                if (edge.isEscalationPath) {
+                    criticalPathNodeIds.add(edge.from);
+                    criticalPathNodeIds.add(edge.to);
+                }
+                // Track SPs and Apps with permission/escalation edges
+                if (relevantEdgeTypes.includes(edge.type) || edge.isEscalationPath) {
+                    const fromNode = graphNodes.find(n => n.id === edge.from);
+                    const toNode = graphNodes.find(n => n.id === edge.to);
+                    
+                    if (fromNode && (fromNode.type === 'servicePrincipal' || fromNode.type === 'application')) {
+                        connectedSPandAppIds.add(edge.from);
+                    }
+                    if (toNode && (toNode.type === 'servicePrincipal' || toNode.type === 'application')) {
+                        connectedSPandAppIds.add(edge.to);
+                    }
+                }
+                
+                // Track roles with any assignment edges
+                if (assignmentEdgeTypes.includes(edge.type)) {
+                    const toNode = graphNodes.find(n => n.id === edge.to);
+                    if (toNode && toNode.type === 'role') {
+                        connectedRoleIds.add(edge.to);
+                    }
+                }
+            });
+            
+            // Filter nodes to exclude unconnected SPs, Apps, and Roles
+            const filteredNodes = graphNodes.filter(node => {
+                if (node.type === 'servicePrincipal' || node.type === 'application') {
+                    return connectedSPandAppIds.has(node.id);
+                }
+                if (node.type === 'role') {
+                    return connectedRoleIds.has(node.id);
+                }
+                return true;
+            });
 
             // Create a lookup map for original node data
             const originalNodeData = {};
-            graphNodes.forEach(node => {
+            filteredNodes.forEach(node => {
                 originalNodeData[node.id] = node;
             });
             const svgIcon = function(svg) { return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg); };
@@ -358,6 +391,45 @@ function New-ScEntraGraphSection {
             };
             const currentTextColor = () => getCssVar('--text-color', '#333');
             const currentMutedTextColor = () => getCssVar('--muted-text-color', '#666');
+            const formatDateTimeValue = (value) => {
+                if (!value) { return null; }
+                const date = new Date(value);
+                if (Number.isNaN(date.getTime())) { return null; }
+                return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+            };
+            const formatRelativeTimeValue = (value) => {
+                if (!value) { return ''; }
+                const date = new Date(value);
+                if (Number.isNaN(date.getTime())) { return ''; }
+                const diffMs = Date.now() - date.getTime();
+                if (!Number.isFinite(diffMs)) { return ''; }
+                const absDiff = Math.abs(diffMs);
+                const units = [
+                    { label: 'year', ms: 365 * 24 * 60 * 60 * 1000 },
+                    { label: 'month', ms: 30 * 24 * 60 * 60 * 1000 },
+                    { label: 'week', ms: 7 * 24 * 60 * 60 * 1000 },
+                    { label: 'day', ms: 24 * 60 * 60 * 1000 },
+                    { label: 'hour', ms: 60 * 60 * 1000 },
+                    { label: 'minute', ms: 60 * 1000 }
+                ];
+                for (const unit of units) {
+                    if (absDiff >= unit.ms || unit.label === 'minute') {
+                        const delta = Math.round(diffMs / unit.ms);
+                        if (delta === 0) {
+                            return 'just now';
+                        }
+                        const plural = Math.abs(delta) === 1 ? unit.label : unit.label + 's';
+                        return delta > 0 ? (Math.abs(delta) + ' ' + plural + ' ago') : ('in ' + Math.abs(delta) + ' ' + plural);
+                    }
+                }
+                return '';
+            };
+            const formatDetailTimestamp = (value) => {
+                const absolute = formatDateTimeValue(value);
+                if (!absolute) { return null; }
+                const relative = formatRelativeTimeValue(value);
+                return relative ? absolute + ' (' + relative + ')' : absolute;
+            };
             const textColor = currentTextColor();
             const mutedTextColor = currentMutedTextColor();
             const defaultUserIconSvg = '<svg id="e24671f6-f501-4952-a2db-8b0b1d329c17" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="be92901b-ec33-4c65-adf1-9b0eed06d677" x1="9" y1="6.88" x2="9" y2="20.45" gradientUnits="userSpaceOnUse"><stop offset="0.22" stop-color="#32d4f5"/><stop offset="1" stop-color="#198ab3"/></linearGradient><linearGradient id="b46fc246-25d8-4398-8779-1042e8cacae7" x1="8.61" y1="-0.4" x2="9.6" y2="11.92" gradientUnits="userSpaceOnUse"><stop offset="0.22" stop-color="#32d4f5"/><stop offset="1" stop-color="#198ab3"/></linearGradient></defs><title>Icon-identity-230</title><path d="M15.72,18a1.45,1.45,0,0,0,1.45-1.45.47.47,0,0,0,0-.17C16.59,11.81,14,8.09,9,8.09S1.34,11.24.83,16.39A1.46,1.46,0,0,0,2.14,18H15.72Z" fill="url(#be92901b-ec33-4c65-adf1-9b0eed06d677)"/><path d="M9,9.17a4.59,4.59,0,0,1-2.48-.73L9,14.86l2.44-6.38A4.53,4.53,0,0,1,9,9.17Z" fill="#fff" opacity="0.8"/><circle cx="9.01" cy="4.58" r="4.58" fill="url(#b46fc246-25d8-4398-8779-1042e8cacae7)"/></svg>';
@@ -375,7 +447,7 @@ function New-ScEntraGraphSection {
                 apiPermission: svgIcon('<svg id="uuid-431a759c-a29d-4678-89ee-5b1b2666f890" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="uuid-10478e68-1009-47b7-9e5e-1dad26a11858" x1="9" y1="18" x2="9" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#198ab3"/><stop offset="1" stop-color="#32bedd"/></linearGradient><linearGradient id="uuid-7623d8a9-ce5d-405d-98e0-ff8e832bdf61" x1="7.203" y1="11.089" x2="7.203" y2="3.888" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#6f4bb2"/><stop offset="1" stop-color="#c69aeb"/></linearGradient></defs><path d="m11.844,12.791c-.316-.081-.641-.073-.947.015l-1.295-2.124c-.04-.065-.124-.087-.19-.049l-.536.309c-.068.039-.091.128-.05.195l1.296,2.127c-.667.668-.737,1.797.01,2.551.12.121.259.223.41.302.276.143.568.213.857.213.463,0,.916-.18,1.273-.527.125-.121.23-.263.31-.417.302-.579.28-1.233-.037-1.769-.245-.413-.636-.707-1.102-.826Zm.424,1.965c-.06.232-.207.428-.414.55-.207.122-.449.156-.682.097-.278-.071-.503-.267-.614-.541-.141-.349-.041-.762.245-1.007.171-.147.379-.222.592-.222.075,0,.151.009.225.029.233.06.428.206.551.413h0c.122.207.157.448.097.681Zm3.555-9.443c-1.012,0-1.863.695-2.106,1.631h-2.54c-.078,0-.141.063-.141.141v.806c0,.078.063.141.141.141h2.54c.243.937,1.093,1.631,2.106,1.631,1.201,0,2.177-.976,2.177-2.175s-.977-2.175-2.177-2.175Zm1.068,2.388c-.082.428-.427.772-.854.854-.766.146-1.428-.515-1.282-1.28.082-.428.426-.772.854-.854.766-.147,1.429.515,1.283,1.28ZM2.978,2.953c.121.03.244.045.366.045.144,0,.286-.022.423-.063l.884,1.447c.04.065.124.087.19.049l.406-.234c.068-.039.091-.128.05-.195l-.887-1.453c.468-.475.577-1.224.218-1.821-.206-.343-.534-.585-.923-.682-.445-.111-.909-.016-1.28.267-.547.417-.737,1.18-.45,1.805.195.424.559.725,1.004.835Zm-.083-2.056c.133-.097.288-.148.445-.148.061,0,.122.008.183.023.232.058.42.219.514.446.13.315.02.691-.258.889-.182.13-.405.172-.619.118-.232-.058-.42-.219-.514-.446-.129-.312-.023-.683.249-.883Zm2.717,10.093l-.828-.477c-.067-.039-.154-.016-.192.052l-1.473,2.577c-1.227-.327-2.587.325-3.009,1.668-.091.289-.125.595-.1.897.071.849.537,1.569,1.253,1.973.377.212.793.321,1.214.321.374,0,.752-.086,1.109-.259.289-.14.549-.34.758-.583.56-.652.743-1.497.522-2.293-.12-.432-.352-.813-.668-1.116l1.468-2.567c.038-.067.015-.153-.052-.192Zm-2.055,5.145l-.213.234c-.161.177-.367.315-.601.366-.298.065-.605.02-.873-.131-.288-.162-.495-.427-.584-.745-.089-.318-.048-.652.115-.939.227-.402.648-.628,1.08-.628.206,0,.415.051.606.16.288.162.495.427.584.745.089.318.048.652-.115.939Z" fill="url(#uuid-10478e68-1009-47b7-9e5e-1dad26a11858)"/><path d="m9.921,5.287l-2.172-1.253c-.339-.195-.757-.195-1.096,0l-2.172,1.253c-.339.196-.548.557-.548.948v2.505c0,.391.209.753.548.949l2.174,1.253c.339.195.757.195,1.096,0l2.174-1.253c.339-.196.548-.557.548-.949v-2.505c-.001-.392-.212-.754-.552-.948Z" fill="url(#uuid-7623d8a9-ce5d-405d-98e0-ff8e832bdf61)"/></svg>')
             };
 
-            const nodes = new vis.DataSet(graphNodes.map(node => {
+            const nodes = new vis.DataSet(filteredNodes.map(node => {
                 // Use icons for PIM-enabled and security groups
                 let icon = null;
                 if (node.type === 'group' && node.shape === 'diamond') {
@@ -440,30 +512,48 @@ function New-ScEntraGraphSection {
             const escalationEdgeWidth = 4;
 
             const edges = new vis.DataSet(graphEdges.map((edge, idx) => {
-                let edgeColor = (
-                    edge.type === 'has_role' ? '#667eea' :
-                    edge.type === 'member_of' ? '#10b981' :
-                    edge.type === 'owns' ? '#f59e0b' :
-                    edge.type === 'assigned_to' ? '#06b6d4' :
-                    edge.type === 'can_manage' ? '#a855f7' :
-                    edge.isPIM ? '#8b5cf6' : '#6b7280'
-                );
+                const normalizedLabel = (edge.label || '').toLowerCase();
+                let edgeColor;
 
+                if (normalizedLabel === 'pim active') {
+                    edgeColor = '#22c55e'; // Always green for PIM Active
+                } else if (edge.isPIM) {
+                    if (normalizedLabel === 'pim eligible') {
+                        edgeColor = '#f59e0b'; // Orange for PIM Eligible (group membership)
+                    } else if (normalizedLabel === 'eligible') {
+                        edgeColor = '#8b5cf6'; // Purple for Eligible (role assignment)
+                    } else {
+                        edgeColor = '#8b5cf6'; // Default purple for other PIM
+                    }
+                } else if (edge.type === 'has_role') {
+                    edgeColor = '#667eea';
+                } else if (edge.type === 'member_of') {
+                    edgeColor = '#2563eb';
+                } else if (edge.type === 'owns') {
+                    edgeColor = '#f59e0b';
+                } else if (edge.type === 'assigned_to') {
+                    edgeColor = '#06b6d4';
+                } else if (edge.type === 'can_manage') {
+                    edgeColor = '#a855f7';
+                } else {
+                    edgeColor = '#6b7280';
+                }
+
+                const explicitGrantType = edge.grantType || '';
                 if (!edge.isEscalationPath) {
-                    const label = (edge.label || '').toLowerCase();
                     if (edge.type === 'requests_permission') {
-                        if (label.startsWith('delegated')) {
+                        if (explicitGrantType === 'Delegated' || normalizedLabel.startsWith('delegated')) {
                             edgeColor = permissionEdgeColors.delegatedRequest;
                         }
-                        else if (label.startsWith('application')) {
+                        else if (explicitGrantType === 'Application' || normalizedLabel.startsWith('application')) {
                             edgeColor = permissionEdgeColors.applicationRequest;
                         }
                     }
                     else if (edge.type === 'has_permission') {
-                        if (label.includes('application grant')) {
+                        if (explicitGrantType === 'Application' || normalizedLabel.includes('application grant')) {
                             edgeColor = permissionEdgeColors.applicationGrant;
                         }
-                        else if (label.startsWith('delegated')) {
+                        else if (explicitGrantType === 'Delegated' || normalizedLabel.startsWith('delegated')) {
                             edgeColor = permissionEdgeColors.delegatedGrant;
                         }
                     }
@@ -509,6 +599,8 @@ function New-ScEntraGraphSection {
 
             const container = document.getElementById('escalationGraph');
             const data = { nodes: nodes, edges: edges };
+            const originalNodePositions = {};
+            const groupedNodeIds = new Set();
             const options = {
                 nodes: {
                     borderWidth: 2,
@@ -549,10 +641,69 @@ function New-ScEntraGraphSection {
                 }
             };
 
+            const defaultNodeSize = (options && options.nodes && options.nodes.size) ? options.nodes.size : 25;
+
             const network = new vis.Network(container, data, options);
 
             let initialViewPosition = null;
             let initialLayoutSettled = false;
+            let gentleMotionInterval = null;
+
+            function startGentleMotion() {
+                if (gentleMotionInterval) return;
+                
+                const allNodes = nodes.get();
+                const nodePositions = {};
+                const nodePhases = {};
+                const nodeFrequencies = {};
+                
+                // Store initial positions and assign random phase offsets and frequencies
+                allNodes.forEach(node => {
+                    const pos = network.getPosition(node.id);
+                    nodePositions[node.id] = { x: pos.x, y: pos.y };
+                    nodePhases[node.id] = { x: Math.random() * Math.PI * 2, y: Math.random() * Math.PI * 2 };
+                    nodeFrequencies[node.id] = { x: 0.8 + Math.random() * 0.4, y: 0.6 + Math.random() * 0.5 };
+                });
+                
+                let time = 0;
+                gentleMotionInterval = setInterval(() => {
+                    time += 0.06;
+                    const updates = [];
+                    
+                    allNodes.forEach(node => {
+                        if (!node.hidden && nodePositions[node.id]) {
+                            const phaseX = nodePhases[node.id].x;
+                            const phaseY = nodePhases[node.id].y;
+                            const freqX = nodeFrequencies[node.id].x;
+                            const freqY = nodeFrequencies[node.id].y;
+                            const amplitude = 25;
+                            
+                            // Create figure-8 like motion with varying frequencies
+                            const offsetX = Math.sin(time * freqX + phaseX) * amplitude + 
+                                          Math.sin(time * freqX * 0.5 + phaseX) * (amplitude * 0.3);
+                            const offsetY = Math.cos(time * freqY + phaseY) * amplitude + 
+                                          Math.cos(time * freqY * 0.7 + phaseY) * (amplitude * 0.4);
+                            
+                            updates.push({
+                                id: node.id,
+                                x: nodePositions[node.id].x + offsetX,
+                                y: nodePositions[node.id].y + offsetY
+                            });
+                        }
+                    });
+                    
+                    if (updates.length > 0) {
+                        nodes.update(updates);
+                    }
+                }, 50);
+            }
+            
+            function stopGentleMotion() {
+                if (gentleMotionInterval) {
+                    clearInterval(gentleMotionInterval);
+                    gentleMotionInterval = null;
+                }
+            }
 
             function finalizeInitialLayout() {
                 if (initialLayoutSettled) {
@@ -561,8 +712,18 @@ function New-ScEntraGraphSection {
 
                 initialLayoutSettled = true;
                 network.setOptions({ physics: false });
-                network.fit({ animation: { duration: 800, easingFunction: 'easeInOutQuad' } });
+                network.fit();
                 initialViewPosition = network.getViewPosition();
+
+                const stabilizedPositions = network.getPositions(nodes.getIds());
+                Object.keys(stabilizedPositions).forEach(nodeId => {
+                    originalNodePositions[nodeId] = stabilizedPositions[nodeId];
+                });
+                
+                // Start gentle motion after layout is stable
+                setTimeout(() => {
+                    startGentleMotion();
+                }, 500);
             }
 
             network.once('stabilizationIterationsDone', finalizeInitialLayout);
@@ -608,19 +769,22 @@ function New-ScEntraGraphSection {
             let currentSelectedNode = null;
 
             const originalNodeStyles = {};
-            graphNodes.forEach(node => {
+            filteredNodes.forEach(node => {
                 const hasIcon = Boolean(nodeIcons[node.type]);
                 const baseColor = node.type === 'user' ? '#4CAF50' :
                                   node.type === 'group' ? '#2196F3' :
                                   node.type === 'role' ? '#FF5722' :
                                   node.type === 'servicePrincipal' ? '#9C27B0' :
                                   node.type === 'application' ? '#FF9800' : '#999';
+                const datasetNode = nodes.get(node.id) || {};
+                const baseSize = datasetNode.size || defaultNodeSize;
                 originalNodeStyles[node.id] = {
                     hasIcon,
                     color: hasIcon ? null : {
                         background: baseColor,
                         border: '#333'
-                    }
+                    },
+                    size: baseSize
                 };
             });
 
@@ -745,6 +909,8 @@ function New-ScEntraGraphSection {
                     const baseStyle = originalNodeStyles[node.id] || {};
                     if (allPathNodes.has(node.id)) {
                         const isSelected = selectedNodes.has(node.id);
+                        const baseSize = baseStyle.size || defaultNodeSize;
+                        const selectedSize = Math.round(baseSize * 2);
                         const update = {
                             id: node.id,
                             borderWidth: baseStyle.hasIcon ? (isSelected ? 4 : 0) : (isSelected ? 6 : 4),
@@ -752,7 +918,8 @@ function New-ScEntraGraphSection {
                             hidden: false,
                             shadow: baseStyle.hasIcon && isSelected,
                             shadowColor: 'rgba(0,0,0,0.4)',
-                            shadowSize: baseStyle.hasIcon && isSelected ? 12 : 0
+                            shadowSize: baseStyle.hasIcon && isSelected ? 12 : 0,
+                            size: isSelected ? selectedSize : baseSize
                         };
                         if (baseStyle.color) {
                             update.color = {
@@ -846,19 +1013,192 @@ function New-ScEntraGraphSection {
                 }
             }
 
+            function highlightNodeAndShowEscalation(nodeId) {
+                if (!nodeId) {
+                    return;
+                }
+
+                const nodeData = nodes.get(nodeId);
+                if (!nodeData) {
+                    return;
+                }
+
+                currentSelectedNode = originalNodeData[nodeId];
+
+                const escalationFilterCheckbox = document.getElementById('escalationFilter');
+                if (!escalationFilterCheckbox.checked) {
+                    escalationFilterCheckbox.checked = true;
+                }
+
+                highlightEscalationPathFromNode(nodeId);
+
+                document.getElementById('selectedNodeName').textContent = nodeData.label;
+                document.getElementById('selectedNodeType').textContent = '(' + nodeData.type + ')';
+                document.getElementById('selectedNodeInfo').style.display = 'block';
+
+                network.focus(nodeId, {
+                    scale: 1.5
+                });
+            }
+
+            function ensureOriginalPositionSnapshot() {
+                if (Object.keys(originalNodePositions).length > 0) {
+                    return;
+                }
+                const fallbackPositions = network.getPositions(nodes.getIds());
+                Object.keys(fallbackPositions).forEach(nodeId => {
+                    originalNodePositions[nodeId] = fallbackPositions[nodeId];
+                });
+            }
+
+            function restoreGroupedNodes() {
+                if (groupedNodeIds.size === 0) {
+                    return;
+                }
+                ensureOriginalPositionSnapshot();
+                const updates = [];
+                groupedNodeIds.forEach(nodeId => {
+                    const originalPos = originalNodePositions[nodeId];
+                    if (originalPos) {
+                        updates.push({
+                            id: nodeId,
+                            x: originalPos.x,
+                            y: originalPos.y,
+                            fixed: false
+                        });
+                    } else {
+                        updates.push({ id: nodeId, fixed: false });
+                    }
+                });
+                if (updates.length > 0) {
+                    nodes.update(updates);
+                }
+                groupedNodeIds.clear();
+            }
+
+            function groupMatchingNodes(matchingNodes) {
+                if (!Array.isArray(matchingNodes) || matchingNodes.length < 2) {
+                    restoreGroupedNodes();
+                    return;
+                }
+
+                ensureOriginalPositionSnapshot();
+                restoreGroupedNodes();
+
+                const uniqueVisibleNodes = [];
+                const seenIds = new Set();
+
+                matchingNodes.forEach(candidate => {
+                    const candidateId = candidate && candidate.id ? candidate.id : candidate;
+                    if (!candidateId || seenIds.has(candidateId)) {
+                        return;
+                    }
+                    const nodeData = nodes.get(candidateId);
+                    if (!nodeData || nodeData.hidden) {
+                        return;
+                    }
+
+                    const storedPosition = originalNodePositions[candidateId];
+                    if (storedPosition) {
+                        uniqueVisibleNodes.push({ id: candidateId, position: storedPosition });
+                    } else {
+                        const fallbackPositions = network.getPositions([candidateId]) || {};
+                        const fallback = fallbackPositions[candidateId] || { x: nodeData.x || 0, y: nodeData.y || 0 };
+                        uniqueVisibleNodes.push({ id: candidateId, position: fallback });
+                    }
+                    seenIds.add(candidateId);
+                });
+
+                if (uniqueVisibleNodes.length < 2) {
+                    restoreGroupedNodes();
+                    return;
+                }
+
+                const centroid = uniqueVisibleNodes.reduce((acc, node) => {
+                    acc.x += node.position.x || 0;
+                    acc.y += node.position.y || 0;
+                    return acc;
+                }, { x: 0, y: 0 });
+                centroid.x /= uniqueVisibleNodes.length;
+                centroid.y /= uniqueVisibleNodes.length;
+
+                let minX = Infinity;
+                let minY = Infinity;
+                let maxX = -Infinity;
+                let maxY = -Infinity;
+
+                uniqueVisibleNodes.forEach(node => {
+                    const { x, y } = node.position;
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                });
+
+                const spanX = Math.max(maxX - minX, 1);
+                const spanY = Math.max(maxY - minY, 1);
+                const maxSpan = Math.max(spanX, spanY);
+                const targetSpan = Math.max(200, Math.min(uniqueVisibleNodes.length * 60, 540));
+                const minScale = 0.65;
+                const maxScale = 1.35;
+                const spanRatio = targetSpan / Math.max(maxSpan, 1);
+                const scale = Math.max(minScale, Math.min(maxScale, spanRatio));
+
+                const usedBuckets = new Set();
+                const bucketSize = 12;
+                const jitterDistance = Math.max(22, Math.min(38, uniqueVisibleNodes.length * 3));
+                const updates = uniqueVisibleNodes.map((node, idx) => {
+                    const relX = node.position.x - centroid.x;
+                    const relY = node.position.y - centroid.y;
+                    let newX = centroid.x + relX * scale;
+                    let newY = centroid.y + relY * scale;
+
+                    const bucketKey = Math.round(newX / bucketSize) + ':' + Math.round(newY / bucketSize);
+                    if (usedBuckets.has(bucketKey)) {
+                        const angle = (idx / uniqueVisibleNodes.length) * 2 * Math.PI;
+                        newX += Math.cos(angle) * jitterDistance;
+                        newY += Math.sin(angle) * jitterDistance;
+                    }
+                    usedBuckets.add(bucketKey);
+
+                    groupedNodeIds.add(node.id);
+                    return {
+                        id: node.id,
+                        x: newX,
+                        y: newY,
+                        fixed: { x: true, y: true }
+                    };
+                });
+
+                nodes.update(updates);
+
+                const nodeIdsForFit = uniqueVisibleNodes.map(node => node.id);
+                network.fit({
+                    nodes: nodeIdsForFit,
+                    animation: {
+                        duration: 550,
+                        easingFunction: 'easeInOutQuad'
+                    },
+                    maxZoomLevel: 2.4
+                });
+            }
+
             function resetHighlight() {
                 selectedNodes.clear();
+                restoreGroupedNodes();
 
                 const updates = [];
-                graphNodes.forEach(node => {
+                filteredNodes.forEach(node => {
                     const baseStyle = originalNodeStyles[node.id] || {};
+                    const baseSize = baseStyle.size || defaultNodeSize;
                     const update = {
                         id: node.id,
                         borderWidth: baseStyle.hasIcon ? 0 : 2,
                         font: { color: currentTextColor(), size: 14 },
                         hidden: false,
                         shadow: false,
-                        shadowSize: 0
+                        shadowSize: 0,
+                        size: baseSize
                     };
                     if (baseStyle.color) {
                         update.color = baseStyle.color;
@@ -887,6 +1227,37 @@ function New-ScEntraGraphSection {
                 riskRows.forEach(row => { row.style.display = ''; });
                 const riskMsg = document.getElementById('risk-filter-msg');
                 if (riskMsg) riskMsg.remove();
+            }
+
+            function focusSelectedNodeOrFitAll() {
+                if (currentSelectedNode && currentSelectedNode.id) {
+                    const selectedId = currentSelectedNode.id;
+                    
+                    // Get all visible nodes connected to the selected node
+                    const connectedEdges = network.getConnectedEdges(selectedId);
+                    const relatedNodeIds = new Set([selectedId]);
+                    
+                    // Find all nodes connected by visible edges
+                    connectedEdges.forEach(edgeId => {
+                        const edge = edges.get(edgeId);
+                        if (edge && !edge.hidden) {
+                            relatedNodeIds.add(edge.from);
+                            relatedNodeIds.add(edge.to);
+                        }
+                    });
+                    
+                    const nodesToFit = Array.from(relatedNodeIds).filter(nodeId => {
+                        const node = nodes.get(nodeId);
+                        return node && !node.hidden;
+                    });
+
+                    // Fit to include all related nodes (no focus, just fit)
+                    network.fit({
+                        nodes: nodesToFit
+                    });
+                } else {
+                    network.fit();
+                }
             }
 
             function groupVisibleNodesByType() {
@@ -953,11 +1324,14 @@ function New-ScEntraGraphSection {
                 network.setOptions({ physics: { enabled: true } });
                 setTimeout(() => {
                     network.setOptions({ physics: { enabled: false } });
-                    network.fit({ animation: { duration: 800, easingFunction: 'easeInOutQuad' } });
+                    network.fit();
                 }, 500);
             }
 
             network.on('click', function(params) {
+                // Stop gentle motion when user interacts
+                stopGentleMotion();
+                
                 if (params.nodes.length > 0) {
                     const nodeId = params.nodes[0];
                     const node = originalNodeData[nodeId];
@@ -985,57 +1359,48 @@ function New-ScEntraGraphSection {
                     document.getElementById('selectedNodeType').textContent = '(' + node.type + ')';
                     document.getElementById('selectedNodeInfo').style.display = 'block';
                     
-                    // Get connected nodes to position them optimally
-                    const connectedNodeIds = getConnectedNodes(nodeId);
+                    // Get connected nodes for fitting
+                    const connectedEdges = network.getConnectedEdges(nodeId);
+                    const relatedNodeIds = new Set([nodeId]);
                     
-                    // Add pulse animation to selected node
-                    const originalSize = nodes.get(nodeId).size || 25;
-                    let pulseCount = 0;
-                    const pulseInterval = setInterval(() => {
-                        const scale = pulseCount % 2 === 0 ? 1.3 : 1.0;
-                        nodes.update({ id: nodeId, size: originalSize * scale });
-                        pulseCount++;
-                        if (pulseCount >= 4) {
-                            clearInterval(pulseInterval);
-                            nodes.update({ id: nodeId, size: originalSize });
-                        }
-                    }, 150);
-                    
-                    // Enable physics temporarily with optimized settings to reduce edge crossings
-                    network.setOptions({
-                        physics: {
-                            enabled: true,
-                            barnesHut: {
-                                gravitationalConstant: -12000,
-                                centralGravity: 0.2,
-                                springLength: 300,
-                                springConstant: 0.025,
-                                damping: 0.25,
-                                avoidOverlap: 0.8
-                            },
-                            solver: 'barnesHut',
-                            stabilization: false
+                    // Find all nodes connected by visible edges
+                    connectedEdges.forEach(edgeId => {
+                        const edge = edges.get(edgeId);
+                        if (edge && !edge.hidden) {
+                            relatedNodeIds.add(edge.from);
+                            relatedNodeIds.add(edge.to);
                         }
                     });
-
-                    // Let physics adjust the layout briefly to untangle edges with smooth animation
-                    setTimeout(() => {
-                        network.setOptions({ physics: { enabled: false } });
-
-                        // Smooth focus animation on the selected node and its connections
+                    
+                    const nodesToFit = Array.from(relatedNodeIds).filter(id => {
+                        const n = nodes.get(id);
+                        return n && !n.hidden;
+                    });
+                    
+                    // Center on the clicked node and fit to screen
+                    if (nodesToFit.length > 1) {
+                        // Fit to show the selected node and related nodes
                         network.fit({
-                            nodes: [nodeId, ...connectedNodeIds],
-                            animation: { duration: 800, easingFunction: 'easeInOutQuad' }
+                            nodes: nodesToFit,
+                            animation: {
+                                duration: 500,
+                                easingFunction: 'easeInOutQuad'
+                            }
                         });
-                    }, 1200);
+                    } else {
+                        // If only one node (isolated), center it with appropriate zoom
+                        network.focus(nodeId, {
+                            scale: 1.5,
+                            animation: {
+                                duration: 500,
+                                easingFunction: 'easeInOutQuad'
+                            }
+                        });
+                    }
                 }
             });
 
             function showNodeDetails(node) {
-                console.log('showNodeDetails called with:', node);
-                console.log('Node properties:', Object.keys(node || {}));
-                console.log('Node type:', node ? node.type : 'NO NODE');
-
                 if (!node || !node.type) {
                     console.error('Invalid node object:', node);
                     alert('Error: Invalid node data. Please try selecting the node again.');
@@ -1047,8 +1412,6 @@ function New-ScEntraGraphSection {
                 const modalTitle = document.getElementById('modalTitle');
                 const modalContent = document.getElementById('modalContent');
 
-                console.log('Modal elements:', { modal, overlay, modalTitle, modalContent });
-
                 if (!modal || !overlay || !modalTitle || !modalContent) {
                     console.error('Modal elements not found!');
                     return;
@@ -1056,137 +1419,181 @@ function New-ScEntraGraphSection {
 
                 modalTitle.textContent = node.label || node.id || 'Unknown';
 
-                let detailsHtml = '<div style="display: flex; flex-direction: column; gap: 15px;">';
-
-                // Add type badge
                 const typeColors = {
-                    'user': '#4CAF50',
-                    'group': '#2196F3',
-                    'role': '#FF5722',
-                    'servicePrincipal': '#9C27B0',
-                    'application': '#FF9800',
-                    'apiPermission': '#6A5ACD'
+                    user: '#4CAF50',
+                    group: '#2196F3',
+                    role: '#FF5722',
+                    servicePrincipal: '#9C27B0',
+                    application: '#FF9800',
+                    apiPermission: '#6A5ACD'
                 };
                 const typeColor = typeColors[node.type] || '#999';
-                detailsHtml += '<div><span style="background: ' + typeColor + '; color: white; padding: 4px 12px; border-radius: 12px; font-size: 0.85em; font-weight: 600;">' + node.type.toUpperCase() + '</span></div>';
+                const isCriticalPathNode = criticalPathNodeIds.has(node.id);
+                const statusChip = (text, cssClass) => '<span class="status-chip ' + cssClass + '">' + text + '</span>';
+                const grantKindLabel = (kind) => {
+                    if (!kind) { return ''; }
+                    if (kind === 'Scope') { return 'Delegated'; }
+                    if (kind === 'Role') { return 'Application'; }
+                    if (kind === 'Mixed') { return 'Delegated + Application'; }
+                    return kind;
+                };
 
-                // Common properties
-                detailsHtml += '<div style="background: #f8f9fa; padding: 15px; border-radius: 6px;">';
-                detailsHtml += '<h4 style="margin: 0 0 10px 0; color: #333;">Basic Information</h4>';
-                detailsHtml += '<table style="width: 100%; border-collapse: collapse;">';
+                let detailsHtml = '<div class="node-detail-body">';
+                detailsHtml += '<div class="detail-badges">';
+                detailsHtml += '<span class="detail-badge" style="background:' + typeColor + '; color:#fff; border-color: rgba(255,255,255,0.35);">' + node.type.toUpperCase() + '</span>';
+                if (isCriticalPathNode) {
+                    detailsHtml += '<span class="detail-badge critical-path-pill">Critical path node</span>';
+                }
+                detailsHtml += '</div>';
 
-                if (node.id) {
-                    detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600; width: 40%;">ID:</td><td style="padding: 6px 0; word-break: break-all; font-family: monospace; font-size: 0.9em;">' + node.id + '</td></tr>';
+                if (isCriticalPathNode) {
+                    detailsHtml += '<div class="detail-section critical-path-section">';
+                    detailsHtml += '<h4>Critical Escalation Context</h4>';
+                    detailsHtml += '<p>This entity participates in at least one modeled escalation route to a Tier-0 role. Enable the &ldquo;Show Only Critical Escalation Paths&rdquo; filter or select this node to trace the full path.</p>';
+                    detailsHtml += '</div>';
                 }
 
-                // Type-specific properties
+                detailsHtml += '<div class="detail-section">';
+                detailsHtml += '<h4>Basic Information</h4>';
+                detailsHtml += '<table class="detail-table">';
+
+                if (node.id) {
+                    detailsHtml += '<tr><td class="detail-label">ID</td><td class="detail-value code">' + node.id + '</td></tr>';
+                }
+
                 if (node.type === 'user') {
                     if (node.userPrincipalName) {
-                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">UPN:</td><td style="padding: 6px 0; word-break: break-all;">' + node.userPrincipalName + '</td></tr>';
+                        detailsHtml += '<tr><td class="detail-label">UPN</td><td class="detail-value">' + node.userPrincipalName + '</td></tr>';
                     }
                     if (node.accountEnabled !== undefined) {
-                        const statusColor = node.accountEnabled ? '#4CAF50' : '#f44336';
                         const statusText = node.accountEnabled ? 'Enabled' : 'Disabled';
-                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Account Status:</td><td style="padding: 6px 0;"><span style="color: ' + statusColor + '; font-weight: 600;">' + statusText + '</span></td></tr>';
+                        const statusClass = node.accountEnabled ? 'status-positive' : 'status-negative';
+                        detailsHtml += '<tr><td class="detail-label">Account Status</td><td class="detail-value">' + statusChip(statusText, statusClass) + '</td></tr>';
                     }
                     if (node.mail) {
-                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Email:</td><td style="padding: 6px 0;">' + node.mail + '</td></tr>';
+                        detailsHtml += '<tr><td class="detail-label">Email</td><td class="detail-value">' + node.mail + '</td></tr>';
                     }
                     if (node.userType) {
-                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">User Type:</td><td style="padding: 6px 0;">' + node.userType + '</td></tr>';
+                        detailsHtml += '<tr><td class="detail-label">User Type</td><td class="detail-value">' + node.userType + '</td></tr>';
+                    }
+                    if (node.onPremisesSyncEnabled !== undefined) {
+                        const text = node.onPremisesSyncEnabled ? 'Hybrid (synced from AD)' : 'Cloud only';
+                        const css = node.onPremisesSyncEnabled ? 'status-info' : 'status-positive';
+                        detailsHtml += '<tr><td class="detail-label">Source</td><td class="detail-value">' + statusChip(text, css) + '</td></tr>';
+                    }
+                    if (node.createdDateTime) {
+                        const createdText = formatDetailTimestamp(node.createdDateTime);
+                        if (createdText) {
+                            detailsHtml += '<tr><td class="detail-label">Created On</td><td class="detail-value">' + createdText + '</td></tr>';
+                        }
+                    }
+                    if (node.lastPasswordChangeDateTime) {
+                        const pwdText = formatDetailTimestamp(node.lastPasswordChangeDateTime);
+                        if (pwdText) {
+                            detailsHtml += '<tr><td class="detail-label">Last Password Change</td><td class="detail-value">' + pwdText + '</td></tr>';
+                        }
                     }
                 } else if (node.type === 'group') {
                     if (node.isAssignableToRole !== undefined) {
-                        const roleAssignable = node.isAssignableToRole ? 'Yes' : 'No';
-                        const roleColor = node.isAssignableToRole ? '#4CAF50' : '#999';
-                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Role Assignable:</td><td style="padding: 6px 0;"><span style="color: ' + roleColor + '; font-weight: 600;">' + roleAssignable + '</span></td></tr>';
+                        const text = node.isAssignableToRole ? 'Assignable' : 'Not assignable';
+                        const css = node.isAssignableToRole ? 'status-positive' : 'status-negative';
+                        detailsHtml += '<tr><td class="detail-label">Role Assignable</td><td class="detail-value">' + statusChip(text, css) + '</td></tr>';
                     }
                     if (node.isPIMEnabled !== undefined) {
-                        const pimEnabled = node.isPIMEnabled ? 'Yes' : 'No';
-                        const pimColor = node.isPIMEnabled ? '#9C27B0' : '#999';
-                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">PIM Enabled:</td><td style="padding: 6px 0;"><span style="color: ' + pimColor + '; font-weight: 600;">' + pimEnabled + '</span></td></tr>';
+                        const text = node.isPIMEnabled ? 'PIM enabled' : 'PIM disabled';
+                        const css = node.isPIMEnabled ? 'status-warning' : 'status-negative';
+                        detailsHtml += '<tr><td class="detail-label">Privileged Identity Management</td><td class="detail-value">' + statusChip(text, css) + '</td></tr>';
                     }
                     if (node.securityEnabled !== undefined) {
-                        const secEnabled = node.securityEnabled ? 'Yes' : 'No';
-                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Security Enabled:</td><td style="padding: 6px 0;">' + secEnabled + '</td></tr>';
+                        const text = node.securityEnabled ? 'Security enabled' : 'Security disabled';
+                        const css = node.securityEnabled ? 'status-info' : 'status-negative';
+                        detailsHtml += '<tr><td class="detail-label">Security Group</td><td class="detail-value">' + statusChip(text, css) + '</td></tr>';
                     }
                     if (node.memberCount !== undefined) {
-                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Member Count:</td><td style="padding: 6px 0;">' + node.memberCount + '</td></tr>';
+                        detailsHtml += '<tr><td class="detail-label">Member Count</td><td class="detail-value">' + node.memberCount + '</td></tr>';
                     }
                     if (node.description) {
-                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Description:</td><td style="padding: 6px 0;">' + node.description + '</td></tr>';
+                        detailsHtml += '<tr><td class="detail-label">Description</td><td class="detail-value">' + node.description + '</td></tr>';
                     }
                 } else if (node.type === 'servicePrincipal' || node.type === 'application') {
                     if (node.appId) {
-                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">App ID:</td><td style="padding: 6px 0; word-break: break-all; font-family: monospace; font-size: 0.9em;">' + node.appId + '</td></tr>';
+                        detailsHtml += '<tr><td class="detail-label">App ID</td><td class="detail-value code">' + node.appId + '</td></tr>';
                     }
                     if (node.accountEnabled !== undefined) {
-                        const statusColor = node.accountEnabled ? '#4CAF50' : '#f44336';
                         const statusText = node.accountEnabled ? 'Enabled' : 'Disabled';
-                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Status:</td><td style="padding: 6px 0;"><span style="color: ' + statusColor + '; font-weight: 600;">' + statusText + '</span></td></tr>';
+                        const statusClass = node.accountEnabled ? 'status-positive' : 'status-negative';
+                        detailsHtml += '<tr><td class="detail-label">Service Status</td><td class="detail-value">' + statusChip(statusText, statusClass) + '</td></tr>';
                     }
                 } else if (node.type === 'apiPermission') {
                     if (node.resource) {
-                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Resource:</td><td style="padding: 6px 0;">' + node.resource + '</td></tr>';
+                        detailsHtml += '<tr><td class="detail-label">Resource</td><td class="detail-value">' + node.resource + '</td></tr>';
                     }
                     if (node.permissionValue) {
-                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Permission:</td><td style="padding: 6px 0; word-break: break-all; font-family: monospace; font-size: 0.95em;">' + node.permissionValue + '</td></tr>';
+                        detailsHtml += '<tr><td class="detail-label">Permission</td><td class="detail-value code">' + node.permissionValue + '</td></tr>';
                     }
                     if (node.permissionDisplayName && node.permissionDisplayName !== node.permissionValue) {
-                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Display Text:</td><td style="padding: 6px 0;">' + node.permissionDisplayName + '</td></tr>';
+                        detailsHtml += '<tr><td class="detail-label">Display Text</td><td class="detail-value">' + node.permissionDisplayName + '</td></tr>';
                     }
-                    if (node.permissionKind) {
-                        const kindLabel = node.permissionKind === 'Scope' ? 'Delegated' : (node.permissionKind === 'Role' ? 'Application' : node.permissionKind);
-                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Grant Type:</td><td style="padding: 6px 0;">' + kindLabel + '</td></tr>';
+                    const resolvedGrantSummary = (() => {
+                        const rawKinds = Array.isArray(node.grantTypes) && node.grantTypes.length ? node.grantTypes : null;
+                        if (rawKinds) {
+                            const uniqueKinds = Array.from(new Set(rawKinds));
+                            return uniqueKinds.map(grantKindLabel).join(' + ');
+                        }
+                        if (node.permissionKind) {
+                            return grantKindLabel(node.permissionKind);
+                        }
+                        return '';
+                    })();
+                    if (resolvedGrantSummary) {
+                        detailsHtml += '<tr><td class="detail-label">Grant Type</td><td class="detail-value">' + resolvedGrantSummary + '</td></tr>';
                     }
                     if (node.permissionAudience) {
-                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Audience:</td><td style="padding: 6px 0;">' + node.permissionAudience + '</td></tr>';
+                        detailsHtml += '<tr><td class="detail-label">Audience</td><td class="detail-value">' + node.permissionAudience + '</td></tr>';
                     }
                     if (node.adminConsentRequired) {
-                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Admin Consent:</td><td style="padding: 6px 0;">' + node.adminConsentRequired + '</td></tr>';
+                        detailsHtml += '<tr><td class="detail-label">Admin Consent</td><td class="detail-value">' + node.adminConsentRequired + '</td></tr>';
                     }
                     if (node.severity) {
-                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Severity:</td><td style="padding: 6px 0;">' + node.severity + '</td></tr>';
+                        detailsHtml += '<tr><td class="detail-label">Severity</td><td class="detail-value">' + node.severity + '</td></tr>';
                     }
                 } else if (node.type === 'role') {
                     if (node.isPrivileged !== undefined) {
-                        const privText = node.isPrivileged ? 'Yes' : 'No';
-                        const privColor = node.isPrivileged ? '#FF5722' : '#999';
-                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Privileged:</td><td style="padding: 6px 0;"><span style="color: ' + privColor + '; font-weight: 600;">' + privText + '</span></td></tr>';
+                        const text = node.isPrivileged ? 'Privileged role' : 'Standard role';
+                        const css = node.isPrivileged ? 'status-warning' : 'status-info';
+                        detailsHtml += '<tr><td class="detail-label">Privileged</td><td class="detail-value">' + statusChip(text, css) + '</td></tr>';
                     }
                     if (node.description) {
-                        detailsHtml += '<tr><td style="padding: 6px 0; color: #666; font-weight: 600;">Description:</td><td style="padding: 6px 0;">' + node.description + '</td></tr>';
+                        detailsHtml += '<tr><td class="detail-label">Description</td><td class="detail-value">' + node.description + '</td></tr>';
                     }
                 }
 
                 detailsHtml += '</table></div>';
 
                 if (node.type === 'apiPermission' && (node.permissionDescription || node.escalationDescription)) {
-                    detailsHtml += '<div style="background: #fefefe; padding: 15px; border-radius: 6px; border: 1px solid #e0e0e0;">';
-                    detailsHtml += '<h4 style="margin: 0 0 10px 0; color: #333;">Permission Details</h4>';
+                    detailsHtml += '<div class="detail-section">';
+                    detailsHtml += '<h4>Permission Details</h4>';
                     if (node.permissionDescription) {
-                        detailsHtml += '<p style="margin: 0 0 10px 0; line-height: 1.4;">' + node.permissionDescription + '</p>';
+                        detailsHtml += '<p style="margin-bottom: 10px;">' + node.permissionDescription + '</p>';
                     }
                     if (node.escalationDescription) {
-                        detailsHtml += '<div style="background: #fff4e5; border-left: 4px solid #ff9800; padding: 10px 12px; border-radius: 4px;">';
-                        detailsHtml += '<strong style="display: block; margin-bottom: 6px;">Escalation Impact</strong>' + node.escalationDescription;
+                        detailsHtml += '<div class="permission-callout">';
+                        detailsHtml += '<strong style="display:block; margin-bottom:4px;">Escalation Impact</strong>' + node.escalationDescription;
                         detailsHtml += '</div>';
                     }
                     detailsHtml += '</div>';
                 }
 
-                // Connection statistics
                 const connectedEdges = network.getConnectedEdges(node.id);
                 const connectedNodes = network.getConnectedNodes(node.id);
 
-                detailsHtml += '<div style="background: #f8f9fa; padding: 15px; border-radius: 6px;">';
-                detailsHtml += '<h4 style="margin: 0 0 10px 0; color: #333;">Connections</h4>';
-                detailsHtml += '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">';
-                detailsHtml += '<div style="text-align: center; padding: 10px; background: white; border-radius: 4px;"><div style="font-size: 1.5em; font-weight: bold; color: #667eea;">' + connectedEdges.length + '</div><div style="font-size: 0.85em; color: #666;">Relationships</div></div>';
-                detailsHtml += '<div style="text-align: center; padding: 10px; background: white; border-radius: 4px;"><div style="font-size: 1.5em; font-weight: bold; color: #667eea;">' + connectedNodes.length + '</div><div style="font-size: 0.85em; color: #666;">Connected Nodes</div></div>';
+                detailsHtml += '<div class="detail-section">';
+                detailsHtml += '<h4>Connections</h4>';
+                detailsHtml += '<div class="detail-grid">';
+                detailsHtml += '<div class="detail-stat"><div class="detail-stat-value">' + connectedEdges.length + '</div><div class="detail-stat-label">Relationships</div></div>';
+                detailsHtml += '<div class="detail-stat"><div class="detail-stat-value">' + connectedNodes.length + '</div><div class="detail-stat-label">Connected Nodes</div></div>';
                 detailsHtml += '</div></div>';
 
-                // Relationship breakdown
                 if (connectedEdges.length > 0) {
                     const edgeTypes = {};
                     connectedEdges.forEach(edgeId => {
@@ -1197,16 +1604,18 @@ function New-ScEntraGraphSection {
                         }
                     });
 
-                    detailsHtml += '<div style="background: #f8f9fa; padding: 15px; border-radius: 6px;">';
-                    detailsHtml += '<h4 style="margin: 0 0 10px 0; color: #333;">Relationship Breakdown</h4>';
-                    detailsHtml += '<div style="display: flex; flex-direction: column; gap: 8px;">';
+                    detailsHtml += '<div class="detail-section">';
+                    detailsHtml += '<h4>Relationship Breakdown</h4>';
 
                     for (const [label, count] of Object.entries(edgeTypes).sort((a, b) => b[1] - a[1])) {
                         const percentage = Math.round((count / connectedEdges.length) * 100);
-                        detailsHtml += '<div><div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span style="font-size: 0.9em; color: #666;">' + label + '</span><span style="font-size: 0.9em; font-weight: 600;">' + count + '</span></div><div style="background: #e0e0e0; height: 6px; border-radius: 3px; overflow: hidden;"><div style="background: #667eea; height: 100%; width: ' + percentage + '%; transition: width 0.3s;"></div></div></div>';
+                        detailsHtml += '<div class="detail-breakdown-item">';
+                        detailsHtml += '<div class="detail-breakdown-row"><span>' + label + '</span><span class="detail-breakdown-value">' + count + '</span></div>';
+                        detailsHtml += '<div class="detail-progress"><div class="detail-progress-bar" style="width: ' + percentage + '%;"></div></div>';
+                        detailsHtml += '</div>';
                     }
 
-                    detailsHtml += '</div></div>';
+                    detailsHtml += '</div>';
                 }
 
                 detailsHtml += '</div>';
@@ -1324,13 +1733,15 @@ function New-ScEntraGraphSection {
                 allNodes.forEach(node => {
                     if (nodeIds.has(node.id)) {
                         const baseStyle = originalNodeStyles[node.id] || {};
+                        const baseSize = baseStyle.size || defaultNodeSize;
                         const update = {
                             id: node.id,
                             borderWidth: baseStyle.hasIcon ? 0 : 4,
                             font: { color: currentTextColor(), size: 16 },
                             hidden: false,
                             shadow: false,
-                            shadowSize: 0
+                            shadowSize: 0,
+                            size: baseSize
                         };
                         if (baseStyle.color) {
                             update.color = baseStyle.color;
@@ -1391,19 +1802,26 @@ function New-ScEntraGraphSection {
 
                 if (target && target.id) {
                     network.focus(target.id, {
-                        scale: candidates.length === 1 ? 1.5 : 1.25,
-                        animation: { duration: 500, easingFunction: 'easeInOutQuad' }
+                        scale: candidates.length === 1 ? 1.5 : 1.25
                     });
                 }
             }
 
             function applyFilters() {
+                // Stop gentle motion when user applies filters
+                stopGentleMotion();
+                
                 const rawSearchValue = document.getElementById('nodeFilter').value || '';
                 const normalizedSearchTerm = rawSearchValue.trim().toLowerCase();
                 const hasSearchTerm = normalizedSearchTerm.length > 0;
                 const typeFilter = document.getElementById('typeFilter').value;
                 const assignmentFilter = document.getElementById('assignmentFilter').value;
                 const escalationFilter = document.getElementById('escalationFilter').checked;
+                const shouldGroupMatches = hasSearchTerm;
+
+                if (!shouldGroupMatches) {
+                    restoreGroupedNodes();
+                }
 
                 // If escalation filter is enabled, show only escalation paths
                 if (escalationFilter) {
@@ -1415,6 +1833,7 @@ function New-ScEntraGraphSection {
                         document.getElementById('selectedNodeName').textContent = currentSelectedNode.label;
                         document.getElementById('selectedNodeType').textContent = '(' + currentSelectedNode.type + ')';
                         document.getElementById('selectedNodeInfo').style.display = 'block';
+                        restoreGroupedNodes();
                         return;
                     }
 
@@ -1457,9 +1876,11 @@ function New-ScEntraGraphSection {
                         document.getElementById('selectedNodeType').textContent = '(' + selectedNode.type + ')';
                         document.getElementById('selectedNodeInfo').style.display = 'block';
                         network.focus(selectedNode.id, {
-                            scale: 1.5,
-                            animation: { duration: 500, easingFunction: 'easeInOutQuad' }
+                            scale: 1.5
                         });
+                        if (shouldGroupMatches) {
+                            groupMatchingNodes(matchingNodes);
+                        }
                         return;
                     }
 
@@ -1470,13 +1891,15 @@ function New-ScEntraGraphSection {
                     allNodes.forEach(node => {
                         if (matchingIds.has(node.id)) {
                             const baseStyle = originalNodeStyles[node.id] || {};
+                            const baseSize = baseStyle.size || defaultNodeSize;
                             const update = {
                                 id: node.id,
                                 borderWidth: baseStyle.hasIcon ? 0 : 4,
                                 font: { color: currentTextColor(), size: 16 },
                                 hidden: false,
                                 shadow: false,
-                                shadowSize: 0
+                                shadowSize: 0,
+                                size: baseSize
                             };
                             if (baseStyle.color) {
                                 update.color = baseStyle.color;
@@ -1487,6 +1910,9 @@ function New-ScEntraGraphSection {
                         }
                     });
                     nodes.update(nodeUpdates);
+                    if (shouldGroupMatches) {
+                        groupMatchingNodes(matchingNodes);
+                    }
                     if (hasSearchTerm && matchingNodes.length > 0) {
                         focusOnSearchMatch(matchingNodes, normalizedSearchTerm);
                     }
@@ -1534,13 +1960,15 @@ function New-ScEntraGraphSection {
                     allNodes.forEach(node => {
                         if (matchingIds.has(node.id)) {
                             const baseStyle = originalNodeStyles[node.id] || {};
+                            const baseSize = baseStyle.size || defaultNodeSize;
                             const update = {
                                 id: node.id,
                                 borderWidth: baseStyle.hasIcon ? 0 : 4,
                                 font: { color: currentTextColor(), size: 16 },
                                 hidden: false,
                                 shadow: false,
-                                shadowSize: 0
+                                shadowSize: 0,
+                                size: baseSize
                             };
                             if (baseStyle.color) {
                                 update.color = baseStyle.color;
@@ -1551,6 +1979,9 @@ function New-ScEntraGraphSection {
                         }
                     });
                     nodes.update(nodeUpdates);
+                    if (shouldGroupMatches) {
+                        groupMatchingNodes(matchingNodes);
+                    }
                     if (hasSearchTerm && matchingNodes.length > 0) {
                         focusOnSearchMatch(matchingNodes, normalizedSearchTerm);
                     }
@@ -1565,10 +1996,12 @@ function New-ScEntraGraphSection {
                     if (matchingNodes.length === 1) {
                         network.selectNodes([matchingNodes[0].id]);
                         network.focus(matchingNodes[0].id, {
-                            scale: 1.5,
-                            animation: { duration: 500, easingFunction: 'easeInOutQuad' }
+                            scale: 1.5
                         });
                         highlightPath(matchingNodes[0].id);
+                        if (shouldGroupMatches) {
+                            groupMatchingNodes(matchingNodes);
+                        }
                         document.getElementById('selectedNodeName').textContent = matchingNodes[0].label;
                         document.getElementById('selectedNodeType').textContent = '(' + matchingNodes[0].type + ')';
                         document.getElementById('selectedNodeInfo').style.display = 'block';
@@ -1579,13 +2012,15 @@ function New-ScEntraGraphSection {
                         allNodes.forEach(node => {
                             if (matchingIds.has(node.id)) {
                                 const baseStyle = originalNodeStyles[node.id] || {};
+                                const baseSize = baseStyle.size || defaultNodeSize;
                                 const update = {
                                     id: node.id,
                                     borderWidth: baseStyle.hasIcon ? 0 : 4,
                                     font: { color: currentTextColor(), size: 16 },
                                     hidden: false,
                                     shadow: false,
-                                    shadowSize: 0
+                                    shadowSize: 0,
+                                    size: baseSize
                                 };
                                 if (baseStyle.color) {
                                     update.color = baseStyle.color;
@@ -1596,6 +2031,9 @@ function New-ScEntraGraphSection {
                             }
                         });
                         nodes.update(updates);
+                        if (shouldGroupMatches) {
+                            groupMatchingNodes(matchingNodes);
+                        }
                         if (hasSearchTerm) {
                             focusOnSearchMatch(matchingNodes, normalizedSearchTerm);
                         }
@@ -1606,10 +2044,39 @@ function New-ScEntraGraphSection {
                             updates.push({ id: node.id, hidden: true });
                         });
                         nodes.update(updates);
+                        if (shouldGroupMatches) {
+                            groupMatchingNodes([]);
+                        }
                     } else {
                         resetHighlight();
                     }
                 }
+            }
+
+            function setupZoomExtendsButton() {
+                const zoomButton = container.querySelector('.vis-button.vis-zoomExtends');
+                if (!zoomButton) {
+                    requestAnimationFrame(setupZoomExtendsButton);
+                    return;
+                }
+
+                if (zoomButton.dataset.customZoomHandler === 'true') {
+                    return;
+                }
+
+                zoomButton.dataset.customZoomHandler = 'true';
+                zoomButton.title = 'Fit view to selected node and related nodes';
+                
+                // Remove default click handlers
+                const newButton = zoomButton.cloneNode(true);
+                zoomButton.parentNode.replaceChild(newButton, zoomButton);
+                
+                newButton.addEventListener('click', event => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    focusSelectedNodeOrFitAll();
+                    return false;
+                });
             }
 
             document.getElementById('nodeFilter').addEventListener('input', applyFilters);
@@ -1617,15 +2084,47 @@ function New-ScEntraGraphSection {
             document.getElementById('assignmentFilter').addEventListener('change', applyFilters);
             document.getElementById('escalationFilter').addEventListener('change', applyFilters);
 
+            setupZoomExtendsButton();
+
+            // Wait for DOM to be fully loaded before attaching risk row listeners
+            function attachRiskRowListeners() {
+                const riskRows = document.querySelectorAll('.risk-row');
+                if (riskRows.length === 0) {
+                    // Risk table might not be rendered yet, try again
+                    setTimeout(attachRiskRowListeners, 100);
+                    return;
+                }
+                
+                riskRows.forEach(row => {
+                    row.addEventListener('click', () => {
+                        const primaryEntityId = row.getAttribute('data-primary-entity-id');
+                        const hasIds = row.getAttribute('data-entity-ids');
+                        const allIds = hasIds ? hasIds.split(',').map(id => id.trim()).filter(Boolean) : [];
+                        const targetId = primaryEntityId || allIds[0];
+                        if (!targetId) {
+                            return;
+                        }
+
+                        highlightNodeAndShowEscalation(targetId);
+                    });
+                });
+            }
+            
+            // Attach listeners after a short delay to ensure table is rendered
+            setTimeout(attachRiskRowListeners, 200);
+
             document.getElementById('resetGraph').addEventListener('click', function() {
                 document.getElementById('nodeFilter').value = '';
                 document.getElementById('typeFilter').value = '';
                 document.getElementById('assignmentFilter').value = '';
                 document.getElementById('escalationFilter').checked = false;
                 resetHighlight();
-                network.fit({
-                    animation: { duration: 500, easingFunction: 'easeInOutQuad' }
-                });
+                network.fit();
+                
+                // Restart gentle motion after a brief delay
+                setTimeout(() => {
+                    startGentleMotion();
+                }, 300);
             });
         </script>
 "@
@@ -1658,8 +2157,9 @@ function New-ScEntraRiskSection {
         if ($risk.MemberId) { $entityIds += $risk.MemberId }
         $entityIdsAttr = ($entityIds -join ',')
 
+        $primaryEntityId = if ($entityIds.Count -gt 0) { $entityIds[0] } else { '' }
         [void]$rowsBuilder.AppendLine(@"
-                    <tr data-entity-ids="$entityIdsAttr" class="risk-row">
+                    <tr data-entity-ids="$entityIdsAttr" data-primary-entity-id="$primaryEntityId" class="risk-row">
                         <td><span class="badge $badgeClass">$($risk.Severity)</span></td>
                         <td>$($risk.RiskType)</td>
                         <td>$($risk.Description)</td>
@@ -1891,6 +2391,8 @@ function New-ScEntraReportDocument {
         }
         td { padding: 12px 15px; border-bottom: 1px solid var(--border-color); }
         tr:hover { background: var(--table-row-hover); }
+        .risk-row { cursor: pointer; }
+        .risk-row:hover { background: var(--table-row-hover); }
         .severity-high { color: #f87171; font-weight: bold; }
         .severity-medium { color: #fbbf24; font-weight: bold; }
         .severity-low { color: #34d399; font-weight: bold; }
@@ -1972,6 +2474,219 @@ function New-ScEntraReportDocument {
             border-radius: 999px;
             display: inline-block;
         }
+        .node-details-modal,
+        .modal-overlay {
+            display: none;
+        }
+        .node-details-modal {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: var(--card-bg);
+            color: var(--text-color);
+            padding: 0;
+            border-radius: 12px;
+            box-shadow: 0 25px 60px rgba(15,23,42,0.45);
+            z-index: 1000;
+            max-width: 620px;
+            width: 90%;
+            max-height: 85vh;
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+            transition: background 0.3s ease, color 0.3s ease;
+        }
+        .modal-header {
+            background: var(--header-bg);
+            color: white;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+        }
+        .modal-header h3 {
+            margin: 0;
+            font-size: 1.3em;
+        }
+        .modal-close {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            width: 36px;
+            height: 36px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s ease;
+        }
+        .modal-close:hover {
+            background: rgba(255,255,255,0.35);
+        }
+        body[data-theme="dark"] .modal-close {
+            background: rgba(255,255,255,0.15);
+        }
+        .modal-body {
+            padding: 20px;
+            overflow-y: auto;
+            max-height: calc(85vh - 80px);
+            background: var(--card-bg);
+        }
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(15,23,42,0.65);
+            z-index: 999;
+        }
+        .node-detail-body {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+        .detail-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .detail-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 12px;
+            border-radius: 999px;
+            font-size: 0.85em;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            border: 1px solid var(--border-color);
+            background: var(--info-panel-bg);
+            color: var(--text-color);
+            text-transform: uppercase;
+        }
+        .critical-path-pill {
+            background: rgba(220,53,69,0.12);
+            color: #dc8892;
+            border-color: rgba(220,53,69,0.3);
+        }
+        body[data-theme="dark"] .critical-path-pill {
+            background: rgba(248,113,113,0.15);
+            color: #fecaca;
+            border-color: rgba(248,113,113,0.4);
+        }
+        .detail-section {
+            background: var(--info-panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 18px;
+            box-shadow: 0 5px 14px rgba(0,0,0,0.08);
+        }
+        body[data-theme="dark"] .detail-section {
+            box-shadow: none;
+        }
+        .detail-section h4 {
+            margin: 0 0 12px 0;
+            color: var(--accent-color);
+            font-size: 1.05em;
+        }
+        .detail-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .detail-label {
+            color: var(--muted-text-color);
+            font-weight: 600;
+            width: 40%;
+            padding: 6px 0;
+            vertical-align: top;
+        }
+        .detail-value {
+            color: var(--text-color);
+            padding: 6px 0;
+        }
+        .detail-value.code {
+            font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace;
+            font-size: 0.9em;
+            word-break: break-all;
+        }
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+        }
+        .detail-stat {
+            text-align: center;
+            padding: 12px;
+            border-radius: 6px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+        }
+        .detail-stat-value {
+            font-size: 1.6em;
+            font-weight: 700;
+            color: var(--accent-color);
+        }
+        .detail-stat-label {
+            font-size: 0.85em;
+            color: var(--muted-text-color);
+            margin-top: 4px;
+        }
+        .detail-progress {
+            background: rgba(0,0,0,0.08);
+            height: 6px;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        body[data-theme="dark"] .detail-progress {
+            background: rgba(255,255,255,0.08);
+        }
+        .detail-progress-bar {
+            background: var(--accent-color);
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+        .detail-breakdown-item { margin-bottom: 10px; }
+        .detail-breakdown-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9em;
+            color: var(--muted-text-color);
+            margin-bottom: 4px;
+        }
+        .detail-breakdown-value {
+            font-weight: 600;
+            color: var(--text-color);
+        }
+        .critical-path-section {
+            border-left: 4px solid #dc3545;
+        }
+        body[data-theme="dark"] .critical-path-section {
+            border-left-color: #f87171;
+        }
+        .permission-callout {
+            background: rgba(255,244,229,0.9);
+            border-left: 4px solid #ff9800;
+            padding: 10px 12px;
+            border-radius: 4px;
+        }
+        body[data-theme="dark"] .permission-callout {
+            background: rgba(251,191,36,0.1);
+        }
+        .status-chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 10px;
+            border-radius: 999px;
+            font-weight: 600;
+            font-size: 0.85em;
+        }
+        .status-positive { background: rgba(34,197,94,0.15); color: #4ade80; }
+        .status-negative { background: rgba(239,68,68,0.15); color: #f87171; }
+        .status-warning { background: rgba(251,191,36,0.2); color: #fbbf24; }
+        .status-info { background: rgba(59,130,246,0.15); color: #93c5fd; }
         
         /* Override vis-network navigation buttons - blue icons without circles */
         div.vis-network div.vis-navigation div.vis-button {
@@ -2056,7 +2771,7 @@ $riskSection
             };
 
             const storedTheme = localStorage.getItem('scEntraTheme');
-            const initialTheme = storedTheme || (prefersDark.matches ? 'dark' : 'light');
+            const initialTheme = storedTheme || 'dark';
             setTheme(initialTheme);
 
             prefersDark.addEventListener('change', event => {

@@ -148,16 +148,37 @@ function Invoke-JsonAnonymizer {
 
         $lk = ($key ?? '').ToLower()
 
-        # Special handling for graph nodes
-        if ($context -and $context.type -eq 'user') {
-            if ($lk -eq 'label') { return Generate-Name $value }
-            if ($lk -eq 'userprincipalname') { return Generate-UPN $value }
+        # For graph nodes with context, use ID-based anonymization
+        if ($context -and $context.id) {
+            if ($lk -eq 'label') {
+                # Generate name/alias from entity ID for consistency
+                switch ($context.type) {
+                    'user' { return Generate-Name $context.id }
+                    'group' { return Alias-Group $context.id }
+                    'servicePrincipal' { return Alias-App $context.id }
+                    'application' { return Alias-App $context.id }
+                }
+            }
+            if ($context.type -eq 'user' -and $lk -eq 'userprincipalname') {
+                # Generate UPN from user ID for consistency
+                return Generate-UPN $context.id
+            }
         }
 
+        # Handle displayName based on context type
+        if ($lk -eq 'displayname' -and $context -and $context.type) {
+            switch ($context.type) {
+                'user' { return Generate-Name $value }
+                'group' { return Alias-Group $value }
+                'servicePrincipal' { return Alias-App $value }
+                'application' { return Alias-App $value }
+            }
+        }
+        
         if ($lk -eq 'principaldisplayname') { return Generate-Name $value }
         if ($lk -eq 'userprincipalname') { return Generate-UPN $value }
         if ($lk -match 'app|serviceprincipal') { return Alias-App $value }
-        if ($lk -match 'group|members|owners') { return Alias-Group $value }
+        if ($lk -match 'group') { return Alias-Group $value }
         if ($lk -match 'displayname|owner|manager|givenname|surname') { return Generate-Name $value }
 
         return $value
@@ -169,51 +190,20 @@ function Invoke-JsonAnonymizer {
         if ($obj -is [System.Collections.IDictionary] -or $obj -is [PSCustomObject]) {
             $new = @{}
             
-            # Build context if this is a node with a type
+            # Build context if this is a node with a type and id
             $currentContext = $context
             if ($obj.PSObject.Properties.Name -contains 'type') {
                 $currentContext = @{ type = $obj.type }
-            }
-            
-            # For user nodes, we need to generate consistent names based on ORIGINAL values
-            $generatedName = $null
-            if ($currentContext -and $currentContext.type -eq 'user') {
-                # Use the ORIGINAL label or id as the seed for consistent anonymization
-                $seed = $null
-                if ($obj.PSObject.Properties.Name -contains 'label' -and $obj.label) {
-                    $seed = $obj.label  # Use original label before anonymization
-                } elseif ($obj.PSObject.Properties.Name -contains 'id' -and $obj.id) {
-                    $seed = $obj.id
-                }
-                if ($seed) {
-                    $generatedName = Generate-Name $seed
+                # Add id to context if available for consistent anonymization
+                if ($obj.PSObject.Properties.Name -contains 'id' -and $obj.id) {
+                    $currentContext.id = $obj.id
                 }
             }
             
             foreach ($k in $obj.PSObject.Properties.Name) {
                 $v = $obj.$k
-                $lk = $k.ToLower()
                 
-                # For user nodes, use consistent name across label and UPN
-                if ($currentContext -and $currentContext.type -eq 'user' -and $generatedName) {
-                    if ($lk -eq 'label') {
-                        $new[$k] = $generatedName
-                        continue
-                    }
-                    if ($lk -eq 'userprincipalname') {
-                        # Convert "First Last" to "first.last@azurehacking.com"
-                        $nameParts = $generatedName -split '\s+', 2
-                        if ($nameParts.Count -eq 2) {
-                            $upn = ($nameParts[0] + "." + $nameParts[1]).ToLower() + "@azurehacking.com"
-                        } else {
-                            $upn = $generatedName.ToLower().Replace(' ', '.') + "@azurehacking.com"
-                        }
-                        $new[$k] = $upn
-                        continue
-                    }
-                }
-                
-                # For scalar values, apply Anonymize-Value then recurse
+                # For scalar values, apply Anonymize-Value with context
                 # For complex objects, just recurse with Anonymize-Obj
                 if ($v -is [string]) {
                     $new[$k] = Anonymize-Value $k $v $currentContext
@@ -236,9 +226,86 @@ function Invoke-JsonAnonymizer {
         return $obj
     }
 
+    function Replace-NamesInDescriptions($data, $nameMap) {
+        # Recursively walk through the data and replace names in description fields
+        function Replace-InObject($obj) {
+            if ($null -eq $obj) { return $obj }
+            
+            if ($obj -is [System.Collections.IDictionary] -or $obj -is [PSCustomObject]) {
+                foreach ($k in $obj.PSObject.Properties.Name) {
+                    $v = $obj.$k
+                    
+                    if ($k -eq 'description' -and $v -is [string]) {
+                        # Replace all entity names in the description
+                        foreach ($originalName in $nameMap.Keys) {
+                            $anonymizedName = $nameMap[$originalName]
+                            # Use regex with word boundaries to avoid partial matches
+                            # Escape special regex characters in the original name
+                            $escapedOriginal = [regex]::Escape($originalName)
+                            $v = $v -replace "'$escapedOriginal'", "'$anonymizedName'"
+                        }
+                        $obj.$k = $v
+                    } elseif ($v -is [System.Collections.IEnumerable] -and $v.GetType().Name -ne 'String') {
+                        foreach ($item in $v) {
+                            Replace-InObject $item
+                        }
+                    } elseif ($v -is [PSCustomObject] -or $v -is [System.Collections.IDictionary]) {
+                        Replace-InObject $v
+                    }
+                }
+            }
+            
+            return $obj
+        }
+        
+        return Replace-InObject $data
+    }
+
     $raw = Get-Content -Path $InputPath -Raw -ErrorAction Stop
     $data = $raw | ConvertFrom-Json -Depth 100
+    
+    # Build a name mapping table before anonymization
+    $nameMap = @{}
+    
+    # Collect all displayNames from various entities
+    if ($data.Users) {
+        foreach ($user in $data.Users) {
+            if ($user.displayName) {
+                $nameMap[$user.displayName] = Generate-Name $user.displayName
+            }
+        }
+    }
+    
+    if ($data.Groups) {
+        foreach ($group in $data.Groups) {
+            if ($group.displayName) {
+                $nameMap[$group.displayName] = Alias-Group $group.displayName
+            }
+        }
+    }
+    
+    if ($data.ServicePrincipals) {
+        foreach ($sp in $data.ServicePrincipals) {
+            if ($sp.displayName) {
+                $nameMap[$sp.displayName] = Alias-App $sp.displayName
+            }
+        }
+    }
+    
+    if ($data.AppRegistrations) {
+        foreach ($app in $data.AppRegistrations) {
+            if ($app.displayName) {
+                $nameMap[$app.displayName] = Alias-App $app.displayName
+            }
+        }
+    }
+    
+    # Anonymize the data
     $anon = Anonymize-Obj $data
+    
+    # Replace names in descriptions
+    $anon = Replace-NamesInDescriptions $anon $nameMap
+    
     $json = ($anon | ConvertTo-Json -Depth 100)
     Set-Content -Path $OutputPath -Value $json -Encoding UTF8
     return $anon
