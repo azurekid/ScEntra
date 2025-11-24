@@ -33,7 +33,7 @@ function Invoke-ScEntraAnalysis {
         # Use with an existing access token
         Connect-ScEntraGraph -AccessToken "eyJ0..."
         Invoke-ScEntraAnalysis -SkipConnection
-    
+
     .EXAMPLE
         # Include all group nesting relationships
         Invoke-ScEntraAnalysis -IncludeAllGroupNesting
@@ -78,7 +78,7 @@ function Invoke-ScEntraAnalysis {
     $escalationRisks = @()
     $graphData = $null
     $reportPath = $null
-    
+
     do {
         Write-Host "`n📋 Available Functions:" -ForegroundColor Yellow
         Write-Host "  [1] Run Full Analysis" -ForegroundColor White
@@ -89,9 +89,9 @@ function Invoke-ScEntraAnalysis {
         Write-Host "  [6] Toggle Full Group Nesting $(if ($IncludeAllGroupNesting) { '[ON]' } else { '[OFF]' })" -ForegroundColor White
         Write-Host "  [7] Exit" -ForegroundColor White
         Write-Host ""
-        
+
         $choice = Read-Host "Select option (1-7)"
-        
+
         switch ($choice) {
             "1" {
                 Write-Host "`n▶ Starting Full Analysis..." -ForegroundColor Cyan
@@ -358,7 +358,7 @@ function Invoke-ScEntraAnalysis {
                 continue
             }
         }
-        
+
     } while ($continue)
 
     # Return results if analysis was completed

@@ -7,7 +7,7 @@
 .DESCRIPTION
     This module provides functions to inventory Entra ID objects (users, groups, service principals, app registrations)
     and analyze privilege escalation risks through role assignments, PIM, and nested group memberships.
-    
+
     This module uses direct Microsoft Graph REST API endpoints for maximum compatibility and control.
 #>
 
@@ -27,4 +27,5 @@ if (Test-Path $publicFolder) {
 Export-ModuleMember -Function @(
     'Connect-ScEntraGraph'
     'Invoke-ScEntraAnalysis'
+    'Export-ScEntraReport'
 )

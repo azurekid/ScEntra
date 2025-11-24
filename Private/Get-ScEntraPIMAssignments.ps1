@@ -25,10 +25,38 @@ function Get-ScEntraPIMAssignments {
     function ConvertTo-PIMAssignment {
         param($Schedule, $AssignmentType)
         
+        $roleDefinition = $Schedule.roleDefinition
+
+        $roleDescription = if ($roleDefinition -and $roleDefinition.description) { $roleDefinition.description } else { $null }
+        $resourceScopes = @()
+        if ($roleDefinition -and $roleDefinition.resourceScopes) {
+            $resourceScopes = @($roleDefinition.resourceScopes | Sort-Object -Unique)
+        }
+
+        $allowedActions = @()
+        if ($roleDefinition -and $roleDefinition.rolePermissions) {
+            foreach ($permission in $roleDefinition.rolePermissions) {
+                if ($permission.allowedResourceActions) {
+                    $allowedActions += $permission.allowedResourceActions
+                }
+            }
+            if ($allowedActions.Count -gt 0) {
+                $allowedActions = $allowedActions | Sort-Object -Unique
+            }
+        }
+
         [PSCustomObject]@{
             AssignmentId = $Schedule.id
             RoleId = $Schedule.roleDefinitionId
-            RoleName = if ($Schedule.roleDefinition) { $Schedule.roleDefinition.displayName } else { 'Unknown' }
+            RoleDefinitionId = if ($roleDefinition) { $roleDefinition.id } else { $Schedule.roleDefinitionId }
+            RoleTemplateId = if ($roleDefinition -and ($roleDefinition.PSObject.Properties.Name -contains 'templateId')) { $roleDefinition.templateId } else { $null }
+            RoleName = if ($roleDefinition) { $roleDefinition.displayName } elseif ($Schedule.roleDefinition) { $Schedule.roleDefinition.displayName } else { 'Unknown' }
+            RoleDescription = $roleDescription
+            RoleIsBuiltIn = if ($roleDefinition -and ($roleDefinition.PSObject.Properties.Name -contains 'isBuiltIn')) { [bool]$roleDefinition.isBuiltIn } else { $null }
+            RoleIsEnabled = if ($roleDefinition -and ($roleDefinition.PSObject.Properties.Name -contains 'isEnabled')) { [bool]$roleDefinition.isEnabled } else { $null }
+            RoleResourceScopes = $resourceScopes
+            RoleAllowedActions = $allowedActions
+            RoleAllowedActionsCount = $allowedActions.Count
             PrincipalId = $Schedule.principalId
             PrincipalDisplayName = if ($Schedule.principal) { $Schedule.principal.displayName } else { 'Unknown' }
             PrincipalType = if ($Schedule.principal -and $Schedule.principal.'@odata.type') {

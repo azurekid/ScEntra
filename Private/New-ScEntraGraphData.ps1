@@ -401,18 +401,127 @@ function New-ScEntraGraphData {
     $assignedRoles = @($RoleAssignments | Select-Object -ExpandProperty RoleName -Unique)
     $pimRoles = @($PIMAssignments | Select-Object -ExpandProperty RoleName -Unique)
     $allRoles = @($assignedRoles; $pimRoles) | Select-Object -Unique
+
+    $roleMetadataByName = @{}
+    $collectRoleMetadata = {
+        param($entry)
+
+        if (-not $entry) { return }
+        $roleName = $entry.RoleName
+        if (-not $roleName) { return }
+
+        if (-not $roleMetadataByName.ContainsKey($roleName)) {
+            $metadata = @{
+                Description         = $entry.RoleDescription
+                TemplateId          = $entry.RoleTemplateId
+                DefinitionId        = $entry.RoleDefinitionId
+                IsBuiltIn           = $entry.RoleIsBuiltIn
+                IsEnabled           = $entry.RoleIsEnabled
+                ResourceScopes      = @()
+                AllowedActions      = @()
+                AllowedActionsCount = if ($entry.RoleAllowedActionsCount -ne $null) { [int]$entry.RoleAllowedActionsCount } else { $null }
+            }
+
+            if ($entry.RoleResourceScopes) {
+                $metadata.ResourceScopes = @($entry.RoleResourceScopes | Sort-Object -Unique)
+            }
+
+            if ($entry.RoleAllowedActions) {
+                $metadata.AllowedActions = @($entry.RoleAllowedActions | Sort-Object -Unique)
+                if (-not $metadata.AllowedActionsCount) {
+                    $metadata.AllowedActionsCount = $metadata.AllowedActions.Count
+                }
+            }
+
+            $roleMetadataByName[$roleName] = $metadata
+        }
+        else {
+            $metadata = $roleMetadataByName[$roleName]
+
+            if (-not $metadata.Description -and $entry.RoleDescription) {
+                $metadata.Description = $entry.RoleDescription
+            }
+            if (-not $metadata.TemplateId -and $entry.RoleTemplateId) {
+                $metadata.TemplateId = $entry.RoleTemplateId
+            }
+            if (-not $metadata.DefinitionId -and $entry.RoleDefinitionId) {
+                $metadata.DefinitionId = $entry.RoleDefinitionId
+            }
+            if ($metadata.IsBuiltIn -eq $null -and $entry.RoleIsBuiltIn -ne $null) {
+                $metadata.IsBuiltIn = [bool]$entry.RoleIsBuiltIn
+            }
+            if ($metadata.IsEnabled -eq $null -and $entry.RoleIsEnabled -ne $null) {
+                $metadata.IsEnabled = [bool]$entry.RoleIsEnabled
+            }
+
+            if ($entry.RoleResourceScopes) {
+                $combinedScopes = @($metadata.ResourceScopes + $entry.RoleResourceScopes)
+                if ($combinedScopes.Count -gt 0) {
+                    $metadata.ResourceScopes = $combinedScopes | Sort-Object -Unique
+                }
+            }
+
+            if ($entry.RoleAllowedActions) {
+                $combinedActions = @($metadata.AllowedActions + $entry.RoleAllowedActions)
+                if ($combinedActions.Count -gt 0) {
+                    $metadata.AllowedActions = $combinedActions | Sort-Object -Unique
+                }
+            }
+
+            if ($entry.RoleAllowedActionsCount -ne $null) {
+                $metadata.AllowedActionsCount = [int]$entry.RoleAllowedActionsCount
+            }
+            elseif ($metadata.AllowedActions -and $metadata.AllowedActions.Count -gt 0) {
+                $metadata.AllowedActionsCount = $metadata.AllowedActions.Count
+            }
+        }
+    }
+
+    foreach ($assignment in $RoleAssignments) { & $collectRoleMetadata $assignment }
+    foreach ($assignment in $PIMAssignments) { & $collectRoleMetadata $assignment }
     
     foreach ($roleName in $allRoles) {
         $roleId = "role-$roleName"
         if (-not $nodeIndex.ContainsKey($roleId)) {
             $isHighPrivilege = $highPrivilegeRoles -contains $roleName
-            $null = $nodes.Add(@{
+            $nodeData = @{
                 id = $roleId
                 label = $roleName
                 type = 'role'
                 isPrivileged = $true
                 isHighPrivilege = $isHighPrivilege
-            })
+            }
+
+            if ($roleMetadataByName.ContainsKey($roleName)) {
+                $metadata = $roleMetadataByName[$roleName]
+                if ($metadata.Description) {
+                    $nodeData.description = $metadata.Description
+                }
+                if ($metadata.TemplateId) {
+                    $nodeData.roleTemplateId = $metadata.TemplateId
+                }
+                if ($metadata.DefinitionId) {
+                    $nodeData.roleDefinitionId = $metadata.DefinitionId
+                }
+                if ($metadata.IsBuiltIn -ne $null) {
+                    $nodeData.roleIsBuiltIn = [bool]$metadata.IsBuiltIn
+                }
+                if ($metadata.IsEnabled -ne $null) {
+                    $nodeData.roleIsEnabled = [bool]$metadata.IsEnabled
+                }
+                if ($metadata.ResourceScopes -and $metadata.ResourceScopes.Count -gt 0) {
+                    $nodeData.roleResourceScopes = @($metadata.ResourceScopes)
+                }
+                if ($metadata.AllowedActions -and $metadata.AllowedActions.Count -gt 0) {
+                    $nodeData.roleAllowedActions = @($metadata.AllowedActions)
+                    $nodeData.roleAllowedActionsCount = if ($metadata.AllowedActionsCount -ne $null) { [int]$metadata.AllowedActionsCount } else { $metadata.AllowedActions.Count }
+                }
+                elseif ($metadata.AllowedActionsCount -ne $null) {
+                    $nodeData.roleAllowedActionsCount = [int]$metadata.AllowedActionsCount
+                }
+            }
+
+            $null = $nodes.Add($nodeData)
             $nodeIndex[$roleId] = $nodes.Count - 1
         }
     }

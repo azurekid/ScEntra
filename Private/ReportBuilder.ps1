@@ -263,7 +263,9 @@ function New-ScEntraGraphSection {
                         Show Only Critical Escalation Paths
                     </label>
                 </div>
-                <button id="resetGraph" class="button-primary">Reset View</button>
+                <div class="graph-button-group">
+                    <button id="resetGraph" class="button-primary">Reset View</button>
+                </div>
             </div>
 
             <div id="selectedNodeInfo">
@@ -1563,8 +1565,34 @@ function New-ScEntraGraphSection {
                         const css = node.isPrivileged ? 'status-warning' : 'status-info';
                         detailsHtml += '<tr><td class="detail-label">Privileged</td><td class="detail-value">' + statusChip(text, css) + '</td></tr>';
                     }
+                    if (node.roleIsBuiltIn !== undefined) {
+                        const text = node.roleIsBuiltIn ? 'Built-in role' : 'Custom role';
+                        const css = node.roleIsBuiltIn ? 'status-info' : 'status-warning';
+                        detailsHtml += '<tr><td class="detail-label">Origin</td><td class="detail-value">' + statusChip(text, css) + '</td></tr>';
+                    }
+                    if (node.roleIsEnabled !== undefined) {
+                        const text = node.roleIsEnabled ? 'Enabled' : 'Disabled';
+                        const css = node.roleIsEnabled ? 'status-positive' : 'status-negative';
+                        detailsHtml += '<tr><td class="detail-label">Status</td><td class="detail-value">' + statusChip(text, css) + '</td></tr>';
+                    }
                     if (node.description) {
                         detailsHtml += '<tr><td class="detail-label">Description</td><td class="detail-value">' + node.description + '</td></tr>';
+                    }
+                    if (node.roleTemplateId) {
+                        detailsHtml += '<tr><td class="detail-label">Role Template</td><td class="detail-value code">' + node.roleTemplateId + '</td></tr>';
+                    }
+                    if (node.roleDefinitionId) {
+                        detailsHtml += '<tr><td class="detail-label">Role Definition</td><td class="detail-value code">' + node.roleDefinitionId + '</td></tr>';
+                    }
+                    if (Array.isArray(node.roleResourceScopes) && node.roleResourceScopes.length > 0) {
+                        const scopeEntries = node.roleResourceScopes.filter(scope => scope);
+                        if (scopeEntries.length > 0) {
+                            const scopeHtml = scopeEntries.map(scope => '<div>' + scope + '</div>').join('');
+                            detailsHtml += '<tr><td class="detail-label">Resource Scopes</td><td class="detail-value code">' + scopeHtml + '</td></tr>';
+                        }
+                    }
+                    if (typeof node.roleAllowedActionsCount === 'number' && node.roleAllowedActionsCount > 0) {
+                        detailsHtml += '<tr><td class="detail-label">Allowed Actions</td><td class="detail-value">' + node.roleAllowedActionsCount + '</td></tr>';
                     }
                 }
 
@@ -1582,6 +1610,25 @@ function New-ScEntraGraphSection {
                         detailsHtml += '</div>';
                     }
                     detailsHtml += '</div>';
+                }
+
+                if (node.type === 'role' && Array.isArray(node.roleAllowedActions) && node.roleAllowedActions.length > 0) {
+                    const allowedActions = node.roleAllowedActions.filter(action => action);
+                    if (allowedActions.length > 0) {
+                        const maxActionsToShow = 20;
+                        detailsHtml += '<div class="detail-section">';
+                        detailsHtml += '<h4>Allowed Resource Actions</h4>';
+                        detailsHtml += '<ul class="detail-code-list">';
+                        allowedActions.slice(0, maxActionsToShow).forEach(action => {
+                            detailsHtml += '<li>' + action + '</li>';
+                        });
+                        if (allowedActions.length > maxActionsToShow) {
+                            const remaining = allowedActions.length - maxActionsToShow;
+                            detailsHtml += '<li class="detail-more">+' + remaining + ' additional actions</li>';
+                        }
+                        detailsHtml += '</ul>';
+                        detailsHtml += '</div>';
+                    }
                 }
 
                 const connectedEdges = network.getConnectedEdges(node.id);
@@ -2084,7 +2131,211 @@ function New-ScEntraGraphSection {
             document.getElementById('assignmentFilter').addEventListener('change', applyFilters);
             document.getElementById('escalationFilter').addEventListener('change', applyFilters);
 
+            const graphContainer = document.getElementById('escalationGraph');
+            let fullscreenButtonRef = null;
+            let fullscreenNavObserver = null;
+
+            const updateFullscreenUI = () => {
+                if (!fullscreenButtonRef) {
+                    return;
+                }
+
+                const isFullscreen = document.fullscreenElement === graphContainer;
+                fullscreenButtonRef.setAttribute('data-active', isFullscreen ? 'true' : 'false');
+                fullscreenButtonRef.setAttribute('aria-pressed', isFullscreen.toString());
+            };
+
+            const requestContainerFullscreen = async () => {
+                if (!graphContainer) {
+                    throw new Error('Graph container is not available.');
+                }
+
+                if (graphContainer.requestFullscreen) {
+                    await graphContainer.requestFullscreen();
+                }
+                else if (graphContainer.webkitRequestFullscreen) { // Safari
+                    graphContainer.webkitRequestFullscreen();
+                }
+                else {
+                    throw new Error('Fullscreen API is not supported in this browser.');
+                }
+            };
+
+            const exitFullscreen = async () => {
+                if (document.exitFullscreen) {
+                    await document.exitFullscreen();
+                }
+                else if (document.webkitExitFullscreen) {
+                    await document.webkitExitFullscreen();
+                }
+            };
+
+            const toggleFullscreen = async () => {
+                try {
+                    if (document.fullscreenElement === graphContainer) {
+                        await exitFullscreen();
+                    }
+                    else if (!document.fullscreenElement) {
+                        await requestContainerFullscreen();
+                    }
+                    else {
+                        await exitFullscreen();
+                        await requestContainerFullscreen();
+                    }
+                }
+                catch (err) {
+                    console.error('Failed to toggle fullscreen mode:', err);
+                }
+            };
+
+            const positionFullscreenButton = () => {
+                if (!fullscreenButtonRef) {
+                    return;
+                }
+
+                const navContainer = container.querySelector('div.vis-navigation');
+                const navButtons = navContainer ? Array.from(navContainer.querySelectorAll('.vis-button')) : [];
+                const otherButtons = navButtons.filter(btn => btn !== fullscreenButtonRef);
+                const navGap = 6;
+                const buttonHeight = fullscreenButtonRef.offsetHeight || 34;
+                let referenceLeft = 10;
+                let referenceTop = 10 + buttonHeight + navGap;
+
+                const computeOffsets = btn => {
+                    if (!btn) {
+                        return null;
+                    }
+                    if (typeof btn.offsetTop === 'number' && typeof btn.offsetLeft === 'number') {
+                        return { top: btn.offsetTop, left: btn.offsetLeft };
+                    }
+                    const inlineTop = parseFloat(btn.style.top || '0') || 0;
+                    const inlineLeft = parseFloat(btn.style.left || '0') || 0;
+                    return { top: inlineTop, left: inlineLeft };
+                };
+
+                if (otherButtons.length > 0) {
+                    referenceLeft = otherButtons.reduce((minLeft, btn) => {
+                        const offsets = computeOffsets(btn);
+                        if (!offsets) {
+                            return minLeft;
+                        }
+                        return Math.min(minLeft, offsets.left);
+                    }, referenceLeft);
+
+                    referenceTop = otherButtons.reduce((minTop, btn) => {
+                        const offsets = computeOffsets(btn);
+                        if (!offsets) {
+                            return minTop;
+                        }
+                        return Math.min(minTop, offsets.top);
+                    }, referenceTop);
+                }
+
+                const fullscreenTop = Math.max(navGap, referenceTop - buttonHeight - navGap);
+                const fullscreenLeft = Math.max(navGap, referenceLeft);
+
+                fullscreenButtonRef.style.position = 'absolute';
+                fullscreenButtonRef.style.top = fullscreenTop + 'px';
+                fullscreenButtonRef.style.left = fullscreenLeft + 'px';
+            };
+
+            const ensureFullscreenButton = () => {
+                if (!graphContainer) {
+                    return;
+                }
+
+                const navContainer = container.querySelector('div.vis-navigation');
+                if (!navContainer) {
+                    return;
+                }
+
+                const zoomExtendsButton = navContainer.querySelector('.vis-button.vis-zoomExtends');
+
+                if (fullscreenButtonRef && navContainer.contains(fullscreenButtonRef)) {
+                    positionFullscreenButton();
+                    return;
+                }
+
+                fullscreenButtonRef = document.createElement('div');
+                fullscreenButtonRef.id = 'toggleFullscreen';
+                fullscreenButtonRef.className = 'vis-button vis-fullscreen';
+                fullscreenButtonRef.setAttribute('role', 'button');
+                fullscreenButtonRef.setAttribute('tabindex', '0');
+                fullscreenButtonRef.setAttribute('aria-pressed', 'false');
+                fullscreenButtonRef.setAttribute('aria-label', 'Toggle fullscreen view');
+                fullscreenButtonRef.title = 'Toggle fullscreen';
+                fullscreenButtonRef.style.minWidth = '34px';
+                fullscreenButtonRef.style.minHeight = '34px';
+
+                const fullscreenIcon = document.createElement('span');
+                fullscreenIcon.className = 'vis-button-icon';
+                fullscreenIcon.setAttribute('aria-hidden', 'true');
+                fullscreenIcon.textContent = '⤢';
+                fullscreenButtonRef.appendChild(fullscreenIcon);
+
+                fullscreenButtonRef.addEventListener('click', async event => {
+                    event.preventDefault();
+                    await toggleFullscreen();
+                });
+
+                fullscreenButtonRef.addEventListener('keydown', async event => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        await toggleFullscreen();
+                    }
+                });
+
+                if (zoomExtendsButton && zoomExtendsButton.parentNode === navContainer) {
+                    zoomExtendsButton.insertAdjacentElement('afterend', fullscreenButtonRef);
+                }
+                else {
+                    navContainer.appendChild(fullscreenButtonRef);
+                }
+
+                positionFullscreenButton();
+                updateFullscreenUI();
+            };
+
+            function setupFullscreenButton() {
+                if (!graphContainer) {
+                    return;
+                }
+
+                const navContainer = container.querySelector('div.vis-navigation');
+                if (!navContainer) {
+                    requestAnimationFrame(setupFullscreenButton);
+                    return;
+                }
+
+                ensureFullscreenButton();
+
+                if (!fullscreenNavObserver) {
+                    fullscreenNavObserver = new MutationObserver(() => {
+                        ensureFullscreenButton();
+                    });
+                    fullscreenNavObserver.observe(container, {
+                        childList: true,
+                        subtree: true
+                    });
+                }
+            }
+
             setupZoomExtendsButton();
+            setupFullscreenButton();
+
+            document.addEventListener('fullscreenchange', () => {
+                updateFullscreenUI();
+                if (document.fullscreenElement === graphContainer) {
+                    setTimeout(() => {
+                        try {
+                            network.fit({ animation: false });
+                        }
+                        catch (err) {
+                            console.debug('Unable to refit network after entering fullscreen:', err);
+                        }
+                    }, 150);
+                }
+            });
 
             // Wait for DOM to be fully loaded before attaching risk row listeners
             function attachRiskRowListeners() {
@@ -2446,6 +2697,14 @@ function New-ScEntraReportDocument {
             border-radius: 8px;
             border: 1px solid var(--border-color);
         }
+        .graph-button-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .graph-button-group .button-primary {
+            white-space: nowrap;
+        }
         .graph-controls {
             display: flex;
             justify-content: center;
@@ -2612,6 +2871,31 @@ function New-ScEntraReportDocument {
             font-size: 0.9em;
             word-break: break-all;
         }
+        .detail-code-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            max-height: 220px;
+            overflow-y: auto;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 10px 12px;
+            font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace;
+            font-size: 0.85em;
+            line-height: 1.45;
+        }
+        .detail-code-list li {
+            margin-bottom: 6px;
+            word-break: break-all;
+        }
+        .detail-code-list li:last-child {
+            margin-bottom: 0;
+        }
+        .detail-code-list .detail-more {
+            color: var(--muted-text-color);
+            font-style: italic;
+        }
         .detail-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -2721,6 +3005,21 @@ function New-ScEntraReportDocument {
         div.vis-network div.vis-navigation div.vis-button.vis-zoomIn::after { content: '+' !important; }
         div.vis-network div.vis-navigation div.vis-button.vis-zoomOut::after { content: '−' !important; }
         div.vis-network div.vis-navigation div.vis-button.vis-zoomExtends::after { content: '⊡' !important; }
+        div.vis-network div.vis-navigation div.vis-button.vis-fullscreen .vis-button-icon {
+            color: #667eea;
+            font-size: 24px;
+            font-weight: bold;
+            line-height: 30px;
+            font-family: 'Segoe UI Symbol', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+        }
+        div.vis-network div.vis-navigation div.vis-button.vis-fullscreen[data-active="true"] {
+            background-color: rgba(102, 126, 234, 0.35) !important;
+        }
         
         body[data-theme="dark"] div.vis-network div.vis-navigation div.vis-button {
             background-color: rgba(165, 180, 252, 0.15) !important;
@@ -2731,6 +3030,12 @@ function New-ScEntraReportDocument {
         }
         body[data-theme="dark"] div.vis-network div.vis-navigation div.vis-button::after {
             color: #a5b4fc !important;
+        }
+        body[data-theme="dark"] div.vis-network div.vis-navigation div.vis-button.vis-fullscreen .vis-button-icon {
+            color: #a5b4fc;
+        }
+        body[data-theme="dark"] div.vis-network div.vis-navigation div.vis-button.vis-fullscreen[data-active="true"] {
+            background-color: rgba(165, 180, 252, 0.35) !important;
         }
     </style>
 </head>
