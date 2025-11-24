@@ -337,7 +337,7 @@ function New-ScEntraGraphSection {
             const graphEdges = $edgesJson;
             
             // Filter out service principals, applications, and roles without connections
-            const relevantEdgeTypes = ['requests_permission', 'has_permission', 'isEscalationPath'];
+            const relevantEdgeTypes = ['requests_permission', 'has_permission', 'owns', 'assigned_to', 'has_service_principal'];
             const assignmentEdgeTypes = ['has_role', 'pim_active', 'pim_eligible', 'eligible'];
             const connectedSPandAppIds = new Set();
             const connectedRoleIds = new Set();
