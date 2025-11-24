@@ -513,6 +513,16 @@ function New-ScEntraGraphSection {
             const escalationEdgeOpacity = 0.95;
             const escalationEdgeWidth = 4;
 
+            const edgeLengthPresets = {
+                'member_of': 165,
+                'has_role': 235,
+                'owns': 275,
+                'assigned_to': 225,
+                'can_manage': 245,
+                'requests_permission': 320,
+                'has_permission': 345
+            };
+
             const edges = new vis.DataSet(graphEdges.map((edge, idx) => {
                 const normalizedLabel = (edge.label || '').toLowerCase();
                 let edgeColor;
@@ -564,6 +574,11 @@ function New-ScEntraGraphSection {
                 let edgeWidth = edge.type === 'has_role' ? 3 :
                                 edge.type === 'can_manage' ? 2 : 1.5;
 
+                const baseLength = edgeLengthPresets[edge.type] || 205;
+                const randomStretch = (Math.random() - 0.5) * 90; // +/-45px variance
+                const escalates = edge.isEscalationPath ? 60 : 0;
+                const resolvedLength = Math.max(140, baseLength + randomStretch + escalates);
+
                 return {
                     id: edge.from + '-' + edge.to + '-' + idx,
                     from: edge.from,
@@ -583,6 +598,7 @@ function New-ScEntraGraphSection {
                         strokeWidth: 0,
                         strokeColor: 'transparent'
                     },
+                    length: resolvedLength,
                     edgeType: edge.type,
                     isPIM: edge.isPIM || false,
                     isEscalationPath: edge.isEscalationPath || false
@@ -649,62 +665,104 @@ function New-ScEntraGraphSection {
 
             let initialViewPosition = null;
             let initialLayoutSettled = false;
-            let gentleMotionInterval = null;
+            let gentleMotionAnimationFrame = null;
+            let gentleMotionState = null;
 
             function startGentleMotion() {
-                if (gentleMotionInterval) return;
-                
-                const allNodes = nodes.get();
-                const nodePositions = {};
+                if (gentleMotionAnimationFrame !== null) {
+                    return;
+                }
+
+                const nodeSnapshot = nodes.get();
+                const basePositions = {};
                 const nodePhases = {};
                 const nodeFrequencies = {};
-                
-                // Store initial positions and assign random phase offsets and frequencies
-                allNodes.forEach(node => {
-                    const pos = network.getPosition(node.id);
-                    nodePositions[node.id] = { x: pos.x, y: pos.y };
-                    nodePhases[node.id] = { x: Math.random() * Math.PI * 2, y: Math.random() * Math.PI * 2 };
-                    nodeFrequencies[node.id] = { x: 0.8 + Math.random() * 0.4, y: 0.6 + Math.random() * 0.5 };
+                const nodeAmplitudes = {};
+
+                nodeSnapshot.forEach(node => {
+                    const pos = network.getPosition(node.id) || { x: 0, y: 0 };
+                    basePositions[node.id] = { x: pos.x, y: pos.y };
+                    nodePhases[node.id] = {
+                        x: Math.random() * Math.PI * 2,
+                        y: Math.random() * Math.PI * 2
+                    };
+                    nodeFrequencies[node.id] = {
+                        x: 0.5 + Math.random() * 0.3,
+                        y: 0.4 + Math.random() * 0.35
+                    };
+                    nodeAmplitudes[node.id] = 22 + Math.random() * 18;
                 });
-                
-                let time = 0;
-                gentleMotionInterval = setInterval(() => {
-                    time += 0.06;
+
+                gentleMotionState = {
+                    basePositions,
+                    nodePhases,
+                    nodeFrequencies,
+                    nodeAmplitudes,
+                    nodeIds: nodeSnapshot.map(n => n.id),
+                    time: 0
+                };
+
+                let lastTimestamp = null;
+
+                const animate = timestamp => {
+                    if (!gentleMotionState) {
+                        gentleMotionAnimationFrame = null;
+                        return;
+                    }
+
+                    if (lastTimestamp === null) {
+                        lastTimestamp = timestamp;
+                    }
+
+                    const deltaSeconds = Math.min((timestamp - lastTimestamp) / 1000, 0.05);
+                    lastTimestamp = timestamp;
+                    gentleMotionState.time += deltaSeconds * 0.9;
+
                     const updates = [];
-                    
-                    allNodes.forEach(node => {
-                        if (!node.hidden && nodePositions[node.id]) {
-                            const phaseX = nodePhases[node.id].x;
-                            const phaseY = nodePhases[node.id].y;
-                            const freqX = nodeFrequencies[node.id].x;
-                            const freqY = nodeFrequencies[node.id].y;
-                            const amplitude = 25;
-                            
-                            // Create figure-8 like motion with varying frequencies
-                            const offsetX = Math.sin(time * freqX + phaseX) * amplitude + 
-                                          Math.sin(time * freqX * 0.5 + phaseX) * (amplitude * 0.3);
-                            const offsetY = Math.cos(time * freqY + phaseY) * amplitude + 
-                                          Math.cos(time * freqY * 0.7 + phaseY) * (amplitude * 0.4);
-                            
-                            updates.push({
-                                id: node.id,
-                                x: nodePositions[node.id].x + offsetX,
-                                y: nodePositions[node.id].y + offsetY
-                            });
+                    gentleMotionState.nodeIds.forEach(nodeId => {
+                        const basePos = gentleMotionState.basePositions[nodeId];
+                        if (!basePos) {
+                            return;
                         }
+
+                        const currentNode = nodes.get(nodeId);
+                        if (!currentNode || currentNode.hidden) {
+                            return;
+                        }
+
+                        const phase = gentleMotionState.nodePhases[nodeId];
+                        const freq = gentleMotionState.nodeFrequencies[nodeId];
+                        const amplitude = gentleMotionState.nodeAmplitudes[nodeId];
+                        const t = gentleMotionState.time;
+
+                        const offsetX = Math.sin(t * freq.x + phase.x) * amplitude * 0.9 +
+                                        Math.sin(t * freq.x * 0.4 + phase.x) * amplitude * 0.35;
+                        const offsetY = Math.cos(t * freq.y + phase.y) * amplitude * 0.85 +
+                                        Math.cos(t * freq.y * 0.55 + phase.y) * amplitude * 0.3;
+
+                        updates.push({
+                            id: nodeId,
+                            x: basePos.x + offsetX,
+                            y: basePos.y + offsetY
+                        });
                     });
-                    
+
                     if (updates.length > 0) {
                         nodes.update(updates);
                     }
-                }, 50);
+
+                    gentleMotionAnimationFrame = requestAnimationFrame(animate);
+                };
+
+                gentleMotionAnimationFrame = requestAnimationFrame(animate);
             }
             
             function stopGentleMotion() {
-                if (gentleMotionInterval) {
-                    clearInterval(gentleMotionInterval);
-                    gentleMotionInterval = null;
+                if (gentleMotionAnimationFrame !== null) {
+                    cancelAnimationFrame(gentleMotionAnimationFrame);
+                    gentleMotionAnimationFrame = null;
                 }
+                gentleMotionState = null;
             }
 
             function finalizeInitialLayout() {
@@ -1033,6 +1091,7 @@ function New-ScEntraGraphSection {
                 }
 
                 highlightEscalationPathFromNode(nodeId);
+                detangleConnectedNodes(nodeId);
 
                 document.getElementById('selectedNodeName').textContent = nodeData.label;
                 document.getElementById('selectedNodeType').textContent = '(' + nodeData.type + ')';
@@ -1330,6 +1389,70 @@ function New-ScEntraGraphSection {
                 }, 500);
             }
 
+            function detangleConnectedNodes(centerNodeId) {
+                if (!centerNodeId) {
+                    return;
+                }
+
+                const neighborIds = network.getConnectedNodes(centerNodeId) || [];
+                const visibleNeighbors = neighborIds.filter(id => {
+                    const node = nodes.get(id);
+                    return node && !node.hidden;
+                });
+
+                if (visibleNeighbors.length === 0) {
+                    return;
+                }
+
+                const positions = network.getPositions([centerNodeId].concat(visibleNeighbors));
+                const centerPosition = positions[centerNodeId];
+                if (!centerPosition) {
+                    return;
+                }
+
+                // Inspired by phyllotaxis patterns (golden angle) to minimize overlapping connectors
+                const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+                const baseOrbit = 150;
+                const orbitStep = 55;
+                const updates = [];
+                const noise = () => (Math.random() - 0.5) * 30;
+
+                visibleNeighbors.forEach((neighborId, index) => {
+                    const neighborNode = nodes.get(neighborId);
+                    const typeModifier = (() => {
+                        if (!neighborNode) return 1;
+                        switch (neighborNode.type) {
+                            case 'role':
+                                return 1.25;
+                            case 'servicePrincipal':
+                            case 'application':
+                                return 1.15;
+                            case 'group':
+                                return 1.05;
+                            default:
+                                return 1;
+                        }
+                    })();
+
+                    const localDegree = (network.getConnectedEdges(neighborId) || []).length;
+                    const degreeModifier = 1 + Math.min(localDegree, 8) * 0.04;
+                    const spiralIndex = index + 1;
+                    const angle = goldenAngle * spiralIndex;
+                    const organicRadius = baseOrbit + Math.sqrt(spiralIndex) * orbitStep * typeModifier * degreeModifier;
+                    const finalRadius = organicRadius + noise();
+
+                    updates.push({
+                        id: neighborId,
+                        x: centerPosition.x + Math.cos(angle) * finalRadius,
+                        y: centerPosition.y + Math.sin(angle) * finalRadius
+                    });
+                });
+
+                if (updates.length > 0) {
+                    nodes.update(updates);
+                }
+            }
+
             network.on('click', function(params) {
                 // Stop gentle motion when user interacts
                 stopGentleMotion();
@@ -1378,6 +1501,8 @@ function New-ScEntraGraphSection {
                         const n = nodes.get(id);
                         return n && !n.hidden;
                     });
+
+                    detangleConnectedNodes(nodeId);
                     
                     // Center on the clicked node and fit to screen
                     if (nodesToFit.length > 1) {

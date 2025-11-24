@@ -527,20 +527,43 @@ function New-ScEntraGraphData {
     }
     
     # Build a quick lookup of principals that currently have an active PIM assignment
-    $activePIMAssignmentMap = @{}
+    $buildAssignmentLookupKeys = {
+        param(
+            [string]$PrincipalId,
+            [string]$RoleId,
+            [string]$RoleDefinitionId,
+            [string]$RoleTemplateId,
+            [string]$RoleName
+        )
+
+        $keys = @()
+        if (-not $PrincipalId) { return $keys }
+        if ($RoleId) { $keys += "$PrincipalId|roleId|$RoleId" }
+        if ($RoleDefinitionId) { $keys += "$PrincipalId|roleDefinition|$RoleDefinitionId" }
+        if ($RoleTemplateId) { $keys += "$PrincipalId|roleTemplate|$RoleTemplateId" }
+        if ($RoleName) { $keys += "$PrincipalId|roleName|$($RoleName.Trim().ToLowerInvariant())" }
+        return $keys
+    }
+
+    $activePIMAssignments = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($pimAssignment in ($PIMAssignments | Where-Object { $_.AssignmentType -eq 'PIM-Active' })) {
-        if ($pimAssignment.PrincipalId -and $pimAssignment.RoleId) {
-            $key = "$($pimAssignment.PrincipalId)|$($pimAssignment.RoleId)"
-            $activePIMAssignmentMap[$key] = $true
+        $lookupKeys = & $buildAssignmentLookupKeys -PrincipalId $pimAssignment.PrincipalId -RoleId $pimAssignment.RoleId -RoleDefinitionId $pimAssignment.RoleDefinitionId -RoleTemplateId $pimAssignment.RoleTemplateId -RoleName $pimAssignment.RoleName
+        foreach ($key in $lookupKeys) {
+            if ($key) { [void]$activePIMAssignments.Add($key) }
         }
     }
 
     # Add nodes and edges for direct role assignments
     foreach ($assignment in $RoleAssignments) {
-        $assignmentKey = if ($assignment.MemberId -and $assignment.RoleId) { "$($assignment.MemberId)|$($assignment.RoleId)" } else { $null }
-
-        # Skip direct connections that represent an active PIM assignment to avoid duplicate labels
-        if ($assignmentKey -and $activePIMAssignmentMap.ContainsKey($assignmentKey)) {
+        $assignmentKeys = & $buildAssignmentLookupKeys -PrincipalId $assignment.MemberId -RoleId $assignment.RoleId -RoleDefinitionId $assignment.RoleDefinitionId -RoleTemplateId $assignment.RoleTemplateId -RoleName $assignment.RoleName
+        $skipDirectEdge = $false
+        foreach ($key in $assignmentKeys) {
+            if ($activePIMAssignments.Contains($key)) {
+                $skipDirectEdge = $true
+                break
+            }
+        }
+        if ($skipDirectEdge) {
             continue
         }
 
@@ -562,7 +585,7 @@ function New-ScEntraGraphData {
             }
             'group' {
                 $group = $Groups | Where-Object { $_.id -eq $assignment.MemberId } | Select-Object -First 1
-                    if ($group) {
+                if ($group) {
                     if (-not $nodeIndex.ContainsKey($group.id)) {
                         $groupShape = & $resolveGroupShape $group
                         $null = $nodes.Add(@{
