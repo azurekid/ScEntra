@@ -5,7 +5,7 @@
     Generate a comprehensive large sample report with realistic enterprise-scale data
 
 .DESCRIPTION
-    Creates a sample HTML report with 200 users, 40+ groups, 70 service principals,
+    Creates a sample HTML report with 200-600 users, 40-60 groups, 70-100 service principals,
     and 50 applications to demonstrate full ScEntra visualization and attack path detection
 #>
 
@@ -18,6 +18,11 @@ Import-Module ./ScEntra.psd1 -Force
 if (-not (Get-Command -Name New-ScEntraGraphData -ErrorAction SilentlyContinue)) {
     . (Join-Path -Path $PSScriptRoot -ChildPath 'Private/New-ScEntraGraphData.ps1')
 }
+
+# Randomize dataset sizes within realistic enterprise ranges
+$userCountTarget = Get-Random -Minimum 200 -Maximum 601    # inclusive upper bound by adding 1
+$groupCountTarget = Get-Random -Minimum 40 -Maximum 61
+$servicePrincipalCountTarget = Get-Random -Minimum 70 -Maximum 101
 
 $graphAppId = "00000003-0000-0000-c000-000000000000"
 
@@ -75,9 +80,9 @@ $appScenarios = @(
     "E-Discovery Platform", "Threat Intelligence Feed", "Incident Response Platform"
 )
 
-Write-Host "Generating 200 users..." -ForegroundColor Yellow
+Write-Host ("Generating {0} users..." -f $userCountTarget) -ForegroundColor Yellow
 
-# Generate 200 users with realistic distribution
+# Generate a randomized user population with realistic distribution
 $firstNames = @(
     "James", "Mary", "John", "Patricia", "Robert", "Jennifer", "Michael", "Linda",
     "William", "Barbara", "David", "Elizabeth", "Richard", "Susan", "Joseph", "Jessica",
@@ -154,8 +159,8 @@ for ($i = 0; $i -lt 2; $i++) {
     }
 }
 
-# Create 198 regular users with azurehacking.com domain
-for ($i = 2; $i -lt 200; $i++) {
+# Create remaining regular users with azurehacking.com domain
+for ($i = 2; $i -lt $userCountTarget; $i++) {
     $firstName = $firstNames[$i % $firstNames.Count]
     $lastName = $lastNames[($i * 7) % $lastNames.Count]  # Mix it up
     $dept = $departments[$i % $departments.Count]
@@ -172,8 +177,6 @@ for ($i = 2; $i -lt 200; $i++) {
         Department = $dept
     }
 }
-
-Write-Host "Generating 40+ groups with security tier classification..." -ForegroundColor Yellow
 
 # Generate comprehensive group structure
 $sampleGroups = @(
@@ -525,6 +528,47 @@ $sampleGroups = @(
     }
 )
 
+if ($sampleGroups.Count -gt $groupCountTarget) {
+    $groupCountTarget = $sampleGroups.Count
+}
+
+Write-Host ("Generating {0} groups with security tier classification..." -f $groupCountTarget) -ForegroundColor Yellow
+
+if ($sampleGroups.Count -lt $groupCountTarget) {
+    $additionalGroupNames = @(
+        "Project Orion Squad",
+        "Data Platform Guild",
+        "Automation Chapter",
+        "Cloud Migration Team",
+        "Innovation Lab",
+        "Endpoint Readiness Crew",
+        "Zero Trust Taskforce",
+        "Analytics Tiger Team",
+        "SRE Operations Pod",
+        "Customer Experience Council"
+    )
+
+    $newGroupIndex = 0
+    while ($sampleGroups.Count -lt $groupCountTarget) {
+        $name = $additionalGroupNames[$newGroupIndex % $additionalGroupNames.Count]
+        if ($newGroupIndex -ge $additionalGroupNames.Count) {
+            $suffix = [Math]::Floor($newGroupIndex / $additionalGroupNames.Count) + 2
+            $name = "$name $suffix"
+        }
+
+        $sampleGroups += [PSCustomObject]@{
+            Id = [Guid]::NewGuid().ToString()
+            DisplayName = $name
+            Description = "Auto-generated collaboration group"
+            IsRoleAssignable = $false
+            SecurityEnabled = $true
+            MailEnabled = $false
+        }
+
+        $newGroupIndex++
+    }
+}
+
 # Normalize group metadata for downstream processing
 $groupLookup = @{}
 for ($i = 0; $i -lt $sampleGroups.Count; $i++) {
@@ -607,7 +651,9 @@ $crossTierRoleMap = @(
     @{ GroupName = "App-ERP-PowerUsers"; RoleId = "158c047a-c907-4556-b7ef-446551a6b5f7"; RoleName = "Cloud Application Administrator" }
 )
 
-Write-Host "Generating 70 service principals..." -ForegroundColor Yellow
+Write-Host ("Generating {0} service principals..." -f $servicePrincipalCountTarget) -ForegroundColor Yellow
+
+$customServicePrincipalCount = [Math]::Max(0, $servicePrincipalCountTarget - $msApps.Count)
 
 # Create Microsoft Graph SP with full roles
 $sampleServicePrincipals = @()
@@ -666,7 +712,7 @@ for ($i = 1; $i -lt $msApps.Count; $i++) {
     }
 }
 
-# Add 58 custom enterprise service principals (70 total with MS apps)
+# Add custom enterprise service principals to reach the target
 $dangerousPermissions = @(
     @{ Id = $permissionIds.ApplicationReadWriteAll; Name = "Application.ReadWrite.All"; Desc = "Can create malicious applications" }
     @{ Id = $permissionIds.DirectoryReadWriteAll; Name = "Directory.ReadWrite.All"; Desc = "Can modify directory data" }
@@ -678,7 +724,7 @@ $dangerousPermissions = @(
     @{ Id = $permissionIds.AppRoleAssignmentReadWriteAll; Name = "AppRoleAssignment.ReadWrite.All"; Desc = "Can assign app roles" }
 )
 
-for ($i = 0; $i -lt 58; $i++) {
+for ($i = 0; $i -lt $customServicePrincipalCount; $i++) {
     $grantedPerms = @()
     
     # Assign 1-3 dangerous permissions randomly
@@ -698,9 +744,14 @@ for ($i = 0; $i -lt 58; $i++) {
         }
     }
     
+    $scenarioName = $appScenarios[$i % $appScenarios.Count]
+    if ($i -ge $appScenarios.Count) {
+        $scenarioName = "$scenarioName SP$([Math]::Floor($i / $appScenarios.Count) + 1)"
+    }
+
     $sampleServicePrincipals += [PSCustomObject]@{
         Id = [Guid]::NewGuid().ToString()
-        DisplayName = $appScenarios[$i]
+        DisplayName = $scenarioName
         AppId = [Guid]::NewGuid().ToString()
         AccountEnabled = (($i % 15) -ne 0)  # 1 in 15 disabled
         GrantedApplicationPermissions = $grantedPerms
@@ -1019,8 +1070,8 @@ $allPrivilegedGroupIds = @($roledGroupIds; $pimGroupIds) | Select-Object -Unique
 
 Write-Host "  Assigning users to $($allPrivilegedGroupIds.Count) privileged groups..." -ForegroundColor Gray
 
-# Assign users to privileged groups based on tier - REALISTIC for 200-employee company
-# In a typical 200-person org: ~5-10% have some admin rights, ~1-2% have high privileges
+# Assign users to privileged groups based on tier - realistic for a 200-600 employee company
+# In a typical 200-600 person org: ~5-10% have some admin rights, ~1-2% have high privileges
 # Use consistent member counts but random user selection
 
 # Create a pool of users to randomly assign (excluding break-glass accounts 0-1)
