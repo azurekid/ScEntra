@@ -6,6 +6,9 @@
 
 ScEntra is a PowerShell security analysis tool for Microsoft Entra ID (formerly Azure AD) that identifies privilege escalation risks, analyzes role assignments, and visualizes complex identity relationships through an interactive graph interface.
 
+<img width="1309" height="793" alt="image" src="https://github.com/user-attachments/assets/dc3d7158-686a-4e9e-b919-d0bea7c003fa" />
+
+
 ## 🎯 Key Features
 
 - **Privilege Escalation Detection**: Identifies potential attack paths through group memberships, role assignments, ownership chains, and dangerous API permissions
@@ -54,16 +57,17 @@ Import-Module ./ScEntra.psd1
 ### 3. Connect to Microsoft Graph
 
 ```powershell
-# Option 1: Using Azure PowerShell (recommended)
+# Option 1: Using device code flow (recommended)
 Connect-AzAccount
-Connect-ScEntraGraph
+Connect-ScEntraGraph -UseDeviceCode
 
 # Option 2: Using Azure CLI
 az login
 Connect-ScEntraGraph
 
-# Option 3: Using device code flow
-Connect-ScEntraGraph -UseDeviceCode
+# Option 3: Using Azure PowerShell
+Connect-AzAccount
+Connect-ScEntraGraph
 ```
 
 ### 4. Run Analysis
@@ -71,10 +75,10 @@ Connect-ScEntraGraph -UseDeviceCode
 ```powershell
 # Interactive menu mode
 Invoke-ScEntraAnalysis
-
-# Direct analysis
-Invoke-ScEntraAnalysis -OutputPath "./my-report.html"
 ```
+
+<img width="502" height="361" alt="image" src="https://github.com/user-attachments/assets/18b0385c-bd77-4856-aa07-61b2239237c4" />
+
 
 ## 📊 Example Output
 
