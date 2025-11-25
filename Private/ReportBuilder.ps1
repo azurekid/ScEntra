@@ -674,6 +674,22 @@ function New-ScEntraGraphSection {
 
             const network = new vis.Network(container, data, options);
 
+            let selectedNodeEdges = [];
+
+            const privilegedApps = new Set();
+            nodes.get().forEach(node => {
+                if (node.type === 'application') {
+                    const connectedEdges = network.getConnectedEdges(node.id);
+                    const hasAppPermissions = connectedEdges.some(edgeId => {
+                        const edge = edges.get(edgeId);
+                        return edge && edge.grantType === 'Role';
+                    });
+                    if (hasAppPermissions) {
+                        privilegedApps.add(node.id);
+                    }
+                }
+            });
+
             let initialViewPosition = null;
             let initialLayoutSettled = false;
             let gentleMotionAnimationFrame = null;
@@ -1525,6 +1541,11 @@ function New-ScEntraGraphSection {
                 const allNodes = nodes.get();
                 const visibleNodes = allNodes.filter(node => !node.hidden && node.id !== selectedNodeId);
                 
+                const selectedNode = nodes.get(selectedNodeId);
+                if (selectedNode && selectedNode.type === 'role' && selectedNode.label === 'Application Administrator') {
+                    visibleNodes = visibleNodes.filter(node => privilegedApps.has(node.id));
+                }
+                
                 if (visibleNodes.length === 0) {
                     return;
                 }
@@ -1574,8 +1595,8 @@ function New-ScEntraGraphSection {
                     };
                 });
                 
-                // Animate positions over 3 seconds
-                const duration = 3000; // ms
+                // Animate positions over 2 seconds
+                const duration = 2000; // ms
                 const startTime = Date.now();
                 const startPositions = {};
                 visibleNodes.forEach(node => {
@@ -1621,6 +1642,29 @@ function New-ScEntraGraphSection {
                     console.log('Node clicked:', nodeId);
                     console.log('Node data from originalNodeData:', node);
                     console.log('Node type:', node ? node.type : 'undefined');
+
+                    // Restore previous selected node edges
+                    if (selectedNodeEdges.length > 0) {
+                        const restoreUpdates = selectedNodeEdges.map(edgeId => {
+                            const baseStyle = originalEdgeStyles[edgeId];
+                            return {
+                                id: edgeId,
+                                width: baseStyle ? baseStyle.width : 1.5
+                            };
+                        });
+                        edges.update(restoreUpdates);
+                        selectedNodeEdges = [];
+                    }
+
+                    // Thicken edges of the selected node
+                    selectedNodeEdges = network.getConnectedEdges(nodeId);
+                    const edgeUpdates = selectedNodeEdges.map(edgeId => {
+                        return {
+                            id: edgeId,
+                            width: 4
+                        };
+                    });
+                    edges.update(edgeUpdates);
 
                     // Store the currently selected node for the info panel click handler
                     currentSelectedNode = node;
