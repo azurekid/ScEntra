@@ -858,25 +858,25 @@ Write-Host "Generating role assignments..." -ForegroundColor Yellow
 $roleAssignments = @()
 $pimAssignments = @()  # Initialize PIM assignments array
 
-# Define all Entra ID roles for variety
+# Define all Entra ID roles with comprehensive properties
 $entraRoles = @(
-    @{ Id = "62e90394-69f5-4237-9190-012177145e10"; Name = "Global Administrator" }
-    @{ Id = "e8611ab8-c189-46e8-94e1-60213ab1f814"; Name = "Privileged Role Administrator" }
-    @{ Id = "9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3"; Name = "Application Administrator" }
-    @{ Id = "c4e39bd9-1100-46d3-8c65-fb160da0071f"; Name = "Authentication Administrator" }
-    @{ Id = "729827e3-9c14-49f7-bb1b-9608f156bbb8"; Name = "Helpdesk Administrator" }
-    @{ Id = "194ae4cb-b126-40b2-bd5b-6091b380977d"; Name = "Security Administrator" }
-    @{ Id = "fe930be7-5e62-47db-91af-98c3a49a38b1"; Name = "User Administrator" }
-    @{ Id = "fdd7a751-b60b-444a-984c-02652fe8fa1c"; Name = "Groups Administrator" }
-    @{ Id = "158c047a-c907-4556-b7ef-446551a6b5f7"; Name = "Cloud Application Administrator" }
-    @{ Id = "b1be1c3e-b65d-4f19-8427-f6fa0d97feb9"; Name = "Conditional Access Administrator" }
-    @{ Id = "29232cdf-9323-42fd-ade2-1d097af3e4de"; Name = "Exchange Administrator" }
-    @{ Id = "f28a1f50-f6e7-4571-818b-6a12f2af6b6c"; Name = "SharePoint Administrator" }
-    @{ Id = "69091246-20e8-4a56-aa4d-066075b2a7a8"; Name = "Teams Administrator" }
-    @{ Id = "3a2c62db-5318-420d-8d74-23affee5d9d5"; Name = "Intune Administrator" }
-    @{ Id = "9360feb5-f418-4baa-8175-e2a00bac4301"; Name = "Directory Writers" }
-    @{ Id = "5d6b6bb7-de71-4623-b4af-96380a352509"; Name = "Security Reader" }
-    @{ Id = "f2ef992c-3afb-46b9-b7cf-a126ee74c451"; Name = "Global Reader" }
+    @{ Id = "62e90394-69f5-4237-9190-012177145e10"; TemplateId = "62e90394-69f5-4237-9190-012177145e10"; Name = "Global Administrator"; Description = "Can manage all aspects of Azure AD and Microsoft services that use Azure AD identities."; AllowedActionsCount = 245 }
+    @{ Id = "e8611ab8-c189-46e8-94e1-60213ab1f814"; TemplateId = "e8611ab8-c189-46e8-94e1-60213ab1f814"; Name = "Privileged Role Administrator"; Description = "Can manage role assignments in Azure AD, and all aspects of Privileged Identity Management."; AllowedActionsCount = 87 }
+    @{ Id = "9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3"; TemplateId = "9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3"; Name = "Application Administrator"; Description = "Can create and manage all aspects of app registrations and enterprise apps."; AllowedActionsCount = 56 }
+    @{ Id = "c4e39bd9-1100-46d3-8c65-fb160da0071f"; TemplateId = "c4e39bd9-1100-46d3-8c65-fb160da0071f"; Name = "Authentication Administrator"; Description = "Can view, set and reset authentication method information for any non-admin user."; AllowedActionsCount = 42 }
+    @{ Id = "729827e3-9c14-49f7-bb1b-9608f156bbb8"; TemplateId = "729827e3-9c14-49f7-bb1b-9608f156bbb8"; Name = "Helpdesk Administrator"; Description = "Can reset passwords for non-administrators and Helpdesk Administrators."; AllowedActionsCount = 28 }
+    @{ Id = "194ae4cb-b126-40b2-bd5b-6091b380977d"; TemplateId = "194ae4cb-b126-40b2-bd5b-6091b380977d"; Name = "Security Administrator"; Description = "Can read security information and reports, and manage configuration in Azure AD and Office 365."; AllowedActionsCount = 93 }
+    @{ Id = "fe930be7-5e62-47db-91af-98c3a49a38b1"; TemplateId = "fe930be7-5e62-47db-91af-98c3a49a38b1"; Name = "User Administrator"; Description = "Can manage all aspects of users and groups, including resetting passwords for limited admins."; AllowedActionsCount = 67 }
+    @{ Id = "fdd7a751-b60b-444a-984c-02652fe8fa1c"; TemplateId = "fdd7a751-b60b-444a-984c-02652fe8fa1c"; Name = "Groups Administrator"; Description = "Members of this role can create/manage groups and its settings like naming and expiration policies."; AllowedActionsCount = 38 }
+    @{ Id = "158c047a-c907-4556-b7ef-446551a6b5f7"; TemplateId = "158c047a-c907-4556-b7ef-446551a6b5f7"; Name = "Cloud Application Administrator"; Description = "Can create and manage all aspects of app registrations and enterprise apps except App Proxy."; AllowedActionsCount = 51 }
+    @{ Id = "b1be1c3e-b65d-4f19-8427-f6fa0d97feb9"; TemplateId = "b1be1c3e-b65d-4f19-8427-f6fa0d97feb9"; Name = "Conditional Access Administrator"; Description = "Can manage Conditional Access capabilities."; AllowedActionsCount = 24 }
+    @{ Id = "29232cdf-9323-42fd-ade2-1d097af3e4de"; TemplateId = "29232cdf-9323-42fd-ade2-1d097af3e4de"; Name = "Exchange Administrator"; Description = "Can manage all aspects of the Exchange product."; AllowedActionsCount = 45 }
+    @{ Id = "f28a1f50-f6e7-4571-818b-6a12f2af6b6c"; TemplateId = "f28a1f50-f6e7-4571-818b-6a12f2af6b6c"; Name = "SharePoint Administrator"; Description = "Can manage all aspects of the SharePoint service."; AllowedActionsCount = 39 }
+    @{ Id = "69091246-20e8-4a56-aa4d-066075b2a7a8"; TemplateId = "69091246-20e8-4a56-aa4d-066075b2a7a8"; Name = "Teams Administrator"; Description = "Can manage the Microsoft Teams service."; AllowedActionsCount = 41 }
+    @{ Id = "3a2c62db-5318-420d-8d74-23affee5d9d5"; TemplateId = "3a2c62db-5318-420d-8d74-23affee5d9d5"; Name = "Intune Administrator"; Description = "Can manage all aspects of the Intune product."; AllowedActionsCount = 52 }
+    @{ Id = "9360feb5-f418-4baa-8175-e2a00bac4301"; TemplateId = "9360feb5-f418-4baa-8175-e2a00bac4301"; Name = "Directory Writers"; Description = "Can read and write basic directory information."; AllowedActionsCount = 15 }
+    @{ Id = "5d6b6bb7-de71-4623-b4af-96380a352509"; TemplateId = "5d6b6bb7-de71-4623-b4af-96380a352509"; Name = "Security Reader"; Description = "Can read security information and reports in Azure AD and Office 365."; AllowedActionsCount = 31 }
+    @{ Id = "f2ef992c-3afb-46b9-b7cf-a126ee74c451"; TemplateId = "f2ef992c-3afb-46b9-b7cf-a126ee74c451"; Name = "Global Reader"; Description = "Can read everything that a Global Administrator can, but not update anything."; AllowedActionsCount = 189 }
 )
 
 $tier0GroupIds = @()
@@ -887,11 +887,19 @@ foreach ($mapping in $tier0RoleMap) {
     $group.isAssignableToRole = $true
     $group.isPIMEnabled = $true
 
+    $role = $entraRoles | Where-Object { $_.Id -eq $mapping.RoleId } | Select-Object -First 1
+
     $pimAssignments += [PSCustomObject]@{
         Id = [Guid]::NewGuid().ToString()
         RoleId = $mapping.RoleId
         RoleName = $mapping.RoleName
-        RoleDescription = $mapping.RoleName
+        RoleDescription = if ($role) { $role.Description } else { $mapping.RoleName }
+        RoleDefinitionId = $mapping.RoleId
+        RoleTemplateId = $mapping.RoleId
+        RoleIsBuiltIn = $true
+        RoleIsEnabled = $true
+        RoleResourceScopes = @("/")
+        RoleAllowedActionsCount = if ($role) { $role.AllowedActionsCount } else { 0 }
         PrincipalId = $group.Id
         PrincipalType = "group"
         AssignmentType = "PIM-Eligible"
@@ -909,11 +917,19 @@ foreach ($mapping in $tier1RoleMap) {
     $group.isAssignableToRole = $true
     $group.isPIMEnabled = $true
 
+    $role = $entraRoles | Where-Object { $_.Id -eq $mapping.RoleId } | Select-Object -First 1
+
     $pimAssignments += [PSCustomObject]@{
         Id = [Guid]::NewGuid().ToString()
         RoleId = $mapping.RoleId
         RoleName = $mapping.RoleName
         RoleDescription = $mapping.RoleName
+        RoleDefinitionId = if ($role) { $role.Id } else { $mapping.RoleId }
+        RoleTemplateId = if ($role) { $role.TemplateId } else { $mapping.RoleId }
+        RoleIsBuiltIn = $true
+        RoleIsEnabled = $true
+        RoleResourceScopes = @("/")
+        RoleAllowedActionsCount = if ($role) { $role.AllowedActionsCount } else { 0 }
         PrincipalId = $group.Id
         PrincipalType = "group"
         AssignmentType = "PIM-Eligible"
@@ -931,11 +947,19 @@ foreach ($mapping in $tier2RoleMap) {
     $group.isAssignableToRole = $true
     $group.isPIMEnabled = $false
 
+    $role = $entraRoles | Where-Object { $_.Id -eq $mapping.RoleId } | Select-Object -First 1
+
     $roleAssignments += [PSCustomObject]@{
         Id = [Guid]::NewGuid().ToString()
         RoleId = $mapping.RoleId
         RoleName = $mapping.RoleName
         RoleDescription = $mapping.RoleName
+        RoleDefinitionId = if ($role) { $role.Id } else { $mapping.RoleId }
+        RoleTemplateId = if ($role) { $role.TemplateId } else { $mapping.RoleId }
+        RoleIsBuiltIn = $true
+        RoleIsEnabled = $true
+        RoleResourceScopes = @("/")
+        RoleAllowedActionsCount = if ($role) { $role.AllowedActionsCount } else { 0 }
         MemberId = $group.Id
         MemberType = "group"
         AssignmentType = "Direct"
@@ -950,11 +974,19 @@ foreach ($mapping in $crossTierRoleMap) {
     $group.isAssignableToRole = $true
     $group.isPIMEnabled = $true
 
+    $role = $entraRoles | Where-Object { $_.Id -eq $mapping.RoleId } | Select-Object -First 1
+
     $pimAssignments += [PSCustomObject]@{
         Id = [Guid]::NewGuid().ToString()
         RoleId = $mapping.RoleId
         RoleName = $mapping.RoleName
         RoleDescription = $mapping.RoleName
+        RoleDefinitionId = if ($role) { $role.Id } else { $mapping.RoleId }
+        RoleTemplateId = if ($role) { $role.TemplateId } else { $mapping.RoleId }
+        RoleIsBuiltIn = $true
+        RoleIsEnabled = $true
+        RoleResourceScopes = @("/")
+        RoleAllowedActionsCount = if ($role) { $role.AllowedActionsCount } else { 0 }
         PrincipalId = $group.Id
         PrincipalType = "group"
         AssignmentType = "PIM-Eligible"
@@ -965,21 +997,35 @@ foreach ($mapping in $crossTierRoleMap) {
 }
 
 # Assign helpdesk roles to helpdesk groups
+$helpdeskRole = $entraRoles | Where-Object { $_.Id -eq "729827e3-9c14-49f7-bb1b-9608f156bbb8" } | Select-Object -First 1
 $roleAssignments += [PSCustomObject]@{
     Id = [Guid]::NewGuid().ToString()
     RoleId = "729827e3-9c14-49f7-bb1b-9608f156bbb8"
     RoleName = "Helpdesk Administrator"
     RoleDescription = "Helpdesk Administrator"
+    RoleDefinitionId = if ($helpdeskRole) { $helpdeskRole.Id } else { "729827e3-9c14-49f7-bb1b-9608f156bbb8" }
+    RoleTemplateId = if ($helpdeskRole) { $helpdeskRole.TemplateId } else { "729827e3-9c14-49f7-bb1b-9608f156bbb8" }
+    RoleIsBuiltIn = $true
+    RoleIsEnabled = $true
+    RoleResourceScopes = @("/")
+    RoleAllowedActionsCount = if ($helpdeskRole) { $helpdeskRole.AllowedActionsCount } else { 0 }
     MemberId = $sampleGroups[23].Id  # Helpdesk Tier 1
     MemberType = "group"
     AssignmentType = "Direct"
 }
 
+$authRole = $entraRoles | Where-Object { $_.Id -eq "c4e39bd9-1100-46d3-8c65-fb160da0071f" } | Select-Object -First 1
 $roleAssignments += [PSCustomObject]@{
     Id = [Guid]::NewGuid().ToString()
     RoleId = "c4e39bd9-1100-46d3-8c65-fb160da0071f"
     RoleName = "Authentication Administrator"
     RoleDescription = "Authentication Administrator"
+    RoleDefinitionId = if ($authRole) { $authRole.Id } else { "c4e39bd9-1100-46d3-8c65-fb160da0071f" }
+    RoleTemplateId = if ($authRole) { $authRole.TemplateId } else { "c4e39bd9-1100-46d3-8c65-fb160da0071f" }
+    RoleIsBuiltIn = $true
+    RoleIsEnabled = $true
+    RoleResourceScopes = @("/")
+    RoleAllowedActionsCount = if ($authRole) { $authRole.AllowedActionsCount } else { 0 }
     MemberId = $sampleGroups[24].Id  # Helpdesk Tier 2
     MemberType = "group"
     AssignmentType = "Direct"
@@ -993,6 +1039,12 @@ for ($i = 13; $i -lt 25; $i++) {
         RoleId = $role.Id
         RoleName = $role.Name
         RoleDescription = $role.Name
+        RoleDefinitionId = $role.Id
+        RoleTemplateId = $role.TemplateId
+        RoleIsBuiltIn = $true
+        RoleIsEnabled = $true
+        RoleResourceScopes = @("/")
+        RoleAllowedActionsCount = $role.AllowedActionsCount
         MemberId = $sampleServicePrincipals[$i].Id
         MemberType = "servicePrincipal"
         AssignmentType = "Direct"
@@ -1017,11 +1069,18 @@ $directUserRoles += @{ UserId = $sampleUsers[15].Id; RoleId = "158c047a-c907-455
 $directUserRoles += @{ UserId = $sampleUsers[25].Id; RoleId = "729827e3-9c14-49f7-bb1b-9608f156bbb8"; RoleName = "Helpdesk Administrator" }  # Lower risk
 
 foreach ($assignment in $directUserRoles) {
+    $role = $entraRoles | Where-Object { $_.Id -eq $assignment.RoleId } | Select-Object -First 1
     $roleAssignments += [PSCustomObject]@{
         Id = [Guid]::NewGuid().ToString()
         RoleId = $assignment.RoleId
         RoleName = $assignment.RoleName
         RoleDescription = $assignment.RoleName
+        RoleDefinitionId = if ($role) { $role.Id } else { $assignment.RoleId }
+        RoleTemplateId = if ($role) { $role.TemplateId } else { $assignment.RoleId }
+        RoleIsBuiltIn = $true
+        RoleIsEnabled = $true
+        RoleResourceScopes = @("/")
+        RoleAllowedActionsCount = if ($role) { $role.AllowedActionsCount } else { 0 }
         MemberId = $assignment.UserId
         MemberType = "user"
         AssignmentType = "Direct"
@@ -1041,13 +1100,20 @@ for ($i = 100; $i -lt 120; $i++) {
         @{ Id = "194ae4cb-b126-40b2-bd5b-6091b380977d"; Name = "Security Administrator" }
     )
     
-    $role = $roles[$i % $roles.Count]
+    $selectedRole = $roles[$i % $roles.Count]
+    $roleDetails = $entraRoles | Where-Object { $_.Id -eq $selectedRole.Id } | Select-Object -First 1
     
     $pimAssignments += [PSCustomObject]@{
         Id = [Guid]::NewGuid().ToString()
-        RoleId = $role.Id
-        RoleName = $role.Name
-        RoleDescription = $role.Name
+        RoleId = $selectedRole.Id
+        RoleName = $selectedRole.Name
+        RoleDescription = $selectedRole.Name
+        RoleDefinitionId = if ($roleDetails) { $roleDetails.Id } else { $selectedRole.Id }
+        RoleTemplateId = if ($roleDetails) { $roleDetails.TemplateId } else { $selectedRole.Id }
+        RoleIsBuiltIn = $true
+        RoleIsEnabled = $true
+        RoleResourceScopes = @("/")
+        RoleAllowedActionsCount = if ($roleDetails) { $roleDetails.AllowedActionsCount } else { 0 }
         PrincipalId = $sampleUsers[$i].Id
         PrincipalType = "user"
         AssignmentType = "PIM-Eligible"

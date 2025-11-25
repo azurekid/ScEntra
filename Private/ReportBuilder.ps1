@@ -65,8 +65,20 @@ function New-ScEntraReportHeaderSection {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][hashtable]$Stats,
+        [Parameter(Mandatory = $false)][hashtable]$OrganizationInfo,
         [Parameter(Mandatory = $true)][string]$GeneratedOn
     )
+    
+    $orgInfoHtml = ""
+    if ($OrganizationInfo) {
+        $orgName = if ($OrganizationInfo.DisplayName) { $OrganizationInfo.DisplayName } else { "Unknown" }
+        $orgDomain = if ($OrganizationInfo.VerifiedDomains) { $OrganizationInfo.VerifiedDomains } else { "" }
+        $orgInfoHtml = @"
+            <div class="org-info">
+                <strong>Organization:</strong> $orgName$(if ($orgDomain) { " ($orgDomain)" })
+            </div>
+"@
+    }
 
     return @"
         <header>
@@ -75,6 +87,7 @@ function New-ScEntraReportHeaderSection {
                 <button id="themeToggle" class="theme-toggle">🌙 Dark Mode</button>
             </div>
             <p>Entra ID Security Analysis - Generated on $GeneratedOn</p>
+            $orgInfoHtml
         </header>
 
         <div class="stats-grid">
@@ -2967,10 +2980,11 @@ function New-ScEntraReportDocument {
         [Parameter(Mandatory = $true)][array]$RiskDistribution,
         [Parameter(Mandatory = $true)][array]$EscalationRisks,
         [Parameter(Mandatory = $false)][hashtable]$GraphData,
+        [Parameter(Mandatory = $false)][hashtable]$OrganizationInfo,
         [Parameter(Mandatory = $true)][string]$GeneratedOn
     )
 
-    $headerSection = New-ScEntraReportHeaderSection -Stats $Stats -GeneratedOn $GeneratedOn
+    $headerSection = New-ScEntraReportHeaderSection -Stats $Stats -OrganizationInfo $OrganizationInfo -GeneratedOn $GeneratedOn
     $chartSection = New-ScEntraReportChartSection -RoleDistribution $RoleDistribution -RiskDistribution $RiskDistribution
     $graphSection = if ($GraphData -and $GraphData.nodes -and $GraphData.nodes.Count -gt 0) { New-ScEntraGraphSection -GraphData $GraphData } else { '' }
     $riskSection = New-ScEntraRiskSection -EscalationRisks $EscalationRisks
@@ -3066,6 +3080,15 @@ function New-ScEntraReportDocument {
         }
         header h1 { font-size: 2.5em; }
         header p { font-size: 1.1em; opacity: 0.9; margin-top: 10px; }
+        .org-info {
+            font-size: 1em;
+            opacity: 0.95;
+            margin-top: 8px;
+            padding: 8px 16px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 6px;
+            display: inline-block;
+        }
         .theme-toggle {
             padding: 10px 18px;
             border: 2px solid rgba(255,255,255,0.4);

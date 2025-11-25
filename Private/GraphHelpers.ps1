@@ -412,3 +412,37 @@ function Invoke-GraphBatchRequest {
 
     return $allResponses
 }
+
+function Get-ScEntraOrganizationInfo {
+    <#
+    .SYNOPSIS
+        Gets organization information from Microsoft Graph
+    .DESCRIPTION
+        Retrieves tenant organization details including display name, ID, and verified domains
+    .EXAMPLE
+        Get-ScEntraOrganizationInfo
+    #>
+    [CmdletBinding()]
+    param()
+
+    try {
+        $orgUri = "$script:GraphBaseUrl/organization"
+        $response = Invoke-GraphRequest -Uri $orgUri -Method GET
+        
+        if ($response.value -and $response.value.Count -gt 0) {
+            $org = $response.value[0]
+            return @{
+                Id = $org.id
+                DisplayName = $org.displayName
+                TenantId = $org.id
+                VerifiedDomains = $org.verifiedDomains | Where-Object { $_.isDefault } | Select-Object -ExpandProperty name -First 1
+                TechnicalContact = $org.technicalNotificationMails -join ', '
+            }
+        }
+        return $null
+    }
+    catch {
+        Write-Warning "Failed to retrieve organization information: $($_.Exception.Message)"
+        return $null
+    }
+}

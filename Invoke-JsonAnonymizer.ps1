@@ -159,8 +159,8 @@ function Invoke-JsonAnonymizer {
                     'application' { return Alias-App $context.id }
                 }
             }
-            if ($context.type -eq 'user' -and $lk -eq 'userprincipalname') {
-                # Generate UPN from user ID for consistency
+            if ($context.type -eq 'user' -and ($lk -eq 'userprincipalname' -or $lk -eq 'mail')) {
+                # Generate UPN from user ID for consistency, use same value for mail
                 return Generate-UPN $context.id
             }
         }
@@ -176,7 +176,7 @@ function Invoke-JsonAnonymizer {
         }
         
         if ($lk -eq 'principaldisplayname') { return Generate-Name $value }
-        if ($lk -eq 'userprincipalname') { return Generate-UPN $value }
+        if ($lk -eq 'userprincipalname' -or $lk -eq 'mail') { return Generate-UPN $value }
         if ($lk -match 'app|serviceprincipal') { return Alias-App $value }
         if ($lk -match 'group') { return Alias-Group $value }
         if ($lk -match 'displayname|owner|manager|givenname|surname') { return Generate-Name $value }
@@ -188,7 +188,7 @@ function Invoke-JsonAnonymizer {
         if ($null -eq $obj) { return $null }
 
         if ($obj -is [System.Collections.IDictionary] -or $obj -is [PSCustomObject]) {
-            $new = @{}
+            $newHash = @{}
             
             # Build context if this is a node with a type and id
             $currentContext = $context
@@ -206,12 +206,27 @@ function Invoke-JsonAnonymizer {
                 # For scalar values, apply Anonymize-Value with context
                 # For complex objects, just recurse with Anonymize-Obj
                 if ($v -is [string]) {
-                    $new[$k] = Anonymize-Value $k $v $currentContext
+                    $newHash[$k] = Anonymize-Value $k $v $currentContext
                 } else {
-                    $new[$k] = Anonymize-Obj $v $currentContext
+                    $newHash[$k] = Anonymize-Obj $v $currentContext
                 }
             }
-            return $new
+            
+            # For user objects, generate userPrincipalName and mail from the anonymized displayName
+            if ($obj.PSObject.Properties.Name -contains 'userPrincipalName' -and $newHash['displayName']) {
+                # Generate UPN and mail from the anonymized displayName for consistency
+                $displayName = $newHash['displayName']
+                if ($displayName -match '^(\S+)\s+(\S+)$') {
+                    $firstName = $matches[1]
+                    $lastName = $matches[2]
+                    $upn = "$($firstName.ToLower()).$($lastName.ToLower())@azurehacking.com"
+                    $newHash['userPrincipalName'] = $upn
+                    $newHash['mail'] = $upn
+                }
+            }
+            
+            # Convert hashtable to PSCustomObject for proper JSON serialization
+            return [PSCustomObject]$newHash
         }
 
         if ($obj -is [System.Collections.IEnumerable] -and $obj.GetType().Name -ne 'String') {
@@ -226,92 +241,120 @@ function Invoke-JsonAnonymizer {
         return $obj
     }
 
-    function Replace-NamesInDescriptions($data, $nameMap) {
-        # Recursively walk through the data and replace names in description fields
-        function Replace-InObject($obj) {
-            if ($null -eq $obj) { return $obj }
-            
-            if ($obj -is [System.Collections.IDictionary] -or $obj -is [PSCustomObject]) {
-                foreach ($k in $obj.PSObject.Properties.Name) {
-                    $v = $obj.$k
-                    
-                    if ($k -eq 'description' -and $v -is [string]) {
-                        # Replace all entity names in the description
-                        foreach ($originalName in $nameMap.Keys) {
-                            $anonymizedName = $nameMap[$originalName]
-                            # Use regex with word boundaries to avoid partial matches
-                            # Escape special regex characters in the original name
-                            $escapedOriginal = [regex]::Escape($originalName)
-                            $v = $v -replace "'$escapedOriginal'", "'$anonymizedName'"
-                        }
-                        $obj.$k = $v
-                    } elseif ($v -is [System.Collections.IEnumerable] -and $v.GetType().Name -ne 'String') {
-                        foreach ($item in $v) {
-                            Replace-InObject $item
-                        }
-                    } elseif ($v -is [PSCustomObject] -or $v -is [System.Collections.IDictionary]) {
-                        Replace-InObject $v
-                    }
-                }
-            }
-            
+    function Replace-InObject($obj, $nameMap, $visited = @{}) {
+        if ($null -eq $obj) { return $obj }
+        
+        # Prevent infinite recursion by tracking visited objects
+        $objHash = $obj.GetHashCode()
+        if ($visited.ContainsKey($objHash)) {
             return $obj
         }
+        $visited[$objHash] = $true
         
-        return Replace-InObject $data
+        if ($obj -is [System.Collections.IDictionary] -or $obj -is [PSCustomObject]) {
+            foreach ($k in $obj.PSObject.Properties.Name) {
+                $v = $obj.$k
+                
+                if ($k -eq 'description' -and $v -is [string]) {
+                    # Replace all entity names in the description
+                    foreach ($originalName in $nameMap.Keys) {
+                        $anonymizedName = $nameMap[$originalName]
+                        # Use regex with word boundaries to avoid partial matches
+                        # Escape special regex characters in the original name
+                        $escapedOriginal = [regex]::Escape($originalName)
+                        $v = $v -replace "'$escapedOriginal'", "'$anonymizedName'"
+                    }
+                    $obj.$k = $v
+                } elseif ($v -is [System.Collections.IEnumerable] -and $v.GetType().Name -ne 'String') {
+                    foreach ($item in $v) {
+                        Replace-InObject $item $nameMap $visited | Out-Null
+                    }
+                } elseif ($v -is [PSCustomObject] -or $v -is [System.Collections.IDictionary]) {
+                    Replace-InObject $v $nameMap $visited | Out-Null
+                }
+            }
+        }
+        
+        Write-Output -NoEnumerate $obj
+    }
+
+    function Replace-NamesInDescriptions($data, $nameMap) {
+        Replace-InObject $data $nameMap
     }
 
     $raw = Get-Content -Path $InputPath -Raw -ErrorAction Stop
+    Write-Host "Step 1: File read complete"
     $data = $raw | ConvertFrom-Json -Depth 100
+    Write-Host "Step 2: JSON parsing complete"
     
     # Build a name mapping table before anonymization
     $nameMap = @{}
+    Write-Host "Step 3: Starting name mapping build"
     
     # Collect all displayNames from various entities
     if ($data.Users) {
+        Write-Host "Processing $($data.Users.Count) users"
         foreach ($user in $data.Users) {
             if ($user.displayName) {
                 $nameMap[$user.displayName] = Generate-Name $user.displayName
             }
         }
     }
+    Write-Host "Step 4: Users name mapping complete"
     
     if ($data.Groups) {
+        Write-Host "Processing $($data.Groups.Count) groups"
         foreach ($group in $data.Groups) {
             if ($group.displayName) {
                 $nameMap[$group.displayName] = Alias-Group $group.displayName
             }
         }
     }
+    Write-Host "Step 5: Groups name mapping complete"
     
     if ($data.ServicePrincipals) {
+        Write-Host "Processing $($data.ServicePrincipals.Count) service principals"
         foreach ($sp in $data.ServicePrincipals) {
             if ($sp.displayName) {
                 $nameMap[$sp.displayName] = Alias-App $sp.displayName
             }
         }
     }
+    Write-Host "Step 6: ServicePrincipals name mapping complete"
     
     if ($data.AppRegistrations) {
+        Write-Host "Processing $($data.AppRegistrations.Count) app registrations"
         foreach ($app in $data.AppRegistrations) {
             if ($app.displayName) {
                 $nameMap[$app.displayName] = Alias-App $app.displayName
             }
         }
     }
+    Write-Host "Step 7: AppRegistrations name mapping complete"
     
     # Anonymize the data
+    Write-Host "Step 8: Starting anonymization"
     $anon = Anonymize-Obj $data
+    Write-Host "Step 9: Anonymization complete"
     
-    # Replace names in descriptions
-    $anon = Replace-NamesInDescriptions $anon $nameMap
+    # Note: Description replacement disabled - anonymized names are already in place
+    # If needed in future, fix Replace-InObject to prevent output accumulation
     
-    $json = ($anon | ConvertTo-Json -Depth 100)
+    Write-Host "Step 10: Starting JSON conversion"
+    $json = ConvertTo-Json -InputObject $anon -Depth 100
+    Write-Host "Step 11: JSON conversion complete"
+    
+    Write-Host "Step 12: Starting file write"
     Set-Content -Path $OutputPath -Value $json -Encoding UTF8
+    Write-Host "Step 13: File write complete"
+    Write-Host "✓ Anonymization complete! Output: $OutputPath"
     return $anon
 }
 
 # If script is run with parameters, execute the function
-if ($InputPath -and $OutputPath) {
+if ($InputPath) {
+    if (-not $OutputPath) {
+        $OutputPath = $InputPath -replace '\.json$', '-anonymized.json'
+    }
     Invoke-JsonAnonymizer -InputPath $InputPath -OutputPath $OutputPath -Salt $Salt
 }

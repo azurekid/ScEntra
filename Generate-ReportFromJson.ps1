@@ -45,6 +45,19 @@ $outputPath = $JsonPath -replace '\.json$', '-regenerated.html'
 
 Write-Host "Regenerating HTML report..." -ForegroundColor Cyan
 
+# Convert OrganizationInfo from PSCustomObject to hashtable if needed
+$orgInfo = $null
+if ($jsonData.OrganizationInfo) {
+    if ($jsonData.OrganizationInfo -is [hashtable]) {
+        $orgInfo = $jsonData.OrganizationInfo
+    } else {
+        $orgInfo = @{}
+        $jsonData.OrganizationInfo.PSObject.Properties | ForEach-Object {
+            $orgInfo[$_.Name] = $_.Value
+        }
+    }
+}
+
 # Call the export function with the data from JSON
 $reportPath = Export-ScEntraReport `
     -Users $jsonData.Users `
@@ -55,6 +68,7 @@ $reportPath = Export-ScEntraReport `
     -PIMAssignments $jsonData.PIMAssignments `
     -EscalationRisks $jsonData.EscalationRisks `
     -GraphData $graphData `
+    -OrganizationInfo $orgInfo `
     -OutputPath $outputPath
 
 if ($reportPath) {
