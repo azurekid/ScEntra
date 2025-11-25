@@ -382,6 +382,51 @@ function New-ScEntraGraphData {
             }
         }
     }
+
+    $ensureServicePrincipalNode = {
+        param($servicePrincipal)
+
+        if (-not $servicePrincipal -or -not $servicePrincipal.id) {
+            return
+        }
+
+        $displayLabel = if ([string]::IsNullOrWhiteSpace($servicePrincipal.displayName)) {
+            $servicePrincipal.appId
+        }
+        else {
+            $servicePrincipal.displayName
+        }
+
+        $servicePrincipalType = $null
+        $isManagedIdentity = $false
+        if ($servicePrincipal.PSObject.Properties.Name -contains 'servicePrincipalType') {
+            $servicePrincipalType = $servicePrincipal.servicePrincipalType
+            if ($servicePrincipalType) {
+                $isManagedIdentity = [string]::Equals($servicePrincipalType, 'ManagedIdentity', [System.StringComparison]::OrdinalIgnoreCase)
+            }
+        }
+
+        $baseNodeData = [ordered]@{
+            id = $servicePrincipal.id
+            label = $displayLabel
+            type = 'servicePrincipal'
+            appId = $servicePrincipal.appId
+            accountEnabled = $servicePrincipal.accountEnabled
+            servicePrincipalType = $servicePrincipalType
+            isManagedIdentity = $isManagedIdentity
+        }
+
+        if (-not $nodeIndex.ContainsKey($servicePrincipal.id)) {
+            $null = $nodes.Add($baseNodeData)
+            $nodeIndex[$servicePrincipal.id] = $nodes.Count - 1
+        }
+        else {
+            $existingNode = $nodes[$nodeIndex[$servicePrincipal.id]]
+            foreach ($key in $baseNodeData.Keys) {
+                $existingNode[$key] = $baseNodeData[$key]
+            }
+        }
+    }
     
     # Define high-privilege roles for escalation path analysis
     $highPrivilegeRoles = @(
@@ -610,16 +655,7 @@ function New-ScEntraGraphData {
             'servicePrincipal' {
                 $sp = $ServicePrincipals | Where-Object { $_.id -eq $assignment.MemberId } | Select-Object -First 1
                 if ($sp) {
-                    if (-not $nodeIndex.ContainsKey($sp.id)) {
-                        $null = $nodes.Add(@{
-                            id = $sp.id
-                            label = $sp.displayName
-                            type = 'servicePrincipal'
-                            appId = $sp.appId
-                            accountEnabled = $sp.accountEnabled
-                        })
-                        $nodeIndex[$sp.id] = $nodes.Count - 1
-                    }
+                    & $ensureServicePrincipalNode $sp
                     $null = $edges.Add(@{
                         from = $sp.id
                         to = $roleId
@@ -686,16 +722,7 @@ function New-ScEntraGraphData {
             'servicePrincipal' {
                 $sp = $ServicePrincipals | Where-Object { $_.id -eq $pimAssignment.PrincipalId } | Select-Object -First 1
                 if ($sp) {
-                    if (-not $nodeIndex.ContainsKey($sp.id)) {
-                        $null = $nodes.Add(@{
-                            id = $sp.id
-                            label = $sp.displayName
-                            type = 'servicePrincipal'
-                            appId = $sp.appId
-                            accountEnabled = $sp.accountEnabled
-                        })
-                        $nodeIndex[$sp.id] = $nodes.Count - 1
-                    }
+                    & $ensureServicePrincipalNode $sp
                     $null = $edges.Add(@{
                         from = $sp.id
                         to = $roleId
@@ -823,16 +850,7 @@ function New-ScEntraGraphData {
     foreach ($spId in $SPOwners.Keys) {
         $sp = $ServicePrincipals | Where-Object { $_.id -eq $spId } | Select-Object -First 1
         if ($sp) {
-            if (-not $nodeIndex.ContainsKey($sp.id)) {
-                $null = $nodes.Add(@{
-                    id = $sp.id
-                    label = $sp.displayName
-                    type = 'servicePrincipal'
-                    appId = $sp.appId
-                    accountEnabled = $sp.accountEnabled
-                })
-                $nodeIndex[$sp.id] = $nodes.Count - 1
-            }
+            & $ensureServicePrincipalNode $sp
             
             foreach ($owner in $SPOwners[$spId]) {
                 $user = $Users | Where-Object { $_.id -eq $owner.id } | Select-Object -First 1
@@ -853,16 +871,7 @@ function New-ScEntraGraphData {
     foreach ($spId in $SPAppRoleAssignments.Keys) {
         $sp = $ServicePrincipals | Where-Object { $_.id -eq $spId } | Select-Object -First 1
         if ($sp) {
-            if (-not $nodeIndex.ContainsKey($sp.id)) {
-                $null = $nodes.Add(@{
-                    id = $sp.id
-                    label = $sp.displayName
-                    type = 'servicePrincipal'
-                    appId = $sp.appId
-                    accountEnabled = $sp.accountEnabled
-                })
-                $nodeIndex[$sp.id] = $nodes.Count - 1
-            }
+            & $ensureServicePrincipalNode $sp
             
             foreach ($assignment in $SPAppRoleAssignments[$spId]) {
                 $principalType = $assignment.principalType
@@ -949,16 +958,7 @@ function New-ScEntraGraphData {
                 })
                 $nodeIndex[$app.id] = $nodes.Count - 1
             }
-            if (-not $nodeIndex.ContainsKey($sp.id)) {
-                $null = $nodes.Add(@{
-                    id = $sp.id
-                    label = $sp.displayName
-                    type = 'servicePrincipal'
-                    appId = $sp.appId
-                    accountEnabled = $sp.accountEnabled
-                })
-                $nodeIndex[$sp.id] = $nodes.Count - 1
-            }
+            & $ensureServicePrincipalNode $sp
             $null = $edges.Add(@{
                 from = $app.id
                 to = $sp.id
@@ -1118,16 +1118,7 @@ function New-ScEntraGraphData {
         $hasDelegatedPerms = $sp.PSObject.Properties.Name -contains 'GrantedDelegatedPermissions' -and $sp.GrantedDelegatedPermissions.Count -gt 0
         if (-not ($hasAppPerms -or $hasDelegatedPerms)) { continue }
 
-        if (-not $nodeIndex.ContainsKey($sp.id)) {
-            $null = $nodes.Add(@{
-                id = $sp.id
-                label = $sp.displayName
-                type = 'servicePrincipal'
-                appId = $sp.appId
-                accountEnabled = $sp.accountEnabled
-            })
-            $nodeIndex[$sp.id] = $nodes.Count - 1
-        }
+        & $ensureServicePrincipalNode $sp
 
         if ($hasAppPerms) {
             foreach ($assignment in $sp.GrantedApplicationPermissions) {

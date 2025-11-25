@@ -306,6 +306,10 @@ function New-ScEntraGraphSection {
                     <span>Service Principal</span>
                 </div>
                 <div class="legend-item">
+                    <img class="legend-icon" data-icon-type="managedIdentity" alt="Managed identity icon" />
+                    <span>Managed Identity</span>
+                </div>
+                <div class="legend-item">
                     <img class="legend-icon" data-icon-type="application" alt="Application icon" />
                     <span>Application</span>
                 </div>
@@ -445,6 +449,7 @@ function New-ScEntraGraphSection {
                 group: svgIcon('<svg id="a5c2c34a-a5f9-4043-a084-e51b74497895" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="f97360fa-fd13-420b-9b43-74b8dde83a11" x1="6.7" y1="7.26" x2="6.7" y2="18.36" gradientUnits="userSpaceOnUse"><stop offset="0.22" stop-color="#32d4f5"/><stop offset="1" stop-color="#198ab3"/></linearGradient><linearGradient id="b2ab4071-529d-4450-9443-e6dc0939cc4e" x1="6.42" y1="1.32" x2="7.23" y2="11.39" gradientUnits="userSpaceOnUse"><stop offset="0.22" stop-color="#32d4f5"/><stop offset="1" stop-color="#198ab3"/></linearGradient></defs><title>Icon-identity-223</title><path d="M17.22,13.92a.79.79,0,0,0,.8-.79.28.28,0,0,0,0-.15c-.31-2.5-1.74-4.54-4.46-4.54S9.35,10.22,9.07,13a.81.81,0,0,0,.72.88h7.43Z" fill="#0078d4"/><path d="M13.55,9.09a2.44,2.44,0,0,1-1.36-.4l1.35,3.52,1.33-3.49A2.54,2.54,0,0,1,13.55,9.09Z" fill="#fff" opacity="0.8"/><circle cx="13.55" cy="6.58" r="2.51" fill="#0078d4"/><path d="M12.19,16.36a1.19,1.19,0,0,0,1.19-1.19.66.66,0,0,0,0-.14c-.47-3.74-2.6-6.78-6.66-6.78S.44,10.83,0,15a1.2,1.2,0,0,0,1.07,1.31h11.1Z" fill="url(#f97360fa-fd13-420b-9b43-74b8dde83a11)"/><path d="M6.77,9.14a3.72,3.72,0,0,1-2-.6l2,5.25,2-5.21A3.81,3.81,0,0,1,6.77,9.14Z" fill="#fff" opacity="0.8"/><circle cx="6.74" cy="5.39" r="3.75" fill="url(#b2ab4071-529d-4450-9443-e6dc0939cc4e)"/></svg>'),
                 role: svgIcon('<svg id="a12d75ea-cbb6-44fa-832a-e54cce009101" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="e2b13d81-97e0-465a-b9ed-b7f57e1b3f8c" x1="9" y1="16.79" x2="9" y2="1.21" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#0078d4"/><stop offset="0.06" stop-color="#0a7cd7"/><stop offset="0.34" stop-color="#2e8ce1"/><stop offset="0.59" stop-color="#4897e9"/><stop offset="0.82" stop-color="#589eed"/><stop offset="1" stop-color="#5ea0ef"/></linearGradient></defs><title>Icon-identity-233</title><path d="M16.08,8.44c0,4.57-5.62,8.25-6.85,9a.43.43,0,0,1-.46,0c-1.23-.74-6.85-4.42-6.85-9V2.94a.44.44,0,0,1,.43-.44C6.73,2.39,5.72.5,9,.5s2.27,1.89,6.65,2a.44.44,0,0,1,.43.44Z" fill="#0078d4"/><path d="M15.5,8.48c0,4.2-5.16,7.57-6.29,8.25a.4.4,0,0,1-.42,0C7.66,16.05,2.5,12.68,2.5,8.48v-5A.41.41,0,0,1,2.9,3C6.92,2.93,6,1.21,9,1.21S11.08,2.93,15.1,3a.41.41,0,0,1,.4.4Z" fill="url(#e2b13d81-97e0-465a-b9ed-b7f57e1b3f8c)"/><path d="M11.85,7.66h-.4V6.24a2.62,2.62,0,0,0-.7-1.81,2.37,2.37,0,0,0-3.48,0,2.61,2.61,0,0,0-.7,1.81V7.66h-.4A.32.32,0,0,0,5.82,8v3.68a.32.32,0,0,0,.33.32h5.7a.32.32,0,0,0,.33-.32V8A.32.32,0,0,0,11.85,7.66Zm-1.55,0H7.7V6.22a1.43,1.43,0,0,1,.41-1,1.19,1.19,0,0,1,1.78,0,1.56,1.56,0,0,1,.16.2h0a1.4,1.4,0,0,1,.25.79Z" fill="#ffbd02"/><path d="M6.15,7.66h5.7a.32.32,0,0,1,.21.08L5.94,11.9a.33.33,0,0,1-.12-.24V8A.32.32,0,0,1,6.15,7.66Z" fill="#ffe452"/><path d="M11.85,7.66H6.15a.32.32,0,0,0-.21.08l6.12,4.16a.3.3,0,0,0,.12-.24V8A.32.32,0,0,0,11.85,7.66Z" fill="#ffd400" opacity="0.5"/></svg>'),
                 servicePrincipal: svgIcon('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="b05ecef1-bdba-47cb-a2a6-665a5bf9ae79" x1="9" y1="19.049" x2="9" y2="1.048" gradientUnits="userSpaceOnUse"><stop offset="0.2" stop-color="#0078d4"/><stop offset="0.287" stop-color="#1380da"/><stop offset="0.495" stop-color="#3c91e5"/><stop offset="0.659" stop-color="#559cec"/><stop offset="0.759" stop-color="#5ea0ef"/></linearGradient></defs><g id="adc593fc-9575-4f0f-b9cc-4803103092a4"><g><rect x="1" y="1" width="16" height="16" rx="0.534" fill="url(#b05ecef1-bdba-47cb-a2a6-665a5bf9ae79)"/><g><g opacity="0.95"><rect x="2.361" y="2.777" width="3.617" height="3.368" rx="0.14" fill="#fff"/><rect x="7.192" y="2.777" width="3.617" height="3.368" rx="0.14" fill="#fff"/><rect x="12.023" y="2.777" width="3.617" height="3.368" rx="0.14" fill="#fff"/></g><rect x="2.361" y="7.28" width="8.394" height="3.368" rx="0.14" fill="#fff" opacity="0.45"/><rect x="12.009" y="7.28" width="3.617" height="3.368" rx="0.14" fill="#fff" opacity="0.9"/><rect x="2.361" y="11.854" width="13.186" height="3.368" rx="0.14" fill="#fff" opacity="0.75"/></g></g></g></svg>'),
+                managedIdentity: svgIcon('<svg id="uuid-fdd7680e-8ace-441a-8a3a-73410c3b1f21" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="uuid-38c07977-ab9a-48eb-a668-cda3102bbd85" x1="7.697" y1="779.168" x2="14.082" y2="786.631" gradientTransform="translate(0 791.516) scale(1 -1)" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#225086"/><stop offset="1" stop-color="#0055c5"/></linearGradient><linearGradient id="uuid-aed4a7bc-b380-4c34-b841-2d0f34d24f17" x1="6.364" y1="778.164" x2="6.364" y2="794.412" gradientTransform="translate(0 791.516) scale(1 -1)" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#6df"/><stop offset="1" stop-color="#0294e4"/></linearGradient><linearGradient id="uuid-e2a7b7f2-bf16-4a76-ba27-7d149ab8a194" x1="9.001" y1="775.956" x2="9.001" y2="794.845" gradientTransform="translate(0 791.516) scale(1 -1)" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#44dbf9"/><stop offset="1" stop-color="#cbf8ff"/></linearGradient><linearGradient id="uuid-c67f3364-071c-41f9-a175-d3de1f837e0a" x1="13.5" y1="774.721" x2="13.5" y2="790.782" gradientTransform="translate(0 791.516) scale(1 -1)" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#041642"/><stop offset="1" stop-color="#041642" stop-opacity=".25"/></linearGradient></defs><g><path d="m17.647,9.906L10.147,1.445c-.599-.676-1.694-.676-2.294,0L.353,9.906c-.579.654-.428,1.641.323,2.111l7.499,4.688c.5.313,1.148.313,1.648,0l7.499-4.688c.751-.469.902-1.457.323-2.111h0Z" fill="url(#uuid-38c07977-ab9a-48eb-a668-cda3102bbd85)" stroke-width="0"/><path d="m10.148,1.445c-.599-.676-1.694-.676-2.294,0L.354,9.906c-.579.654-.428,1.641.323,2.111,0,0,2.776,1.735,3.126,1.954.388.242,1.033.511,1.715.511.621,0,1.197-.18,1.676-.487,0,0,0,0,.002-.001l1.804-1.128-4.364-2.728,4.474-5.047c.55-.627,1.377-1.026,2.302-1.026.472,0,.917.107,1.314.292l-2.579-2.909v-.002Z" fill="url(#uuid-aed4a7bc-b380-4c34-b841-2d0f34d24f17)" stroke-width="0"/><polygon points="4.636 10.138 4.688 10.17 9.001 12.866 9.001 12.866 13.365 10.138 13.366 10.138 13.365 10.138 9.001 5.214 4.636 10.138" fill="url(#uuid-e2a7b7f2-bf16-4a76-ba27-7d149ab8a194)" stroke-width="0"/><path d="m9.001,16.939c.287,0,.574-.078.824-.234l7.499-4.688c.751-.469.902-1.457.323-2.111L10.148,1.445c-.3-.338-.723-.507-1.147-.507v16.001Z" fill="url(#uuid-c67f3364-071c-41f9-a175-d3de1f837e0a)" fill-opacity=".5" isolation="isolate" opacity=".5" stroke-width="0"/></g><g><path id="uuid-f6648d86-048a-4f40-a6df-7ce120116a98" d="m16.512,10.831c.464-.458.468-1.206.01-1.67-.003-.003-.006-.006-.01-.01h0l-2.035-2.035c-.461-.461-1.208-.461-1.669,0h0l-2.035,2.035c-.456.467-.456,1.213,0,1.679l1.7,1.7c.061.063.094.147.092.234v3.155c-.003.108.041.213.122.285l.773.773c.095.104.255.112.359.017.006-.005.012-.011.017-.017l.743-.743h0l.448-.448c.058-.059.058-.154,0-.214l-.316-.315c-.067-.059-.074-.162-.014-.23.005-.005.009-.01.014-.014l.316-.316c.059-.063.059-.161,0-.224l-.316-.316c-.065-.054-.073-.15-.019-.215.006-.007.012-.013.019-.019l.316-.326c.058-.059.058-.154,0-.214l-.448-.448v-.163l1.934-1.944Zm-2.87-3.226c.371,0,.672.301.672.672s-.301.672-.672.672-.672-.301-.672-.672h0c0-.371.301-.672.672-.672Z" fill="#ffca00" stroke-width="0"/><path id="uuid-e1697bf4-8e5d-4d62-90c9-6569d79d4944" d="m13.133,16.042h0c.055.057.145.058.201.003.031-.03.047-.072.043-.115v-2.605c.002-.051-.021-.1-.061-.132h0c-.064-.045-.153-.03-.199.034-.02.029-.029.064-.025.098v2.555c-.02.058-.004.122.041.163Z" fill="#ff9300" isolation="isolate" opacity=".75" stroke-width="0"/><rect id="uuid-c930d4c2-9f41-48c7-adf7-acbd73af6fbf" x="12.014" y="9.834" width="3.348" height=".397" rx=".183" ry=".183" fill="#ff9300" isolation="isolate" opacity=".75" stroke-width="0"/><rect id="uuid-755aaa46-8b89-45f5-9da0-8a42782c5ddd" x="12.014" y="10.475" width="3.348" height=".397" rx=".183" ry=".183" fill="#ff9300" isolation="isolate" opacity=".75" stroke-width="0"/></g></svg>'),
                 application: svgIcon('<svg id="a76a0103-ce03-4d58-859d-4c27e02925d2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="efeb8e96-2af0-4681-9a6a-45f9b0262f19" x1="-6518.78" y1="1118.86" x2="-6518.78" y2="1090.06" gradientTransform="matrix(0.5, 0, 0, -0.5, 3267.42, 559.99)" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#5ea0ef"/><stop offset="0.18" stop-color="#589eed"/><stop offset="0.41" stop-color="#4897e9"/><stop offset="0.66" stop-color="#2e8ce1"/><stop offset="0.94" stop-color="#0a7cd7"/><stop offset="1" stop-color="#0078d4"/></linearGradient></defs><path d="M5.67,10.61H10v4.32H5.67Zm-5-5.76H5V.53H1.23a.6.6,0,0,0-.6.6Zm.6,10.08H5V10.61H.63v3.72A.6.6,0,0,0,1.23,14.93Zm-.6-5H5V5.57H.63Zm10.08,5h3.72a.6.6,0,0,0,.6-.6V10.61H10.71Zm-5-5H10V5.57H5.67Zm5,0H15V5.57H10.71Zm0-9.36V4.85H15V1.13a.6.6,0,0,0-.6-.6Zm-5,4.32H10V.53H5.67Z" fill="url(#efeb8e96-2af0-4681-9a6a-45f9b0262f19)"/><polygon points="17.37 10.7 17.37 15.21 13.5 17.47 13.5 12.96 17.37 10.7" fill="#32bedd"/><polygon points="17.37 10.7 13.5 12.97 9.63 10.7 13.5 8.44 17.37 10.7" fill="#9cebff"/><polygon points="13.5 12.97 13.5 17.47 9.63 15.21 9.63 10.7 13.5 12.97" fill="#50e6ff"/><polygon points="9.63 15.21 13.5 12.96 13.5 17.47 9.63 15.21" fill="#9cebff"/><polygon points="17.37 15.21 13.5 12.96 13.5 17.47 17.37 15.21" fill="#50e6ff"/></svg>'),
                 apiPermission: svgIcon('<svg id="uuid-431a759c-a29d-4678-89ee-5b1b2666f890" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="uuid-10478e68-1009-47b7-9e5e-1dad26a11858" x1="9" y1="18" x2="9" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#198ab3"/><stop offset="1" stop-color="#32bedd"/></linearGradient><linearGradient id="uuid-7623d8a9-ce5d-405d-98e0-ff8e832bdf61" x1="7.203" y1="11.089" x2="7.203" y2="3.888" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#6f4bb2"/><stop offset="1" stop-color="#c69aeb"/></linearGradient></defs><path d="m11.844,12.791c-.316-.081-.641-.073-.947.015l-1.295-2.124c-.04-.065-.124-.087-.19-.049l-.536.309c-.068.039-.091.128-.05.195l1.296,2.127c-.667.668-.737,1.797.01,2.551.12.121.259.223.41.302.276.143.568.213.857.213.463,0,.916-.18,1.273-.527.125-.121.23-.263.31-.417.302-.579.28-1.233-.037-1.769-.245-.413-.636-.707-1.102-.826Zm.424,1.965c-.06.232-.207.428-.414.55-.207.122-.449.156-.682.097-.278-.071-.503-.267-.614-.541-.141-.349-.041-.762.245-1.007.171-.147.379-.222.592-.222.075,0,.151.009.225.029.233.06.428.206.551.413h0c.122.207.157.448.097.681Zm3.555-9.443c-1.012,0-1.863.695-2.106,1.631h-2.54c-.078,0-.141.063-.141.141v.806c0,.078.063.141.141.141h2.54c.243.937,1.093,1.631,2.106,1.631,1.201,0,2.177-.976,2.177-2.175s-.977-2.175-2.177-2.175Zm1.068,2.388c-.082.428-.427.772-.854.854-.766.146-1.428-.515-1.282-1.28.082-.428.426-.772.854-.854.766-.147,1.429.515,1.283,1.28ZM2.978,2.953c.121.03.244.045.366.045.144,0,.286-.022.423-.063l.884,1.447c.04.065.124.087.19.049l.406-.234c.068-.039.091-.128.05-.195l-.887-1.453c.468-.475.577-1.224.218-1.821-.206-.343-.534-.585-.923-.682-.445-.111-.909-.016-1.28.267-.547.417-.737,1.18-.45,1.805.195.424.559.725,1.004.835Zm-.083-2.056c.133-.097.288-.148.445-.148.061,0,.122.008.183.023.232.058.42.219.514.446.13.315.02.691-.258.889-.182.13-.405.172-.619.118-.232-.058-.42-.219-.514-.446-.129-.312-.023-.683.249-.883Zm2.717,10.093l-.828-.477c-.067-.039-.154-.016-.192.052l-1.473,2.577c-1.227-.327-2.587.325-3.009,1.668-.091.289-.125.595-.1.897.071.849.537,1.569,1.253,1.973.377.212.793.321,1.214.321.374,0,.752-.086,1.109-.259.289-.14.549-.34.758-.583.56-.652.743-1.497.522-2.293-.12-.432-.352-.813-.668-1.116l1.468-2.567c.038-.067.015-.153-.052-.192Zm-2.055,5.145l-.213.234c-.161.177-.367.315-.601.366-.298.065-.605.02-.873-.131-.288-.162-.495-.427-.584-.745-.089-.318-.048-.652.115-.939.227-.402.648-.628,1.08-.628.206,0,.415.051.606.16.288.162.495.427.584.745.089.318.048.652-.115.939Z" fill="url(#uuid-10478e68-1009-47b7-9e5e-1dad26a11858)"/><path d="m9.921,5.287l-2.172-1.253c-.339-.195-.757-.195-1.096,0l-2.172,1.253c-.339.196-.548.557-.548.948v2.505c0,.391.209.753.548.949l2.174,1.253c.339.195.757.195,1.096,0l2.174-1.253c.339-.196.548-.557.548-.949v-2.505c-.001-.392-.212-.754-.552-.948Z" fill="url(#uuid-7623d8a9-ce5d-405d-98e0-ff8e832bdf61)"/></svg>')
             };
@@ -452,10 +457,13 @@ function New-ScEntraGraphSection {
             const nodes = new vis.DataSet(filteredNodes.map(node => {
                 // Use icons for PIM-enabled and security groups
                 let icon = null;
+                const isManagedIdentity = node.type === 'servicePrincipal' && node.isManagedIdentity;
                 if (node.type === 'group' && node.shape === 'diamond') {
                     icon = nodeIcons.pimEnabledGroup;
                 } else if (node.type === 'group' && node.shape === 'triangle') {
                     icon = nodeIcons.securityGroup;
+                } else if (isManagedIdentity) {
+                    icon = nodeIcons.managedIdentity;
                 } else if (node.type !== 'group') {
                     icon = nodeIcons[node.type];
                 }
@@ -471,6 +479,9 @@ function New-ScEntraGraphSection {
                     if (node.isPIMEnabled) detailTags.push('PIM enabled');
                     if (node.isAssignableToRole) detailTags.push('Role-assignable');
                     if (node.securityEnabled) detailTags.push('Security group');
+                }
+                if (isManagedIdentity) {
+                    detailTags.push('Managed identity');
                 }
 
                 const config = {
@@ -787,6 +798,40 @@ function New-ScEntraGraphSection {
             }
 
             network.once('stabilizationIterationsDone', finalizeInitialLayout);
+
+            let dragGroupInitial = null;
+            let dragCenterInitial = null;
+
+            network.on('dragStart', function(params) {
+                if (params.nodes.length > 0 && params.nodes[0] === selectedNodeId) {
+                    dragGroupInitial = {};
+                    const directNeighbors = network.getConnectedNodes(selectedNodeId) || [];
+                    directNeighbors.forEach(id => {
+                        const pos = network.getPositions([id])[id];
+                        if (pos) dragGroupInitial[id] = {x: pos.x, y: pos.y};
+                    });
+                    dragCenterInitial = network.getPositions([selectedNodeId])[selectedNodeId];
+                }
+            });
+
+            network.on('dragging', function(params) {
+                if (params.nodes.length > 0 && params.nodes[0] === selectedNodeId && dragCenterInitial) {
+                    const currentCenter = network.getPositions([selectedNodeId])[selectedNodeId];
+                    const deltaX = currentCenter.x - dragCenterInitial.x;
+                    const deltaY = currentCenter.y - dragCenterInitial.y;
+                    const updates = [];
+                    Object.keys(dragGroupInitial).forEach(id => {
+                        const initial = dragGroupInitial[id];
+                        updates.push({id: id, x: initial.x + deltaX, y: initial.y + deltaY});
+                    });
+                    if (updates.length > 0) nodes.update(updates);
+                }
+            });
+
+            network.on('dragEnd', function(params) {
+                dragGroupInitial = null;
+                dragCenterInitial = null;
+            });
 
             function applyGraphThemeStyles() {
                 const updatedTextColor = getCssVar('--text-color', '#333');
@@ -1321,6 +1366,22 @@ function New-ScEntraGraphSection {
                 }
             }
 
+            function fitVisibleNodes() {
+                const visibleNodeIds = nodes.get().filter(node => !node.hidden).map(node => node.id);
+                if (visibleNodeIds.length > 0) {
+                    network.fit({ nodes: visibleNodeIds });
+                } else {
+                    network.fit();
+                }
+            }
+
+            function arrangeAndFitGraph() {
+                restoreGroupedNodes();
+                stopGentleMotion();
+                network.setOptions({ physics: { enabled: false } });
+                fitVisibleNodes();
+            }
+
             function groupVisibleNodesByType() {
                 // Get all visible nodes
                 const allNodes = nodes.get();
@@ -1412,10 +1473,11 @@ function New-ScEntraGraphSection {
 
                 // Inspired by phyllotaxis patterns (golden angle) to minimize overlapping connectors
                 const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-                const baseOrbit = 150;
-                const orbitStep = 55;
+                const baseOrbit = 220;
+                const orbitStep = 75;
+                const minNeighborDistance = 260;
                 const updates = [];
-                const noise = () => (Math.random() - 0.5) * 30;
+                const noise = () => (Math.random() - 0.5) * 45;
 
                 visibleNeighbors.forEach((neighborId, index) => {
                     const neighborNode = nodes.get(neighborId);
@@ -1439,7 +1501,7 @@ function New-ScEntraGraphSection {
                     const spiralIndex = index + 1;
                     const angle = goldenAngle * spiralIndex;
                     const organicRadius = baseOrbit + Math.sqrt(spiralIndex) * orbitStep * typeModifier * degreeModifier;
-                    const finalRadius = organicRadius + noise();
+                    const finalRadius = Math.max(minNeighborDistance, organicRadius + noise());
 
                     updates.push({
                         id: neighborId,
@@ -1451,6 +1513,100 @@ function New-ScEntraGraphSection {
                 if (updates.length > 0) {
                     nodes.update(updates);
                 }
+            }
+
+            function detangleVisibleNodes() {
+                if (!selectedNodeId) {
+                    return;
+                }
+                
+                stopGentleMotion();
+                
+                const allNodes = nodes.get();
+                const visibleNodes = allNodes.filter(node => !node.hidden && node.id !== selectedNodeId);
+                
+                if (visibleNodes.length === 0) {
+                    return;
+                }
+                
+                const positions = network.getPositions([selectedNodeId]);
+                const centerPosition = positions[selectedNodeId];
+                if (!centerPosition) {
+                    return;
+                }
+                
+                // Calculate target positions in circular organic arrangement using phyllotaxis
+                const targets = {};
+                const placedNodes = new Set([selectedNodeId]);
+                
+                // Arrange all visible nodes in phyllotaxis pattern around the center
+                const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+                const baseOrbit = 300;
+                const orbitStep = 100;
+                const minDistance = 200;
+                const noise = () => (Math.random() - 0.5) * 45;
+                
+                visibleNodes.forEach((node, index) => {
+                    const typeModifier = (() => {
+                        switch (node.type) {
+                            case 'role':
+                                return 1.25;
+                            case 'servicePrincipal':
+                            case 'application':
+                                return 1.15;
+                            case 'group':
+                                return 1.05;
+                            default:
+                                return 1;
+                        }
+                    })();
+                    
+                    const localDegree = (network.getConnectedEdges(node.id) || []).length;
+                    const degreeModifier = 1 + Math.min(localDegree, 8) * 0.04;
+                    const spiralIndex = index + 1;
+                    const angle = goldenAngle * spiralIndex;
+                    const organicRadius = baseOrbit + Math.sqrt(spiralIndex) * orbitStep * typeModifier * degreeModifier;
+                    const finalRadius = Math.max(minDistance, organicRadius + noise());
+                    
+                    targets[node.id] = {
+                        x: centerPosition.x + Math.cos(angle) * finalRadius,
+                        y: centerPosition.y + Math.sin(angle) * finalRadius
+                    };
+                });
+                
+                // Animate positions over 3 seconds
+                const duration = 3000; // ms
+                const startTime = Date.now();
+                const startPositions = {};
+                visibleNodes.forEach(node => {
+                    startPositions[node.id] = { x: node.x, y: node.y };
+                });
+                
+                const animate = () => {
+                    const elapsed = Date.now() - startTime;
+                    const progress = Math.min(elapsed / duration, 1);
+                    const easedProgress = 1 - Math.pow(1 - progress, 3); // ease out cubic
+                    
+                    const updates = [];
+                    visibleNodes.forEach(node => {
+                        const start = startPositions[node.id];
+                        const target = targets[node.id];
+                        const x = start.x + (target.x - start.x) * easedProgress;
+                        const y = start.y + (target.y - start.y) * easedProgress;
+                        updates.push({ id: node.id, x: x, y: y });
+                    });
+                    
+                    nodes.update(updates);
+                    
+                    if (progress < 1) {
+                        requestAnimationFrame(animate);
+                    } else {
+                        // Fit after animation
+                        network.fit();
+                    }
+                };
+                
+                requestAnimationFrame(animate);
             }
 
             network.on('click', function(params) {
@@ -1483,6 +1639,15 @@ function New-ScEntraGraphSection {
                     document.getElementById('selectedNodeName').textContent = node.label;
                     document.getElementById('selectedNodeType').textContent = '(' + node.type + ')';
                     document.getElementById('selectedNodeInfo').style.display = 'block';
+                    
+                    // Show detangle button when a node is selected
+                    selectedNodeId = nodeId;
+                    isNodeSelected = true;
+                    ensureDetangleButton();
+                    ensureResetButton();
+                    detangleButtonRef.style.display = 'block';
+                    positionDetangleButton();
+                    positionResetButton();
                     
                     // Get connected nodes for fitting
                     const connectedEdges = network.getConnectedEdges(nodeId);
@@ -1650,6 +1815,14 @@ function New-ScEntraGraphSection {
                         const statusText = node.accountEnabled ? 'Enabled' : 'Disabled';
                         const statusClass = node.accountEnabled ? 'status-positive' : 'status-negative';
                         detailsHtml += '<tr><td class="detail-label">Service Status</td><td class="detail-value">' + statusChip(statusText, statusClass) + '</td></tr>';
+                    }
+                    if (node.servicePrincipalType) {
+                        detailsHtml += '<tr><td class="detail-label">Principal Type</td><td class="detail-value">' + node.servicePrincipalType + '</td></tr>';
+                    }
+                    if (node.type === 'servicePrincipal' && node.isManagedIdentity !== undefined) {
+                        const text = node.isManagedIdentity ? 'Managed identity' : 'Application identity';
+                        const css = node.isManagedIdentity ? 'status-info' : 'status-positive';
+                        detailsHtml += '<tr><td class="detail-label">Identity Kind</td><td class="detail-value">' + statusChip(text, css) + '</td></tr>';
                     }
                 } else if (node.type === 'apiPermission') {
                     if (node.resource) {
@@ -2246,9 +2419,12 @@ function New-ScEntraGraphSection {
                 newButton.addEventListener('click', event => {
                     event.preventDefault();
                     event.stopPropagation();
-                    focusSelectedNodeOrFitAll();
+                    arrangeAndFitGraph();
                     return false;
                 });
+
+                // Ensure detangle button is inserted after zoom button replacement
+                ensureDetangleButton();
             }
 
             document.getElementById('nodeFilter').addEventListener('input', applyFilters);
@@ -2258,7 +2434,11 @@ function New-ScEntraGraphSection {
 
             const graphContainer = document.getElementById('escalationGraph');
             let fullscreenButtonRef = null;
+            let detangleButtonRef = null;
+            let resetButtonRef = null;
             let fullscreenNavObserver = null;
+            let isNodeSelected = false;
+            let selectedNodeId = null;
 
             const updateFullscreenUI = () => {
                 if (!fullscreenButtonRef) {
@@ -2320,7 +2500,7 @@ function New-ScEntraGraphSection {
 
                 const navContainer = container.querySelector('div.vis-navigation');
                 const navButtons = navContainer ? Array.from(navContainer.querySelectorAll('.vis-button')) : [];
-                const otherButtons = navButtons.filter(btn => btn !== fullscreenButtonRef);
+                const otherButtons = navButtons.filter(btn => btn !== fullscreenButtonRef && btn !== detangleButtonRef && btn !== resetButtonRef);
                 const navGap = 6;
                 const buttonHeight = fullscreenButtonRef.offsetHeight || 34;
                 let referenceLeft = 10;
@@ -2362,6 +2542,150 @@ function New-ScEntraGraphSection {
                 fullscreenButtonRef.style.position = 'absolute';
                 fullscreenButtonRef.style.top = fullscreenTop + 'px';
                 fullscreenButtonRef.style.left = fullscreenLeft + 'px';
+            };
+
+            const positionDetangleButton = () => {
+                if (!detangleButtonRef || !resetButtonRef) {
+                    return;
+                }
+
+                const resetWidth = resetButtonRef.offsetWidth || 34;
+                const navGap = 6;
+
+                detangleButtonRef.style.position = 'absolute';
+                detangleButtonRef.style.top = resetButtonRef.style.top;
+                detangleButtonRef.style.left = (parseFloat(resetButtonRef.style.left || '10') + resetWidth + navGap) + 'px';
+                // Don't override display property during positioning
+            };
+
+            const positionResetButton = () => {
+                if (!resetButtonRef || !fullscreenButtonRef) {
+                    return;
+                }
+
+                const fullscreenWidth = fullscreenButtonRef.offsetWidth || 34;
+                const navGap = 6;
+
+                resetButtonRef.style.position = 'absolute';
+                resetButtonRef.style.top = fullscreenButtonRef.style.top;
+                resetButtonRef.style.left = (parseFloat(fullscreenButtonRef.style.left || '10') + fullscreenWidth + navGap) + 'px';
+            };
+
+            const ensureDetangleButton = () => {
+                if (!graphContainer) {
+                    return;
+                }
+
+                const navContainer = container.querySelector('div.vis-navigation');
+                if (!navContainer) {
+                    return;
+                }
+
+                if (detangleButtonRef && navContainer.contains(detangleButtonRef)) {
+                    positionDetangleButton();
+                    // Detangle button only visible when node is selected
+                    detangleButtonRef.style.display = isNodeSelected ? 'block' : 'none';
+                    return;
+                }
+
+                detangleButtonRef = document.createElement('div');
+                detangleButtonRef.className = 'vis-button vis-detangle';
+                detangleButtonRef.setAttribute('role', 'button');
+                detangleButtonRef.setAttribute('tabindex', '0');
+                detangleButtonRef.setAttribute('aria-label', 'Detangle selected node');
+                detangleButtonRef.title = 'Detangle selected node';
+                detangleButtonRef.style.minWidth = '34px';
+                detangleButtonRef.style.minHeight = '34px';
+                detangleButtonRef.style.display = 'none';
+
+                const detangleIcon = document.createElement('span');
+                detangleIcon.className = 'vis-button-icon';
+                detangleIcon.setAttribute('aria-hidden', 'true');
+                detangleIcon.textContent = '✺';
+                detangleButtonRef.appendChild(detangleIcon);
+
+                const triggerDetangle = event => {
+                    event.preventDefault();
+                    detangleVisibleNodes();
+                    return false;
+                };
+
+                detangleButtonRef.addEventListener('click', triggerDetangle);
+                detangleButtonRef.addEventListener('keydown', event => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        triggerDetangle(event);
+                    }
+                });
+
+                navContainer.appendChild(detangleButtonRef);
+                positionDetangleButton();
+                // Set initial display based on current state
+                detangleButtonRef.style.display = isNodeSelected ? 'block' : 'none';
+            };
+
+            const ensureResetButton = () => {
+                if (!graphContainer) {
+                    return;
+                }
+
+                const navContainer = container.querySelector('div.vis-navigation');
+                if (!navContainer) {
+                    return;
+                }
+
+                if (resetButtonRef && navContainer.contains(resetButtonRef)) {
+                    positionResetButton();
+                    return;
+                }
+
+                resetButtonRef = document.createElement('div');
+                resetButtonRef.className = 'vis-button vis-reset';
+                resetButtonRef.setAttribute('role', 'button');
+                resetButtonRef.setAttribute('tabindex', '0');
+                resetButtonRef.setAttribute('aria-label', 'Reset view');
+                resetButtonRef.title = 'Reset view';
+                resetButtonRef.style.minWidth = '34px';
+                resetButtonRef.style.minHeight = '34px';
+
+                const resetIcon = document.createElement('span');
+                resetIcon.className = 'vis-button-icon';
+                resetIcon.setAttribute('aria-hidden', 'true');
+                resetIcon.textContent = '↺';
+                resetButtonRef.appendChild(resetIcon);
+
+                const triggerReset = event => {
+                    event.preventDefault();
+                    document.getElementById('nodeFilter').value = '';
+                    document.getElementById('typeFilter').value = '';
+                    document.getElementById('assignmentFilter').value = '';
+                    document.getElementById('escalationFilter').checked = false;
+                    resetHighlight();
+                    network.fit();
+                    
+                    selectedNodeId = null;
+                    isNodeSelected = false;
+                    if (detangleButtonRef) {
+                        detangleButtonRef.style.display = 'none';
+                    }
+                    if (resetButtonRef) {
+                        positionResetButton();
+                    }
+                    
+                    setTimeout(() => {
+                        startGentleMotion();
+                    }, 300);
+                    return false;
+                };
+
+                resetButtonRef.addEventListener('click', triggerReset);
+                resetButtonRef.addEventListener('keydown', event => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        triggerReset(event);
+                    }
+                });
+
+                navContainer.appendChild(resetButtonRef);
+                positionResetButton();
             };
 
             const ensureFullscreenButton = () => {
@@ -2433,19 +2757,41 @@ function New-ScEntraGraphSection {
                 }
 
                 ensureFullscreenButton();
+                ensureDetangleButton();
+                ensureResetButton();
 
                 if (!fullscreenNavObserver) {
-                    fullscreenNavObserver = new MutationObserver(() => {
-                        ensureFullscreenButton();
-                    });
-                    fullscreenNavObserver.observe(container, {
-                        childList: true,
-                        subtree: true
-                    });
+                    const navContainer = container.querySelector('div.vis-navigation');
+                    if (navContainer) {
+                        fullscreenNavObserver = new MutationObserver(() => {
+                            ensureFullscreenButton();
+                            ensureDetangleButton();
+                            ensureResetButton();
+                        });
+                        fullscreenNavObserver.observe(navContainer, {
+                            childList: true,
+                            subtree: false
+                        });
+                    }
                 }
             }
 
+            function setupDetangleButton() {
+                if (!graphContainer) {
+                    return;
+                }
+
+                const navContainer = container.querySelector('div.vis-navigation');
+                if (!navContainer) {
+                    requestAnimationFrame(setupDetangleButton);
+                    return;
+                }
+
+                ensureDetangleButton();
+            }
+
             setupZoomExtendsButton();
+            setupDetangleButton();
             setupFullscreenButton();
 
             document.addEventListener('fullscreenchange', () => {
@@ -2496,6 +2842,12 @@ function New-ScEntraGraphSection {
                 document.getElementById('escalationFilter').checked = false;
                 resetHighlight();
                 network.fit();
+                
+                // Hide detangle button when resetting
+                isNodeSelected = false;
+                if (detangleButtonRef) {
+                    detangleButtonRef.style.display = 'none';
+                }
                 
                 // Restart gentle motion after a brief delay
                 setTimeout(() => {
@@ -3130,6 +3482,30 @@ function New-ScEntraReportDocument {
         div.vis-network div.vis-navigation div.vis-button.vis-zoomIn::after { content: '+' !important; }
         div.vis-network div.vis-navigation div.vis-button.vis-zoomOut::after { content: '−' !important; }
         div.vis-network div.vis-navigation div.vis-button.vis-zoomExtends::after { content: '⊡' !important; }
+        div.vis-network div.vis-navigation div.vis-button.vis-detangle .vis-button-icon {
+            color: #667eea;
+            font-size: 24px;
+            font-weight: bold;
+            line-height: 30px;
+            font-family: 'Segoe UI Symbol', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+        }
+        div.vis-network div.vis-navigation div.vis-button.vis-reset .vis-button-icon {
+            color: #667eea;
+            font-size: 24px;
+            font-weight: bold;
+            line-height: 30px;
+            font-family: 'Segoe UI Symbol', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+        }
         div.vis-network div.vis-navigation div.vis-button.vis-fullscreen .vis-button-icon {
             color: #667eea;
             font-size: 24px;
@@ -3156,7 +3532,9 @@ function New-ScEntraReportDocument {
         body[data-theme="dark"] div.vis-network div.vis-navigation div.vis-button::after {
             color: #a5b4fc !important;
         }
-        body[data-theme="dark"] div.vis-network div.vis-navigation div.vis-button.vis-fullscreen .vis-button-icon {
+        body[data-theme="dark"] div.vis-network div.vis-navigation div.vis-button.vis-fullscreen .vis-button-icon,
+        body[data-theme="dark"] div.vis-network div.vis-navigation div.vis-button.vis-detangle .vis-button-icon,
+        body[data-theme="dark"] div.vis-network div.vis-navigation div.vis-button.vis-reset .vis-button-icon {
             color: #a5b4fc;
         }
         body[data-theme="dark"] div.vis-network div.vis-navigation div.vis-button.vis-fullscreen[data-active="true"] {
