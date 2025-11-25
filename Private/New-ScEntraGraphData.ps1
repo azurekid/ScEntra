@@ -93,45 +93,64 @@ function New-ScEntraGraphData {
     }
 
     $permissionEscalationTargets = @{
-        'Application.ReadWrite.All' = @{
-            Roles       = @('Application Administrator', 'Cloud Application Administrator')
-            Severity    = 'High'
-            Description = 'Full application CRUD enables creation of malicious service principals.'
+        # Global Administrator equivalent permissions
+        'RoleManagement.ReadWrite.Directory' = @{
+            Roles       = @('Global Administrator')
+            Severity    = 'Critical'
+            Description = 'Can assign any directory role including Global Administrator to any principal.'
         }
         'AppRoleAssignment.ReadWrite.All' = @{
-            Roles       = @('Privileged Role Administrator')
-            Severity    = 'High'
-            Description = 'Can assign any app role, including privileged service principals.'
-        }
-        'RoleManagement.ReadWrite.Directory' = @{
-            Roles       = @('Privileged Role Administrator')
-            Severity    = 'High'
-            Description = 'Can manage directory roles and activate privileged admins.'
-        }
-        'Directory.AccessAsUser.All' = @{
             Roles       = @('Global Administrator')
-            Severity    = 'High'
-            Description = 'Full delegated access to all APIs as any user grants total tenant control.'
+            Severity    = 'Critical'
+            Description = 'Can grant any application permission to any service principal, including RoleManagement.ReadWrite.Directory.'
         }
         'Directory.ReadWrite.All' = @{
             Roles       = @('Global Administrator')
+            Severity    = 'Critical'
+            Description = 'Can modify directory objects including service principal ownership, enabling privilege escalation.'
+        }
+        
+        # Application Administrator equivalent permissions
+        'Application.ReadWrite.All' = @{
+            Roles       = @('Application Administrator', 'Cloud Application Administrator')
             Severity    = 'High'
-            Description = 'Write access to directory objects allows privilege escalation through owners.'
+            Description = 'Can create and manage all applications and service principals, add credentials, and consent to permissions.'
+        }
+        
+        # Privileged Role Administrator equivalent permissions
+        'RoleManagementPolicy.ReadWrite.Directory' = @{
+            Roles       = @('Privileged Role Administrator')
+            Severity    = 'High'
+            Description = 'Can modify PIM policies to enable instant activation without approval or MFA.'
+        }
+        'RoleEligibilitySchedule.ReadWrite.Directory' = @{
+            Roles       = @('Privileged Role Administrator')
+            Severity    = 'High'
+            Description = 'Can create PIM eligible assignments for any directory role.'
+        }
+        'RoleAssignmentSchedule.ReadWrite.Directory' = @{
+            Roles       = @('Privileged Role Administrator')
+            Severity    = 'High'
+            Description = 'Can create PIM active assignments for any directory role.'
         }
         'PrivilegedAccess.ReadWrite.AzureAD' = @{
             Roles       = @('Privileged Role Administrator')
             Severity    = 'High'
-            Description = 'Can administer PIM objects and activate privileged assignments.'
+            Description = 'Can manage PIM settings and assignments for Azure AD roles using the legacy API.'
         }
-        'Group.ReadWrite.All' = @{
-            Roles       = @('User Administrator')
-            Severity    = 'Medium'
-            Description = 'Can modify role-assignable groups and pivot into privileged memberships.'
-        }
+        
+        # User Administrator equivalent permissions
         'User.ReadWrite.All' = @{
             Roles       = @('User Administrator')
             Severity    = 'Medium'
-            Description = 'Can change privileged user credentials and MFA configurations.'
+            Description = 'Can modify user properties, reset passwords for non-admins, and update authentication methods.'
+        }
+        
+        # Groups Administrator equivalent permissions
+        'Group.ReadWrite.All' = @{
+            Roles       = @('Groups Administrator')
+            Severity    = 'Medium'
+            Description = 'Can create and manage all groups, modify memberships, and update group properties.'
         }
     }
 
@@ -1321,6 +1340,78 @@ function New-ScEntraGraphData {
                         sourceRole = $roleName
                     })
                 }
+            }
+        }
+    }
+
+    # Add "can_compromise" edges from User Administrator to non-admin users
+    # User Administrator can reset passwords and modify users who have NO role assignments
+    $userAdminRoleId = "role-User Administrator"
+    if ($nodeIndex.ContainsKey($userAdminRoleId)) {
+        # Build a set of user IDs who have ANY role (direct, PIM, or via role-assignable group)
+        $allRoleAssignments = @($RoleAssignments; $PIMAssignments)
+        $usersWithRoles = [System.Collections.Generic.HashSet[string]]::new()
+        
+        foreach ($assignment in $allRoleAssignments) {
+            if ($assignment.MemberId) {
+                [void]$usersWithRoles.Add($assignment.MemberId)
+            }
+        }
+        
+        # Also add users who are members of role-assignable groups that have role assignments
+        foreach ($group in $Groups) {
+            if ($group.isRoleAssignable) {
+                # Check if this group has any role assignments
+                $groupHasRole = $allRoleAssignments | Where-Object { $_.MemberId -eq $group.id }
+                if ($groupHasRole -and $group.members) {
+                    foreach ($memberId in $group.members) {
+                        [void]$usersWithRoles.Add($memberId)
+                    }
+                }
+            }
+        }
+        
+        # Create can_compromise edges to users without roles
+        foreach ($user in $Users) {
+            if (-not $usersWithRoles.Contains($user.id) -and $nodeIndex.ContainsKey($user.id)) {
+                $null = $edges.Add(@{
+                    from = $userAdminRoleId
+                    to = $user.id
+                    type = 'can_compromise'
+                    label = 'Can Reset Password'
+                    description = 'User Administrator can reset passwords and modify non-admin users'
+                })
+            }
+        }
+    }
+
+    # Add "can_compromise" edges from Groups Administrator to manageable groups
+    # Groups Administrator can manage ALL groups EXCEPT:
+    # 1. Role-assignable groups (isRoleAssignable = true)
+    # 2. PIM-enabled groups (Privileged Access Groups)
+    $groupsAdminRoleId = "role-Groups Administrator"
+    if ($nodeIndex.ContainsKey($groupsAdminRoleId)) {
+        foreach ($group in $Groups) {
+            # Check if group is PIM-enabled
+            $isPIMEnabled = $false
+            if ($group.members) {
+                foreach ($member in $group.members) {
+                    if ($member -is [hashtable] -and $member.ContainsKey('isPIMEligible') -and $member.isPIMEligible) {
+                        $isPIMEnabled = $true
+                        break
+                    }
+                }
+            }
+            
+            # Groups Admin can only manage non-role-assignable, non-PIM groups
+            if ($group -and -not $group.isRoleAssignable -and -not $isPIMEnabled -and $nodeIndex.ContainsKey($group.id)) {
+                $null = $edges.Add(@{
+                    from = $groupsAdminRoleId
+                    to = $group.id
+                    type = 'can_compromise'
+                    label = 'Can Modify Members'
+                    description = 'Groups Administrator can manage group membership for non-role-assignable groups'
+                })
             }
         }
     }

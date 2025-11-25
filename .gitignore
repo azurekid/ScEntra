@@ -28,3 +28,4 @@ TestResults/
 # Exception: Don't ignore module files
 !ScEntra.psd1
 !ScEntra.psm1
+/docs*
