@@ -687,8 +687,6 @@ function New-ScEntraGraphSection {
 
             const network = new vis.Network(container, data, options);
 
-            let selectedNodeEdges = [];
-
             const privilegedApps = new Set();
             nodes.get().forEach(node => {
                 if (node.type === 'application') {
@@ -828,38 +826,20 @@ function New-ScEntraGraphSection {
 
             network.once('stabilizationIterationsDone', finalizeInitialLayout);
 
-            let dragGroupInitial = null;
-            let dragCenterInitial = null;
-
             network.on('dragStart', function(params) {
-                if (params.nodes.length > 0 && params.nodes[0] === selectedNodeId) {
-                    dragGroupInitial = {};
-                    const directNeighbors = network.getConnectedNodes(selectedNodeId) || [];
-                    directNeighbors.forEach(id => {
-                        const pos = network.getPositions([id])[id];
-                        if (pos) dragGroupInitial[id] = {x: pos.x, y: pos.y};
-                    });
-                    dragCenterInitial = network.getPositions([selectedNodeId])[selectedNodeId];
+                // Unfix any node that is being dragged
+                if (params.nodes.length > 0) {
+                    const draggedNodeId = params.nodes[0];
+                    nodes.update({ id: draggedNodeId, fixed: false });
                 }
             });
 
             network.on('dragging', function(params) {
-                if (params.nodes.length > 0 && params.nodes[0] === selectedNodeId && dragCenterInitial) {
-                    const currentCenter = network.getPositions([selectedNodeId])[selectedNodeId];
-                    const deltaX = currentCenter.x - dragCenterInitial.x;
-                    const deltaY = currentCenter.y - dragCenterInitial.y;
-                    const updates = [];
-                    Object.keys(dragGroupInitial).forEach(id => {
-                        const initial = dragGroupInitial[id];
-                        updates.push({id: id, x: initial.x + deltaX, y: initial.y + deltaY});
-                    });
-                    if (updates.length > 0) nodes.update(updates);
-                }
+                // Removed group dragging behavior to allow independent node movement
             });
 
             network.on('dragEnd', function(params) {
-                dragGroupInitial = null;
-                dragCenterInitial = null;
+                // Cleanup after drag
             });
 
             function applyGraphThemeStyles() {
@@ -1086,7 +1066,16 @@ function New-ScEntraGraphSection {
                         let highlightColor = Object.assign({}, baseColor, { opacity: 1 });
                         let edgeWidth = baseStyle.width ?? edge.width ?? 2;
 
-                        if (edge.isEscalationPath) {
+                        // Check if this edge connects two selected (enlarged) nodes
+                        const fromNodeSelected = selectedNodes.has(edge.from);
+                        const toNodeSelected = selectedNodes.has(edge.to);
+                        const connectsSelectedNodes = fromNodeSelected && toNodeSelected;
+
+                        if (connectsSelectedNodes) {
+                            // Yellow for edges between selected nodes
+                            highlightColor = { color: '#FFD700', opacity: 1 };
+                            edgeWidth = 6;
+                        } else if (edge.isEscalationPath) {
                             highlightColor = { color: escalationEdgeColor, opacity: escalationEdgeOpacity };
                             edgeWidth = Math.max(edgeWidth, escalationEdgeWidth);
                         } else if (edge.edgeType === 'has_role') {
@@ -1655,29 +1644,6 @@ function New-ScEntraGraphSection {
                     console.log('Node clicked:', nodeId);
                     console.log('Node data from originalNodeData:', node);
                     console.log('Node type:', node ? node.type : 'undefined');
-
-                    // Restore previous selected node edges
-                    if (selectedNodeEdges.length > 0) {
-                        const restoreUpdates = selectedNodeEdges.map(edgeId => {
-                            const baseStyle = originalEdgeStyles[edgeId];
-                            return {
-                                id: edgeId,
-                                width: baseStyle ? baseStyle.width : 1.5
-                            };
-                        });
-                        edges.update(restoreUpdates);
-                        selectedNodeEdges = [];
-                    }
-
-                    // Thicken edges of the selected node
-                    selectedNodeEdges = network.getConnectedEdges(nodeId);
-                    const edgeUpdates = selectedNodeEdges.map(edgeId => {
-                        return {
-                            id: edgeId,
-                            width: 4
-                        };
-                    });
-                    edges.update(edgeUpdates);
 
                     // Store the currently selected node for the info panel click handler
                     currentSelectedNode = node;
