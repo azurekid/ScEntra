@@ -41,7 +41,7 @@ function Invoke-ScEntraAnalysis {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $false)]
-        [string]$OutputPath = "./ScEntra-Report-$(Get-Date -Format 'yyyyMMdd-HHmmss').html",
+        [string]$OutputPath,
 
         [Parameter(Mandatory = $false)]
         [switch]$SkipConnection,
@@ -50,7 +50,9 @@ function Invoke-ScEntraAnalysis {
         [switch]$IncludeAllGroupNesting
     )
 
-    Write-Host @"
+    # Function to display the logo
+    function Show-ScEntraLogo {
+        Write-Host @"
 
 ╔═════════════════════════════════════════════════════════════════╗
 ║                                                                 ║
@@ -66,6 +68,21 @@ function Invoke-ScEntraAnalysis {
 ╚═════════════════════════════════════════════════════════════════╝
 
 "@ -ForegroundColor Cyan
+    }
+
+    # Display logo initially
+    Show-ScEntraLogo
+
+    # Create reports folder if it doesn't exist
+    $reportsFolder = Join-Path (Get-Location) "reports"
+    if (-not (Test-Path $reportsFolder)) {
+        New-Item -ItemType Directory -Path $reportsFolder -Force | Out-Null
+    }
+
+    # Set default output path if not specified
+    if (-not $OutputPath) {
+        $OutputPath = Join-Path $reportsFolder "ScEntra-Report-$(Get-Date -Format 'yyyyMMdd-HHmmss').html"
+    }
 
     $continue = $true
     # Initialize result variables outside the loop
@@ -86,7 +103,7 @@ function Invoke-ScEntraAnalysis {
         Write-Host "  [3] Connect with Current Context" -ForegroundColor White
         Write-Host "  [4] Export Report (from existing JSON)" -ForegroundColor White
         Write-Host "  [5] Check Current Connection" -ForegroundColor White
-        Write-Host "  [6] Toggle Full Group Nesting $(if ($IncludeAllGroupNesting) { '[ON]' } else { '[OFF]' })" -ForegroundColor White
+        Write-Host "  [6] Open Latest Report" -ForegroundColor White
         Write-Host "  [7] Exit" -ForegroundColor White
         Write-Host ""
 
@@ -151,6 +168,18 @@ function Invoke-ScEntraAnalysis {
                 $startTime = Get-Date
 
                 Write-Host "[1/5] 📋 Collecting Inventory..." -ForegroundColor Cyan
+                
+                # Get organization information
+                $organizationInfo = Get-ScEntraOrganizationInfo
+                if ($organizationInfo) {
+                    Write-Host "  ✓ Organization: $($organizationInfo.DisplayName)" -ForegroundColor Green
+                    if ($organizationInfo.VerifiedDomains) {
+                        Write-Host "    Primary Domain: $($organizationInfo.VerifiedDomains)" -ForegroundColor Gray
+                    }
+                    if ($organizationInfo.TenantId) {
+                        Write-Host "    Tenant ID: $($organizationInfo.TenantId)" -ForegroundColor Gray
+                    }
+                }
 
                 $inventory = Get-ScEntraUsersAndGroups
                 $users = $inventory.Users
@@ -276,13 +305,14 @@ function Invoke-ScEntraAnalysis {
                     Write-Host "  Then grant the missing permissions when prompted." -ForegroundColor Gray
                 }
                 
-                Write-Host "`nReport Location: $reportPath" -ForegroundColor Cyan
+                Write-Host "Report Location: $reportPath" -ForegroundColor Cyan
                 Write-Host "Duration: $($duration.ToString('mm\:ss'))" -ForegroundColor Gray
 
-                Write-Host "`nPress any key to return to menu..." -ForegroundColor Gray
+                Write-Host "\nPress any key to return to menu..." -ForegroundColor Gray
                 $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-                
-                break
+                Clear-Host
+                Show-ScEntraLogo
+                continue
             }
             "2" {
                 Write-Host "`n▶ Initiating Graph Connection..." -ForegroundColor Cyan
@@ -299,6 +329,10 @@ function Invoke-ScEntraAnalysis {
                 if ($connected) {
                     Write-Host "✓ Successfully connected to Microsoft Graph" -ForegroundColor Green
                 }
+                Write-Host "`nPress any key to return to menu..." -ForegroundColor Gray
+                $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+                Clear-Host
+                Show-ScEntraLogo
                 continue
             }
             "3" {
@@ -307,6 +341,10 @@ function Invoke-ScEntraAnalysis {
                 if ($connected) {
                     Write-Host "✓ Successfully connected to Microsoft Graph using current context" -ForegroundColor Green
                 }
+                Write-Host "`nPress any key to return to menu..." -ForegroundColor Gray
+                $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+                Clear-Host
+                Show-ScEntraLogo
                 continue
             }
             "4" {
@@ -319,6 +357,10 @@ function Invoke-ScEntraAnalysis {
                 else {
                     Write-Error "JSON file not found: $jsonPath"
                 }
+                Write-Host "`nPress any key to return to menu..." -ForegroundColor Gray
+                $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+                Clear-Host
+                Show-ScEntraLogo
                 continue
             }
             "5" {
@@ -335,17 +377,37 @@ function Invoke-ScEntraAnalysis {
                         Write-Host "  Scopes: $($tokenInfo.Scopes -join ', ')" -ForegroundColor Gray
                     }
                 }
+                Write-Host "`nPress any key to return to menu..." -ForegroundColor Gray
+                $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+                Clear-Host
+                Show-ScEntraLogo
                 continue
             }
             "6" {
-                $IncludeAllGroupNesting = -not $IncludeAllGroupNesting
-                $status = if ($IncludeAllGroupNesting) { "ENABLED" } else { "DISABLED" }
-                Write-Host "`n⚙️  Full Group Nesting: $status" -ForegroundColor Cyan
-                if ($IncludeAllGroupNesting) {
-                    Write-Host "  ⚠️  This will analyze ALL groups for memberships and owners (may take longer)" -ForegroundColor Yellow
+                Write-Host "`n▶ Opening Latest Report..." -ForegroundColor Cyan
+                
+                # Find latest HTML report in reports folder
+                $reportsFolder = Join-Path (Get-Location) "reports"
+                if (Test-Path $reportsFolder) {
+                    $latestReport = Get-ChildItem -Path $reportsFolder -Filter "ScEntra-Report-*.html" | 
+                        Sort-Object LastWriteTime -Descending | 
+                        Select-Object -First 1
+                    
+                    if ($latestReport) {
+                        Write-Host "  Opening: $($latestReport.Name)" -ForegroundColor Green
+                        Invoke-Item $latestReport.FullName
+                    } else {
+                        Write-Host "  ✗ No reports found in reports folder" -ForegroundColor Yellow
+                        Write-Host "    Generate a report first using option [1]" -ForegroundColor Gray
+                    }
                 } else {
-                    Write-Host "  ℹ️  Only privileged groups will be analyzed (faster, recommended)" -ForegroundColor Gray
+                    Write-Host "  ✗ Reports folder does not exist" -ForegroundColor Yellow
+                    Write-Host "    Generate a report first using option [1]" -ForegroundColor Gray
                 }
+                Write-Host "`nPress any key to return to menu..." -ForegroundColor Gray
+                $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+                Clear-Host
+                Show-ScEntraLogo
                 continue
             }
             "7" {
@@ -355,6 +417,9 @@ function Invoke-ScEntraAnalysis {
             }
             default {
                 Write-Host "`n✗ Invalid option. Please select 1-7." -ForegroundColor Yellow
+                Start-Sleep -Seconds 1
+                Clear-Host
+                Show-ScEntraLogo
                 continue
             }
         }

@@ -45,6 +45,33 @@ $outputPath = $JsonPath -replace '\.json$', '-regenerated.html'
 
 Write-Host "Regenerating HTML report..." -ForegroundColor Cyan
 
+# Filter escalation risks to exclude empty groups and non-highly-privileged roles
+$highPrivilegeRoles = @(
+    'Global Administrator',
+    'Privileged Role Administrator',
+    'Security Administrator',
+    'Cloud Application Administrator',
+    'Application Administrator',
+    'User Administrator',
+    'Exchange Administrator',
+    'SharePoint Administrator'
+)
+
+$filteredRisks = $jsonData.EscalationRisks | Where-Object {
+    $risk = $_
+    
+    # Filter RoleEnabledGroup risks
+    if ($risk.RiskType -eq 'RoleEnabledGroup') {
+        # Exclude if group has 0 members or role is not highly privileged
+        return ($risk.MemberCount -gt 0) -and ($highPrivilegeRoles -contains $risk.RoleName)
+    }
+    
+    # Keep all other risk types
+    return $true
+}
+
+Write-Host "Filtered risks: $($jsonData.EscalationRisks.Count) -> $($filteredRisks.Count)" -ForegroundColor Yellow
+
 # Convert OrganizationInfo from PSCustomObject to hashtable if needed
 $orgInfo = $null
 if ($jsonData.OrganizationInfo) {
@@ -66,7 +93,7 @@ $reportPath = Export-ScEntraReport `
     -AppRegistrations $jsonData.AppRegistrations `
     -RoleAssignments $jsonData.RoleAssignments `
     -PIMAssignments $jsonData.PIMAssignments `
-    -EscalationRisks $jsonData.EscalationRisks `
+    -EscalationRisks $filteredRisks `
     -GraphData $graphData `
     -OrganizationInfo $orgInfo `
     -OutputPath $outputPath

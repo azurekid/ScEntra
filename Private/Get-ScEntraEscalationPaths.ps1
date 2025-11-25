@@ -63,6 +63,18 @@ function Get-ScEntraEscalationPaths {
 
     $escalationRisks = @()
 
+    # Define high privilege roles for escalation risk filtering (excludes read-only roles)
+    $highPrivilegeRoles = @(
+        'Global Administrator',
+        'Privileged Role Administrator',
+        'Security Administrator',
+        'Cloud Application Administrator',
+        'Application Administrator',
+        'User Administrator',
+        'Exchange Administrator',
+        'SharePoint Administrator'
+    )
+
     $groupMemberships = @{}
     $groupOwners = @{}
     $spOwners = @{}
@@ -277,17 +289,20 @@ function Get-ScEntraEscalationPaths {
             $ownerCount = if ($groupOwners.ContainsKey($groupId)) { $groupOwners[$groupId].Count } else { 0 }
 
             foreach ($role in $groupRoles) {
-                $risk = [PSCustomObject]@{
-                    RiskType    = 'RoleEnabledGroup'
-                    Severity    = 'High'
-                    GroupId     = $group.id
-                    GroupName   = $group.displayName
-                    RoleName    = $role.RoleName
-                    MemberCount = $memberCount
-                    OwnerCount  = $ownerCount
-                    Description = "Role-enabled group '$($group.displayName)' has '$($role.RoleName)' role with $memberCount members"
+                # Only create risk if the role is highly privileged and group has members
+                if (($highPrivilegeRoles -contains $role.RoleName) -and ($memberCount -gt 0)) {
+                    $risk = [PSCustomObject]@{
+                        RiskType    = 'RoleEnabledGroup'
+                        Severity    = 'High'
+                        GroupId     = $group.id
+                        GroupName   = $group.displayName
+                        RoleName    = $role.RoleName
+                        MemberCount = $memberCount
+                        OwnerCount  = $ownerCount
+                        Description = "Role-enabled group '$($group.displayName)' has '$($role.RoleName)' role with $memberCount members"
+                    }
+                    $escalationRisks += $risk
                 }
-                $escalationRisks += $risk
             }
         }
     }
@@ -619,13 +634,15 @@ function Get-ScEntraEscalationPaths {
 
         foreach ($principalGroup in $pimByPrincipal) {
             if ($principalGroup.Count -gt 3) {
+                $roles = $principalGroup.Group | Select-Object -ExpandProperty RoleName
+                $roleExamples = ($roles | Select-Object -First 3) -join ', '
                 $risk = [PSCustomObject]@{
                     RiskType     = 'MultiplePIMRoles'
                     Severity     = 'Medium'
                     PrincipalId  = $principalGroup.Name
                     PIMRoleCount = $principalGroup.Count
-                    Roles        = ($principalGroup.Group | Select-Object -ExpandProperty RoleName) -join ', '
-                    Description  = "Principal has $($principalGroup.Count) PIM role assignments: $($principalGroup.Group | Select-Object -ExpandProperty RoleName -First 3 | Join-String -Separator ', ')..."
+                    Roles        = $roles -join ', '
+                    Description  = "Principal has $($principalGroup.Count) PIM role assignments (e.g., $roleExamples)"
                 }
                 $escalationRisks += $risk
             }

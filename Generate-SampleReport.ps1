@@ -1285,23 +1285,62 @@ Write-Host "Generating escalation risks and attack paths..." -ForegroundColor Ye
 # Generate comprehensive escalation risks
 $escalationRisks = @()
 
-# Role-enabled group risks (ALL role-assignable groups)
+# Define high privilege roles for escalation risk filtering (excludes read-only roles)
+$highPrivilegeRoles = @(
+    'Global Administrator',
+    'Privileged Role Administrator',
+    'Security Administrator',
+    'Cloud Application Administrator',
+    'Application Administrator',
+    'User Administrator',
+    'Exchange Administrator',
+    'SharePoint Administrator'
+)
+
+# Role-enabled group risks (ONLY groups with highly privileged role assignments)
 for ($i = 0; $i -lt $sampleGroups.Count; $i++) {
     $group = $sampleGroups[$i]
     if ($group.IsRoleAssignable) {
-        # Find members of this group
-        $memberCount = if ($groupMemberships.ContainsKey($group.Id)) { $groupMemberships[$group.Id].Count } else { 0 }
+        # Find role assignments for this group (both direct and PIM)
+        $groupRoleAssignments = @($roleAssignments | Where-Object { $_.MemberId -eq $group.Id })
+        $groupPIMAssignments = @($pimAssignments | Where-Object { $_.PrincipalId -eq $group.Id })
         
-        $escalationRisks += [PSCustomObject]@{
-            Id = [Guid]::NewGuid().ToString()
-            RiskType = "RoleAssignableGroupMembership"
-            Severity = if ($i -lt 4) { "Critical" } else { "High" }
-            Title = "Role-Assignable Group: $($group.DisplayName)"
-            Description = "Group '$($group.DisplayName)' is role-assignable with $memberCount members. All members can inherit privileged role assignments."
-            AffectedEntity = $group.Id
-            AffectedEntityType = "Group"
-            AffectedEntityName = $group.DisplayName
-            EscalationPath = @("Add user to group", "User inherits role assignment", "Elevate privileges")
+        # Check if any assigned role is highly privileged
+        $hasHighPrivilegeRole = $false
+        foreach ($assignment in $groupRoleAssignments) {
+            if ($highPrivilegeRoles -contains $assignment.RoleName) {
+                $hasHighPrivilegeRole = $true
+                break
+            }
+        }
+        if (-not $hasHighPrivilegeRole) {
+            foreach ($assignment in $groupPIMAssignments) {
+                if ($highPrivilegeRoles -contains $assignment.RoleName) {
+                    $hasHighPrivilegeRole = $true
+                    break
+                }
+            }
+        }
+        
+        # Only create risk if group has a highly privileged role and has members
+        if ($hasHighPrivilegeRole) {
+            # Find members of this group
+            $memberCount = if ($groupMemberships.ContainsKey($group.Id)) { $groupMemberships[$group.Id].Count } else { 0 }
+            
+            # Only add risk if group has members
+            if ($memberCount -gt 0) {
+                $escalationRisks += [PSCustomObject]@{
+                    Id = [Guid]::NewGuid().ToString()
+                    RiskType = "RoleAssignableGroupMembership"
+                    Severity = if ($i -lt 4) { "Critical" } else { "High" }
+                    Title = "Role-Assignable Group: $($group.DisplayName)"
+                    Description = "Group '$($group.DisplayName)' is role-assignable with $memberCount members. All members can inherit privileged role assignments."
+                    AffectedEntity = $group.Id
+                    AffectedEntityType = "Group"
+                    AffectedEntityName = $group.DisplayName
+                    EscalationPath = @("Add user to group", "User inherits role assignment", "Elevate privileges")
+                }
+            }
         }
     }
 }

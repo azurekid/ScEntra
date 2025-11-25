@@ -48,17 +48,27 @@ function Export-ScEntraReport {
         [Parameter(Mandatory = $false)][array]$EscalationRisks = @(),
         [Parameter(Mandatory = $false)][hashtable]$GraphData = $null,
         [Parameter(Mandatory = $false)][hashtable]$GroupMemberships = @{},
-        [Parameter(Mandatory = $false)][string]$OutputPath = "./ScEntra-Report-$(Get-Date -Format 'yyyyMMdd-HHmmss').html"
+        [Parameter(Mandatory = $false)][hashtable]$OrganizationInfo = $null,
+        [Parameter(Mandatory = $false)][string]$OutputPath
     )
 
     Write-Verbose "Generating HTML report..."
+    
+    # Set default output path if not specified (use reports folder)
+    if (-not $OutputPath) {
+        $reportsFolder = Join-Path (Get-Location) "reports"
+        if (-not (Test-Path $reportsFolder)) {
+            New-Item -ItemType Directory -Path $reportsFolder -Force | Out-Null
+        }
+        $OutputPath = Join-Path $reportsFolder "ScEntra-Report-$(Get-Date -Format 'yyyyMMdd-HHmmss').html"
+    }
 
     $stats = Get-ScEntraReportStatistics -Users $Users -Groups $Groups -ServicePrincipals $ServicePrincipals -AppRegistrations $AppRegistrations -RoleAssignments $RoleAssignments -PIMAssignments $PIMAssignments -EscalationRisks $EscalationRisks
     $roleDistribution = Get-ScEntraRoleDistribution -RoleAssignments $RoleAssignments
     $riskDistribution = Get-ScEntraRiskDistribution -EscalationRisks $EscalationRisks
     $generatedOn = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
 
-    $html = New-ScEntraReportDocument -Stats $stats -RoleDistribution $roleDistribution -RiskDistribution $riskDistribution -EscalationRisks $EscalationRisks -GraphData $GraphData -GeneratedOn $generatedOn
+    $html = New-ScEntraReportDocument -Stats $stats -RoleDistribution $roleDistribution -RiskDistribution $riskDistribution -EscalationRisks $EscalationRisks -GraphData $GraphData -OrganizationInfo $OrganizationInfo -GeneratedOn $generatedOn
 
     try {
         $html | Out-File -FilePath $OutputPath -Encoding UTF8
@@ -67,6 +77,7 @@ function Export-ScEntraReport {
         $jsonPath = $OutputPath -replace '\.html$', '.json'
         $jsonData = @{
             GeneratedAt = Get-Date -Format 'o'
+            OrganizationInfo = $OrganizationInfo
             Statistics = $stats
             Users = $Users | Select-Object id, displayName, userPrincipalName, accountEnabled, userType
             Groups = $Groups | Select-Object id, displayName, isAssignableToRole, isPIMEnabled, securityEnabled, memberCount

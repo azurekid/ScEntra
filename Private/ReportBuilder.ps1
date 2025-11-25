@@ -2876,17 +2876,71 @@ function New-ScEntraGraphSection {
                 
                 riskRows.forEach(row => {
                     row.addEventListener('click', () => {
-                        const primaryEntityId = row.getAttribute('data-primary-entity-id');
                         const hasIds = row.getAttribute('data-entity-ids');
                         const allIds = hasIds ? hasIds.split(',').map(id => id.trim()).filter(Boolean) : [];
-                        const targetId = primaryEntityId || allIds[0];
-                        if (!targetId) {
+                        
+                        if (allIds.length === 0) {
                             return;
                         }
 
-                        highlightNodeAndShowEscalation(targetId);
+                        // Filter graph to show only nodes related to this risk
+                        filterGraphByRiskEntities(allIds);
                     });
                 });
+            }
+            
+            function filterGraphByRiskEntities(entityIds) {
+                // Stop gentle motion when filtering
+                stopGentleMotion();
+                
+                // Collect all related nodes starting from the risk entities
+                const relatedNodes = new Set();
+                const relatedEdges = new Set();
+                
+                entityIds.forEach(entityId => {
+                    // Add the entity itself
+                    relatedNodes.add(entityId);
+                    
+                    // Get all connected nodes using the existing function
+                    const connectedNodes = getConnectedNodes(entityId, new Set(), false);
+                    connectedNodes.forEach(nodeId => relatedNodes.add(nodeId));
+                });
+                
+                // Get all edges that connect the related nodes
+                const allEdges = edges.get();
+                allEdges.forEach(edge => {
+                    if (relatedNodes.has(edge.from) && relatedNodes.has(edge.to)) {
+                        relatedEdges.add(edge.id);
+                    }
+                });
+                
+                // Update the graph to show only related nodes and edges
+                displayFilteredGraph(relatedNodes, relatedEdges);
+                
+                // Select the first entity and trigger detangle for highly privileged roles
+                if (entityIds.length > 0 && nodes.get(entityIds[0])) {
+                    const firstEntityId = entityIds[0];
+                    const firstEntity = nodes.get(firstEntityId);
+                    
+                    // Set the selected node
+                    selectedNodeId = firstEntityId;
+                    isNodeSelected = true;
+                    currentSelectedNode = firstEntity;
+                    
+                    // Focus on the entity
+                    network.focus(firstEntityId, {
+                        scale: 1.2,
+                        animation: {
+                            duration: 500,
+                            easingFunction: 'easeInOutQuad'
+                        }
+                    });
+                    
+                    // Automatically detangle after a brief delay to allow focus animation
+                    setTimeout(() => {
+                        detangleVisibleNodes();
+                    }, 600);
+                }
             }
             
             // Attach listeners after a short delay to ensure table is rendered
@@ -2925,8 +2979,30 @@ function New-ScEntraRiskSection {
         return ''
     }
 
+    # Deduplicate risks by RiskType + Description while collecting all entity IDs
+    $riskGroups = @{}
+    foreach ($risk in $EscalationRisks) {
+        $key = "$($risk.RiskType)|$($risk.Description)"
+        
+        if (-not $riskGroups.ContainsKey($key)) {
+            $riskGroups[$key] = @{
+                Risk = $risk
+                EntityIds = @()
+            }
+        }
+        
+        # Collect all entity IDs for this risk (check all possible ID fields)
+        if ($risk.GroupId) { $riskGroups[$key].EntityIds += $risk.GroupId }
+        if ($risk.ServicePrincipalId) { $riskGroups[$key].EntityIds += $risk.ServicePrincipalId }
+        if ($risk.AppId) { $riskGroups[$key].EntityIds += $risk.AppId }
+        if ($risk.PrincipalId) { $riskGroups[$key].EntityIds += $risk.PrincipalId }
+        if ($risk.MemberId) { $riskGroups[$key].EntityIds += $risk.MemberId }
+        if ($risk.AffectedEntity) { $riskGroups[$key].EntityIds += $risk.AffectedEntity }
+    }
+
     $rowsBuilder = [System.Text.StringBuilder]::new()
-    foreach ($risk in ($EscalationRisks | Sort-Object -Property Severity -Descending)) {
+    foreach ($group in ($riskGroups.GetEnumerator() | Sort-Object { $_.Value.Risk.Severity } -Descending)) {
+        $risk = $group.Value.Risk
         $badgeClass = switch ($risk.Severity) {
             'High' { 'badge-high' }
             'Medium' { 'badge-medium' }
@@ -2934,19 +3010,19 @@ function New-ScEntraRiskSection {
             default { 'badge-medium' }
         }
 
-        $entityIds = @()
-        if ($risk.GroupId) { $entityIds += $risk.GroupId }
-        if ($risk.ServicePrincipalId) { $entityIds += $risk.ServicePrincipalId }
-        if ($risk.AppId) { $entityIds += $risk.AppId }
-        if ($risk.PrincipalId) { $entityIds += $risk.PrincipalId }
-        if ($risk.MemberId) { $entityIds += $risk.MemberId }
+        $entityIds = $group.Value.EntityIds | Select-Object -Unique
         $entityIdsAttr = ($entityIds -join ',')
-
         $primaryEntityId = if ($entityIds.Count -gt 0) { $entityIds[0] } else { '' }
+        
+        # Convert PascalCase to spaced text, handling acronyms
+        $riskTypeDisplay = $risk.RiskType -creplace '([A-Z])', ' $1' -replace '^\s+', ''
+        # Fix known acronyms (with optional trailing space)
+        $riskTypeDisplay = $riskTypeDisplay -replace ' P I M(\s|$)', ' PIM$1' -replace ' S P(\s|$)', ' SP$1' -replace ' A P I(\s|$)', ' API$1'
+        
         [void]$rowsBuilder.AppendLine(@"
                     <tr data-entity-ids="$entityIdsAttr" data-primary-entity-id="$primaryEntityId" class="risk-row">
                         <td><span class="badge $badgeClass">$($risk.Severity)</span></td>
-                        <td>$($risk.RiskType)</td>
+                        <td>$riskTypeDisplay</td>
                         <td>$($risk.Description)</td>
                     </tr>
 "@)
