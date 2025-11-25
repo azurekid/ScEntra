@@ -1,3 +1,5 @@
+<img width="1024" height="1024" alt="image" src="https://github.com/user-attachments/assets/fb04f6b4-b495-437c-bfb4-08869748f778" />
+
 # ScEntra
 
 **Scan Entra for Risk & Escalation Paths**
