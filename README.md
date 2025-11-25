@@ -16,6 +16,9 @@ ScEntra is a PowerShell security analysis tool for Microsoft Entra ID (formerly 
 - **Comprehensive Reporting**: HTML reports with risk tables, statistics, and JSON exports for automation
 - **PIM Analysis**: Detects eligible role assignments and time-limited privileges
 - **Service Principal Risk Assessment**: Identifies dangerous permissions like `Domain.ReadWrite.All`, `RoleManagement.ReadWrite.Directory`, and `Application.ReadWrite.All`
+
+  <img width="1309" height="799" alt="image" src="https://github.com/user-attachments/assets/6187fcde-982b-4e80-a2d5-f2973bc48851" />
+
 - **Zero Dependencies**: Uses direct Microsoft Graph REST API calls - no Microsoft.Graph PowerShell modules required
 
 ## 📋 Prerequisites
