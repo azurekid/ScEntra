@@ -29,3 +29,4 @@ TestResults/
 !ScEntra.psd1
 !ScEntra.psm1
 docs/
+*.md
