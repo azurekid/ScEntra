@@ -261,10 +261,22 @@ function Invoke-GraphRequest {
         throw "Not authenticated. Please run Connect-ScEntraGraph first."
     }
 
+    # Get module version for User-Agent
+    $moduleVersion = '1.0.0'
+    try {
+        $module = Get-Module -Name ScEntra -ErrorAction SilentlyContinue
+        if ($module) {
+            $moduleVersion = $module.Version.ToString()
+        }
+    } catch {
+        # Fallback to default version
+    }
+
     $headers = @{
         'Authorization'    = "Bearer $script:GraphAccessToken"
         'Content-Type'     = 'application/json'
         'ConsistencyLevel' = 'eventual'
+        'User-Agent'       = "ScEntra/$moduleVersion (PowerShell/$($PSVersionTable.PSVersion))"
     }
 
     $params = @{
@@ -398,7 +410,20 @@ function Invoke-GraphBatchRequest {
             }
 
             $batchUri = "$script:GraphBaseUrl/`$batch"
-            $response = Invoke-RestMethod -Uri $batchUri -Method POST -Headers $headers -Body ($batchBody | ConvertTo-Json -Depth 10) -ErrorAction Stop
+            # Add User-Agent to batch request headers
+            $batchHeaders = $headers.Clone()
+            if (-not $batchHeaders.ContainsKey('User-Agent')) {
+                $moduleVersion = '1.0.0'
+                try {
+                    $module = Get-Module -Name ScEntra -ErrorAction SilentlyContinue
+                    if ($module) {
+                        $moduleVersion = $module.Version.ToString()
+                    }
+                } catch { }
+                $batchHeaders['User-Agent'] = "ScEntra/$moduleVersion (PowerShell/$($PSVersionTable.PSVersion))"
+            }
+            
+            $response = Invoke-RestMethod -Uri $batchUri -Method POST -Headers $batchHeaders -Body ($batchBody | ConvertTo-Json -Depth 10) -ErrorAction Stop
 
             foreach ($resp in $response.responses) {
                 $allResponses[$resp.id] = $resp

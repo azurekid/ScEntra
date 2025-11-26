@@ -50,11 +50,23 @@ function Connect-ScEntraGraph {
         $clientId = "14d82eec-204b-4c2f-b7e8-296a70dab67e"
         $scopeString = ($Scopes | ForEach-Object { "https://graph.microsoft.com/$_" }) -join " "
         
+        # Get module version for User-Agent
+        $moduleVersion = '1.0.0'
+        try {
+            $module = Get-Module -Name ScEntra -ErrorAction SilentlyContinue
+            if ($module) {
+                $moduleVersion = $module.Version.ToString()
+            }
+        } catch { }
+        
+        $userAgent = "ScEntra/$moduleVersion (PowerShell/$($PSVersionTable.PSVersion))"
+        
         # Request device code
         $deviceCodeRequest = @{
-            Uri     = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/devicecode"
-            Method  = 'POST'
-            Body    = @{
+            Uri        = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/devicecode"
+            Method     = 'POST'
+            UserAgent  = $userAgent
+            Body       = @{
                 client_id = $clientId
                 scope     = $scopeString
             }
@@ -68,8 +80,9 @@ function Connect-ScEntraGraph {
             
             # Poll for token
             $tokenRequest = @{
-                Uri    = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
-                Method = 'POST'
+                Uri       = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
+                Method    = 'POST'
+                UserAgent = $userAgent
             }
             
             $interval = if ($deviceCodeResponse.interval) { $deviceCodeResponse.interval } else { 5 }

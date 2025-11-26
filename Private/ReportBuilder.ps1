@@ -236,8 +236,10 @@ function New-ScEntraGraphSection {
         return ''
     }
 
-    $nodesJson = $GraphData.nodes | ConvertTo-Json -Compress -Depth 10
-    $edgesJson = $GraphData.edges | ConvertTo-Json -Compress -Depth 10
+    # Use higher depth to ensure all nested properties are preserved
+    # Compress to reduce HTML size, but depth 20 ensures complex objects aren't truncated
+    $nodesJson = $GraphData.nodes | ConvertTo-Json -Compress -Depth 20
+    $edgesJson = $GraphData.edges | ConvertTo-Json -Compress -Depth 20
 
     return @"
         <div class="section">
