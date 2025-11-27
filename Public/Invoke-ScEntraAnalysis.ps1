@@ -181,26 +181,67 @@ function Invoke-ScEntraAnalysis {
                     }
                 }
 
-                $inventory = Get-ScEntraUsersAndGroups
-                $users = $inventory.Users
-                $groups = $inventory.Groups
+                # Run inventory collection in parallel for better performance
+                Write-Host "  📊 Starting parallel inventory collection..." -ForegroundColor Yellow
+                
+                $parallelResults = 0..2 | ForEach-Object -Parallel {
+                    $index = $_
+                    $moduleRoot = Join-Path $using:PSScriptRoot '..'
+                    $privateFolder = Join-Path -Path $moduleRoot -ChildPath 'Private'
+                    Get-ChildItem -Path $privateFolder -Filter '*.ps1' -File | ForEach-Object { . $_.FullName }
+                    $script:GraphBaseUrl = $using:script:GraphBaseUrl
+                    $script:GraphAccessToken = $using:script:GraphAccessToken
+                    switch ($index) {
+                        0 {
+                            try {
+                                $inventory = Get-ScEntraUsersAndGroups
+                                @{ Type = 'inventory'; Users = $inventory.Users; Groups = $inventory.Groups; Error = $null }
+                            }
+                            catch {
+                                @{ Type = 'inventory'; Users = @(); Groups = @(); Error = $_.Exception.Message }
+                            }
+                        }
+                        1 {
+                            try {
+                                $sps = Get-ScEntraServicePrincipals
+                                @{ Type = 'sp'; ServicePrincipals = $sps; Error = $null }
+                            }
+                            catch {
+                                @{ Type = 'sp'; ServicePrincipals = @(); Error = $_.Exception.Message }
+                            }
+                        }
+                        2 {
+                            try {
+                                $apps = Get-ScEntraAppRegistrations
+                                @{ Type = 'app'; AppRegistrations = $apps; Error = $null }
+                            }
+                            catch {
+                                @{ Type = 'app'; AppRegistrations = @(); Error = $_.Exception.Message }
+                            }
+                        }
+                    }
+                } -ThrottleLimit 3
 
-                $servicePrincipals = @()
-                try {
-                    $servicePrincipals = Get-ScEntraServicePrincipals
-                }
-                catch {
-                    Write-Error "Failed to retrieve service principals: $($_.Exception.Message)"
-                    $servicePrincipals = @()
-                }
+                # Extract data
+                $inventoryResult = $parallelResults | Where-Object { $_.Type -eq 'inventory' }
+                $spResult = $parallelResults | Where-Object { $_.Type -eq 'sp' }
+                $appResult = $parallelResults | Where-Object { $_.Type -eq 'app' }
 
-                $appRegistrations = @()
-                try {
-                    $appRegistrations = Get-ScEntraAppRegistrations
+                # Extract data
+                $users = $inventoryResult.Users
+                $groups = $inventoryResult.Groups
+                $servicePrincipals = $spResult.ServicePrincipals
+                $appRegistrations = $appResult.AppRegistrations
+
+                # Report any errors
+                if ($inventoryResult.Error) {
+                    Write-Warning "Error retrieving users and groups: $($inventoryResult.Error)"
                 }
-                catch {
-                    Write-Error "Failed to retrieve app registrations: $($_.Exception.Message)"
-                    $appRegistrations = @()
+                if ($spResult.Error) {
+                    Write-Error "Failed to retrieve service principals: $($spResult.Error)"
+                }
+                if ($appResult.Error) {
+                    Write-Error "Failed to retrieve app registrations: $($appResult.Error)"
                 }
 
                 Write-Host "[2/5] 👑 Enumerating Role Assignments..." -ForegroundColor Cyan

@@ -381,14 +381,14 @@ function Get-ScEntraEscalationPaths {
         $spBatchRequests += @{
             id     = "$spRequestId-sp-owners-$($sp.id)"
             method = "GET"
-            url    = "/servicePrincipals/$($sp.id)/owners?`$select=id,displayName,userPrincipalName"
+            url    = "/servicePrincipals/$($sp.id)/owners?`$select=id,displayName,userPrincipalName&`$top=999"
         }
         $spRequestId++
 
         $spBatchRequests += @{
             id     = "$spRequestId-sp-approles-$($sp.id)"
             method = "GET"
-            url    = "/servicePrincipals/$($sp.id)/appRoleAssignedTo?`$select=principalId,principalDisplayName,principalType&`$top=100"
+            url    = "/servicePrincipals/$($sp.id)/appRoleAssignedTo?`$select=principalId,principalDisplayName,principalType&`$top=999"
         }
         $spRequestId++
     }
@@ -411,18 +411,19 @@ function Get-ScEntraEscalationPaths {
         $ownerResponseKey = $spBatchResponses.Keys | Where-Object { $_ -like "*-sp-owners-$($sp.id)" } | Select-Object -First 1
         if ($ownerResponseKey) {
             $ownerResponse = $spBatchResponses[$ownerResponseKey]
-            if ($ownerResponse -and $ownerResponse.status -eq 200 -and $ownerResponse.body.value) {
-                $spOwners[$sp.id] = $ownerResponse.body.value
-                $ownerCount = $ownerResponse.body.value.Count
+            if ($ownerResponse -and $ownerResponse.status -eq 200) {
+                $owners = Get-PagedBatchItems -Response $ownerResponse
+                $spOwners[$sp.id] = $owners
+                $ownerCount = $owners.Count
             }
         }
         else {
             try {
-                $ownersUri = "$script:GraphBaseUrl/servicePrincipals/$($sp.id)/owners?`$select=id,displayName,userPrincipalName"
-                $owners = Invoke-GraphRequest -Uri $ownersUri -Method GET -ErrorAction SilentlyContinue
-                if ($owners.value) {
-                    $spOwners[$sp.id] = $owners.value
-                    $ownerCount = $owners.value.Count
+                $ownersUri = "$script:GraphBaseUrl/servicePrincipals/$($sp.id)/owners?`$select=id,displayName,userPrincipalName&`$top=999"
+                $owners = Get-AllGraphItems -Uri $ownersUri -Method GET
+                if ($owners) {
+                    $spOwners[$sp.id] = $owners
+                    $ownerCount = $owners.Count
                 }
             }
             catch {
@@ -433,16 +434,17 @@ function Get-ScEntraEscalationPaths {
         $appRoleResponseKey = $spBatchResponses.Keys | Where-Object { $_ -like "*-sp-approles-$($sp.id)" } | Select-Object -First 1
         if ($appRoleResponseKey) {
             $appRoleResponse = $spBatchResponses[$appRoleResponseKey]
-            if ($appRoleResponse -and $appRoleResponse.status -eq 200 -and $appRoleResponse.body.value) {
-                $spAppRoleAssignments[$sp.id] = $appRoleResponse.body.value
+            if ($appRoleResponse -and $appRoleResponse.status -eq 200) {
+                $appRoles = Get-PagedBatchItems -Response $appRoleResponse
+                $spAppRoleAssignments[$sp.id] = $appRoles
             }
         }
         else {
             try {
-                $appRolesUri = "$script:GraphBaseUrl/servicePrincipals/$($sp.id)/appRoleAssignedTo?`$select=principalId,principalDisplayName,principalType&`$top=100"
-                $appRoles = Invoke-GraphRequest -Uri $appRolesUri -Method GET -ErrorAction SilentlyContinue
-                if ($appRoles.value) {
-                    $spAppRoleAssignments[$sp.id] = $appRoles.value
+                $appRolesUri = "$script:GraphBaseUrl/servicePrincipals/$($sp.id)/appRoleAssignedTo?`$select=principalId,principalDisplayName,principalType&`$top=999"
+                $appRoles = Get-AllGraphItems -Uri $appRolesUri -Method GET
+                if ($appRoles) {
+                    $spAppRoleAssignments[$sp.id] = $appRoles
                 }
             }
             catch {

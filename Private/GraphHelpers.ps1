@@ -400,16 +400,18 @@ function Invoke-GraphBatchRequest {
 
     Write-Verbose "Processing $($Requests.Count) requests in $($batches.Count) batches"
 
-    foreach ($batch in $batches) {
+    # Process batches in parallel with throttling to avoid rate limits
+    $batches | ForEach-Object -Parallel {
+        param($batch, $graphBaseUrl, $graphAccessToken)
         $batchBody = @{ requests = $batch }
 
         try {
             $headers = @{
-                'Authorization' = "Bearer $script:GraphAccessToken"
+                'Authorization' = "Bearer $graphAccessToken"
                 'Content-Type'  = 'application/json'
             }
 
-            $batchUri = "$script:GraphBaseUrl/`$batch"
+            $batchUri = "$graphBaseUrl/`$batch"
             # Add User-Agent to batch request headers
             $batchHeaders = $headers.Clone()
             if (-not $batchHeaders.ContainsKey('User-Agent')) {
@@ -425,17 +427,62 @@ function Invoke-GraphBatchRequest {
             
             $response = Invoke-RestMethod -Uri $batchUri -Method POST -Headers $batchHeaders -Body ($batchBody | ConvertTo-Json -Depth 10) -ErrorAction Stop
 
-            foreach ($resp in $response.responses) {
-                $allResponses[$resp.id] = $resp
-            }
+            # Return the responses
+            $response.responses
         }
         catch {
-            Write-Error "Batch request failed: $_"
-            throw
+            # In parallel, we can't throw, so return error info
+            [PSCustomObject]@{ Error = $_.Exception.Message; Batch = $batch }
+        }
+    } -ArgumentList $_, $script:GraphBaseUrl, $script:GraphAccessToken -ThrottleLimit 5 | ForEach-Object {
+        if ($_.Error) {
+            Write-Error "Batch request failed: $($_.Error)"
+            throw $_.Error
+        }
+        foreach ($resp in $_) {
+            $allResponses[$resp.id] = $resp
         }
     }
 
     return $allResponses
+}
+
+function Get-PagedBatchItems {
+    <#
+    .SYNOPSIS
+        Helper function to collect all items from a batch response with pagination
+    .PARAMETER Response
+        The batch response object
+    .EXAMPLE
+        $items = Get-PagedBatchItems -Response $batchResponse
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        $Response
+    )
+
+    $items = @()
+    if (-not $Response) { return $items }
+    if ($Response.body -and $Response.body.value) {
+        $items += $Response.body.value
+    }
+
+    $nextLink = if ($Response.body) { $Response.body.'@odata.nextLink' } else { $null }
+    while ($nextLink) {
+        try {
+            $nextResult = Invoke-GraphRequest -Uri $nextLink -Method GET -ErrorAction Stop
+            if ($nextResult.value) {
+                $items += $nextResult.value
+            }
+            $nextLink = $nextResult.'@odata.nextLink'
+        }
+        catch {
+            Write-Verbose "Failed to fetch additional page for batch response $($Response.id): $_"
+            break
+        }
+    }
+
+    return $items
 }
 
 function Get-ScEntraOrganizationInfo {
