@@ -167,7 +167,20 @@ function Invoke-ScEntraAnalysis {
 
                 $startTime = Get-Date
 
-                Write-Host "[1/5] 📋 Collecting Inventory..." -ForegroundColor Cyan
+                # Determine environment size and adaptive configuration BEFORE data collection
+                Write-Host "[1/5] 🔍 Determining Environment Size..." -ForegroundColor Cyan
+                try {
+                    $envConfig = Get-ScEntraEnvironmentSize
+                    Write-Host "  📊 Environment Profile: $($envConfig.Profile)" -ForegroundColor Green
+                    Write-Host "    Batch Throttle: $($envConfig.BatchThrottleLimit) | Delay: $($envConfig.DelayBetweenBatches)ms | Max Batch Size: $($envConfig.MaxBatchSize)" -ForegroundColor Gray
+                }
+                catch {
+                    Write-Warning "Could not determine environment size automatically: $_"
+                    Write-Warning "Falling back to conservative Enterprise configuration"
+                    $envConfig = Get-ScEntraEnvironmentConfig -UserCount 100000 -GroupCount 50000 -ServicePrincipalCount 50000 -AppRegistrationCount 100000
+                }
+
+                Write-Host "[2/5] 📋 Collecting Inventory..." -ForegroundColor Cyan
                 
                 # Get organization information
                 $organizationInfo = Get-ScEntraOrganizationInfo
@@ -244,7 +257,12 @@ function Invoke-ScEntraAnalysis {
                     Write-Error "Failed to retrieve app registrations: $($appResult.Error)"
                 }
 
-                Write-Host "[2/5] 👑 Enumerating Role Assignments..." -ForegroundColor Cyan
+                # Environment size detection and adaptive configuration
+                Write-Host "  📊 Environment Profile: $($envConfig.Profile)" -ForegroundColor Cyan
+                Write-Host "    Users: $($users.Count) | Groups: $($groups.Count) | SPs: $($servicePrincipals.Count) | Apps: $($appRegistrations.Count)" -ForegroundColor Gray
+                Write-Host "    Batch Throttle: $($envConfig.BatchThrottleLimit) | Delay: $($envConfig.DelayBetweenBatches)ms | Max Batch Size: $($envConfig.MaxBatchSize)" -ForegroundColor Gray
+
+                Write-Host "[3/5] 👑 Enumerating Role Assignments..." -ForegroundColor Cyan
 
                 $roleAssignments = @()
                 try {
@@ -284,7 +302,13 @@ function Invoke-ScEntraAnalysis {
                         -RoleAssignments $roleAssignments `
                         -PIMAssignments $pimAssignments `
                         -ServicePrincipals $servicePrincipals `
-                        -AppRegistrations $appRegistrations
+                        -AppRegistrations $appRegistrations `
+                        -BatchThrottleLimit $envConfig.BatchThrottleLimit `
+                        -DelayBetweenBatches $envConfig.DelayBetweenBatches `
+                        -MaxBatchSize $envConfig.MaxBatchSize `
+                        -UseParallelEscalation $envConfig.UseParallelEscalation `
+                        -EscalationThrottleLimit $envConfig.EscalationThrottleLimit `
+                        -CircuitBreakerThreshold $envConfig.CircuitBreakerThreshold
                 }
                 catch {
                     Write-Error "Failed to analyze escalation paths: $($_.Exception.Message)"

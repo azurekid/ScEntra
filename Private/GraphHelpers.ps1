@@ -363,6 +363,155 @@ function Get-AllGraphItems {
     return $allItems
 }
 
+function Get-ScEntraEnvironmentSize {
+    <#
+    .SYNOPSIS
+        Automatically determines environment size by querying Microsoft Graph API counts
+    .DESCRIPTION
+        Queries the actual counts of users, groups, service principals, and applications
+        from Microsoft Graph API to determine the appropriate environment configuration.
+    .EXAMPLE
+        $config = Get-ScEntraEnvironmentSize
+    #>
+    [CmdletBinding()]
+    param()
+
+    if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
+        throw "Not authenticated. Please run Connect-ScEntraGraph first."
+    }
+
+    Write-Host "🔍 Determining environment size by querying Microsoft Graph API..." -ForegroundColor Cyan
+
+    $counts = @{
+        Users = 0
+        Groups = 0
+        ServicePrincipals = 0
+        Applications = 0
+    }
+
+    # Query each resource type count
+    $endpoints = @{
+        Users = "$script:GraphBaseUrl/users/`$count"
+        Groups = "$script:GraphBaseUrl/groups/`$count"
+        ServicePrincipals = "$script:GraphBaseUrl/servicePrincipals/`$count"
+        Applications = "$script:GraphBaseUrl/applications/`$count"
+    }
+
+    foreach ($resourceType in $endpoints.Keys) {
+        try {
+            Write-Verbose "Querying $resourceType count..."
+            $count = Invoke-GraphRequest -Uri $endpoints[$resourceType] -Method GET
+            $counts[$resourceType] = [int]$count
+            Write-Host "   $resourceType`: $($counts[$resourceType].ToString('N0'))" -ForegroundColor Gray
+        }
+        catch {
+            Write-Warning "Could not query $resourceType count: $_"
+            Write-Warning "Falling back to conservative Enterprise configuration"
+            # Return conservative defaults if we can't determine size
+            return Get-ScEntraEnvironmentConfig -UserCount 100000 -GroupCount 50000 -ServicePrincipalCount 50000 -AppRegistrationCount 100000
+        }
+    }
+
+    Write-Host "✅ Environment detected: $($counts.Users.ToString('N0')) users, $($counts.Groups.ToString('N0')) groups, $($counts.ServicePrincipals.ToString('N0')) SPs, $($counts.Applications.ToString('N0')) apps" -ForegroundColor Green
+
+    return Get-ScEntraEnvironmentConfig -UserCount $counts.Users -GroupCount $counts.Groups -ServicePrincipalCount $counts.ServicePrincipals -AppRegistrationCount $counts.Applications
+}
+
+function Get-ScEntraEnvironmentConfig {
+    <#
+    .SYNOPSIS
+        Determines environment size and returns adaptive configuration for API throttling
+    .PARAMETER UserCount
+        Number of users in the tenant
+    .PARAMETER GroupCount
+        Number of groups in the tenant
+    .PARAMETER ServicePrincipalCount
+        Number of service principals in the tenant
+    .PARAMETER AppRegistrationCount
+        Number of app registrations in the tenant
+    .EXAMPLE
+        $config = Get-ScEntraEnvironmentConfig -UserCount 60000 -GroupCount 80000 -ServicePrincipalCount 120000 -AppRegistrationCount 260000
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$UserCount,
+        [Parameter(Mandatory = $true)]
+        [int]$GroupCount,
+        [Parameter(Mandatory = $true)]
+        [int]$ServicePrincipalCount,
+        [Parameter(Mandatory = $true)]
+        [int]$AppRegistrationCount
+    )
+
+    # Calculate environment score based on object counts
+    $envScore = ($UserCount * 1) + ($GroupCount * 2) + ($ServicePrincipalCount * 0.5) + ($AppRegistrationCount * 0.5)
+
+    # Determine environment profile
+    $profile = if ($envScore -lt 25000) {
+        "Small"
+    }
+    elseif ($envScore -lt 75000) {
+        "Medium"
+    }
+    elseif ($envScore -lt 200000) {
+        "Large"
+    }
+    else {
+        "Enterprise"
+    }
+
+    # Adaptive configuration based on environment size
+    $config = switch ($profile) {
+        "Small" {
+            @{
+                Profile = "Small (<25k objects)"
+                BatchThrottleLimit = 5
+                DelayBetweenBatches = 0
+                MaxBatchSize = 20
+                UseParallelEscalation = $true
+                EscalationThrottleLimit = 5
+                CircuitBreakerThreshold = 20
+            }
+        }
+        "Medium" {
+            @{
+                Profile = "Medium (25k-75k objects)"
+                BatchThrottleLimit = 3
+                DelayBetweenBatches = 100
+                MaxBatchSize = 20
+                UseParallelEscalation = $true
+                EscalationThrottleLimit = 3
+                CircuitBreakerThreshold = 15
+            }
+        }
+        "Large" {
+            @{
+                Profile = "Large (75k-200k objects)"
+                BatchThrottleLimit = 2
+                DelayBetweenBatches = 250
+                MaxBatchSize = 15
+                UseParallelEscalation = $false
+                EscalationThrottleLimit = 1
+                CircuitBreakerThreshold = 10
+            }
+        }
+        "Enterprise" {
+            @{
+                Profile = "Enterprise (200k+ objects)"
+                BatchThrottleLimit = 1
+                DelayBetweenBatches = 500
+                MaxBatchSize = 10
+                UseParallelEscalation = $false
+                EscalationThrottleLimit = 1
+                CircuitBreakerThreshold = 5
+            }
+        }
+    }
+
+    return [PSCustomObject]$config
+}
+
 function Invoke-GraphBatchRequest {
     <#
     .SYNOPSIS
@@ -371,19 +520,27 @@ function Invoke-GraphBatchRequest {
         Array of request objects with id, method, and url properties
     .PARAMETER MaxBatchSize
         Maximum number of requests per batch (default: 20, Graph API limit)
+    .PARAMETER ThrottleLimit
+        Maximum number of concurrent batch operations (default: 5)
+    .PARAMETER DelayBetweenBatches
+        Delay in milliseconds between processing batches (default: 0)
     .EXAMPLE
         $requests = @(
             @{ id = "1"; method = "GET"; url = "/groups/id1/members" }
             @{ id = "2"; method = "GET"; url = "/groups/id2/members" }
         )
-        Invoke-GraphBatchRequest -Requests $requests
+        Invoke-GraphBatchRequest -Requests $requests -ThrottleLimit 2 -DelayBetweenBatches 250
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
         [array]$Requests,
         [Parameter(Mandatory = $false)]
-        [int]$MaxBatchSize = 20
+        [int]$MaxBatchSize = 20,
+        [Parameter(Mandatory = $false)]
+        [int]$ThrottleLimit = 5,
+        [Parameter(Mandatory = $false)]
+        [int]$DelayBetweenBatches = 0
     )
 
     if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
@@ -398,49 +555,102 @@ function Invoke-GraphBatchRequest {
         $batches += , @($Requests[$i..($i + $batchSize - 1)])
     }
 
-    Write-Verbose "Processing $($Requests.Count) requests in $($batches.Count) batches"
+    Write-Verbose "Processing $($Requests.Count) requests in $($batches.Count) batches (ThrottleLimit: $ThrottleLimit, Delay: ${DelayBetweenBatches}ms)"
 
-    # Process batches in parallel with throttling to avoid rate limits
-    $batches | ForEach-Object -Parallel {
-        param($batch, $graphBaseUrl, $graphAccessToken)
-        $batchBody = @{ requests = $batch }
+    $graphBaseUrl = $script:GraphBaseUrl
+    $graphAccessToken = $script:GraphAccessToken
 
-        try {
-            $headers = @{
-                'Authorization' = "Bearer $graphAccessToken"
-                'Content-Type'  = 'application/json'
+    # Choose processing strategy based on throttle limit and delay requirements
+    if ($ThrottleLimit -eq 1 -or $DelayBetweenBatches -gt 0) {
+        # Sequential processing for large environments or when delays are needed
+        Write-Verbose "Using sequential batch processing for large environment compatibility"
+        
+        foreach ($batch in $batches) {
+            $batchBody = @{ requests = $batch }
+
+            try {
+                $headers = @{
+                    'Authorization' = "Bearer $graphAccessToken"
+                    'Content-Type'  = 'application/json'
+                }
+
+                $batchUri = "$graphBaseUrl/`$batch"
+                # Add User-Agent to batch request headers
+                $batchHeaders = $headers.Clone()
+                if (-not $batchHeaders.ContainsKey('User-Agent')) {
+                    $moduleVersion = '1.0.0'
+                    try {
+                        $module = Get-Module -Name ScEntra -ErrorAction SilentlyContinue
+                        if ($module) {
+                            $moduleVersion = $module.Version.ToString()
+                        }
+                    } catch { }
+                    $batchHeaders['User-Agent'] = "ScEntra/$moduleVersion (PowerShell/$($PSVersionTable.PSVersion))"
+                }
+                
+                $response = Invoke-RestMethod -Uri $batchUri -Method POST -Headers $batchHeaders -Body ($batchBody | ConvertTo-Json -Depth 10) -ErrorAction Stop
+
+                # Process responses
+                foreach ($resp in $response.responses) {
+                    $allResponses[$resp.id] = $resp
+                }
+
+                # Add delay between batches if specified
+                if ($DelayBetweenBatches -gt 0) {
+                    Start-Sleep -Milliseconds $DelayBetweenBatches
+                }
             }
-
-            $batchUri = "$graphBaseUrl/`$batch"
-            # Add User-Agent to batch request headers
-            $batchHeaders = $headers.Clone()
-            if (-not $batchHeaders.ContainsKey('User-Agent')) {
-                $moduleVersion = '1.0.0'
-                try {
-                    $module = Get-Module -Name ScEntra -ErrorAction SilentlyContinue
-                    if ($module) {
-                        $moduleVersion = $module.Version.ToString()
-                    }
-                } catch { }
-                $batchHeaders['User-Agent'] = "ScEntra/$moduleVersion (PowerShell/$($PSVersionTable.PSVersion))"
+            catch {
+                Write-Error "Batch request failed: $($_.Exception.Message)"
+                throw
             }
-            
-            $response = Invoke-RestMethod -Uri $batchUri -Method POST -Headers $batchHeaders -Body ($batchBody | ConvertTo-Json -Depth 10) -ErrorAction Stop
+        }
+    }
+    else {
+        # Parallel processing for smaller environments
+        Write-Verbose "Using parallel batch processing for optimal performance"
+        
+        $batches | ForEach-Object -Parallel {
+            $batch = $_
+            $batchBody = @{ requests = $batch }
 
-            # Return the responses
-            $response.responses
-        }
-        catch {
-            # In parallel, we can't throw, so return error info
-            [PSCustomObject]@{ Error = $_.Exception.Message; Batch = $batch }
-        }
-    } -ArgumentList $_, $script:GraphBaseUrl, $script:GraphAccessToken -ThrottleLimit 5 | ForEach-Object {
-        if ($_.Error) {
-            Write-Error "Batch request failed: $($_.Error)"
-            throw $_.Error
-        }
-        foreach ($resp in $_) {
-            $allResponses[$resp.id] = $resp
+            try {
+                $headers = @{
+                    'Authorization' = "Bearer $using:graphAccessToken"
+                    'Content-Type'  = 'application/json'
+                }
+
+                $batchUri = "$using:graphBaseUrl/`$batch"
+                # Add User-Agent to batch request headers
+                $batchHeaders = $headers.Clone()
+                if (-not $batchHeaders.ContainsKey('User-Agent')) {
+                    $moduleVersion = '1.0.0'
+                    try {
+                        $module = Get-Module -Name ScEntra -ErrorAction SilentlyContinue
+                        if ($module) {
+                            $moduleVersion = $module.Version.ToString()
+                        }
+                    } catch { }
+                    $batchHeaders['User-Agent'] = "ScEntra/$moduleVersion (PowerShell/$($PSVersionTable.PSVersion))"
+                }
+                
+                $response = Invoke-RestMethod -Uri $batchUri -Method POST -Headers $batchHeaders -Body ($batchBody | ConvertTo-Json -Depth 10) -ErrorAction Stop
+
+                # Return the responses
+                $response.responses
+            }
+            catch {
+                # In parallel, we can't throw, so return error info
+                [PSCustomObject]@{ Error = $_.Exception.Message; Batch = $batch }
+            }
+        } -ThrottleLimit $ThrottleLimit | ForEach-Object {
+            if ($_.Error) {
+                Write-Error "Batch request failed: $($_.Error)"
+                throw $_.Error
+            }
+            foreach ($resp in $_) {
+                $allResponses[$resp.id] = $resp
+            }
         }
     }
 

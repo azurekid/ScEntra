@@ -27,5 +27,7 @@ if (Test-Path $publicFolder) {
 Export-ModuleMember -Function @(
     'Connect-ScEntraGraph'
     'Invoke-ScEntraAnalysis'
+    'Get-ScEntraEnvironmentSize'
+    'Get-ScEntraEnvironmentConfig'
     'Export-ScEntraReport'
 )
