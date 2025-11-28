@@ -141,6 +141,79 @@ Update the HTML report without re-querying Graph API:
 ./Invoke-JsonAnonymizer.ps1 -InputPath "./reports/ScEntra-Report.json" -OutputPath "./reports/anonymized.json"
 ```
 
+## 🔧 Performance & Scaling
+
+### Microsoft Graph API Throttling Limits
+
+ScEntra automatically adapts its API usage based on tenant size to prevent throttling. The tool uses Microsoft Graph's Resource Unit (RU) based throttling system.
+
+#### Automatic Environment Detection
+
+ScEntra automatically queries Microsoft Graph API count endpoints to determine tenant size:
+
+```powershell
+# Manual environment detection
+$config = Get-ScEntraEnvironmentSize
+
+# Manual configuration with specific counts
+$config = Get-ScEntraEnvironmentConfig -UserCount 60000 -GroupCount 80000 -ServicePrincipalCount 120000 -AppRegistrationCount 260000
+```
+
+The automatic detection queries:
+- `/users/$count` - User count
+- `/groups/$count` - Group count  
+- `/servicePrincipals/$count` - Service principal count
+- `/applications/$count` - App registration count
+
+#### Throttling Limits by Tenant Size
+
+| Tenant Size | RU Limit per 10s | RU Limit per 20s | Request Limit per 5min |
+|-------------|------------------|------------------|----------------------|
+| **Small** (<50 users) | 3,500 RU | - | 3,000 requests |
+| **Medium** (50-500 users) | 5,000 RU | - | 3,000 requests |
+| **Large** (>500 users) | **8,000 RU** | 150,000 RU | 18,000 requests |
+
+#### Resource Unit Costs for ScEntra Operations
+
+| Microsoft Graph Endpoint | RU Cost | Used For |
+|--------------------------|---------|----------|
+| `GET /groups/{id}/members` | 3 RU | Group membership enumeration |
+| `GET /groups/{id}/transitiveMembers` | 5 RU | Nested group analysis |
+| `GET /groups/{id}/owners` | 1 RU | Group ownership checks |
+| `GET /servicePrincipals/{id}/owners` | 1 RU | Service principal ownership |
+| `GET /servicePrincipals/{id}/appRoleAssignedTo` | 1 RU | App role assignments |
+| `GET /applications/{id}/owners` | 1 RU | App registration ownership |
+| `GET /users` | 2 RU | User enumeration |
+| `GET /servicePrincipals` | 1 RU | Service principal enumeration |
+| `GET /applications` | 2 RU | App registration enumeration |
+
+#### Adaptive Configuration by Environment
+
+ScEntra automatically detects tenant size by querying Microsoft Graph API counts and applies optimal settings:
+
+| Environment | Profile | Batch Size | Concurrency | Delay | RU Usage |
+|-------------|---------|------------|-------------|-------|----------|
+| **Small** (<10k objects) | Small | 20 requests | 5 parallel | 0ms | ~10-20% of limit |
+| **Medium** (10k-50k objects) | Medium | 20 requests | 3 parallel | 100ms | ~15-25% of limit |
+| **Large** (50k-200k objects) | Large | 15 requests | 2 parallel | 250ms | ~20-30% of limit |
+| **Enterprise** (200k+ objects) | Enterprise | 20 requests | 1 sequential | 100ms | ~20-25% of limit |
+
+#### Enterprise Environment Example
+
+For a tenant with 60k users, 80k groups, 120k service principals, and 260k app registrations:
+- **Profile**: Enterprise (200k+ objects)
+- **Batch Size**: 20 requests per batch (Graph API maximum)
+- **Concurrency**: 1 batch at a time (sequential processing)
+- **Delay**: 100ms between batches
+- **Estimated RU Usage**: ~1,800 RU per 10 seconds (22.5% of 8,000 RU limit)
+
+### References
+
+- [Microsoft Graph Throttling Limits](https://learn.microsoft.com/en-us/graph/throttling-limits)
+- [Identity and Access Service Limits](https://learn.microsoft.com/en-us/graph/throttling-limits#identity-and-access-service-limits)
+- [JSON Batching Best Practices](https://learn.microsoft.com/en-us/graph/json-batching)
+- [Throttling Best Practices](https://learn.microsoft.com/en-us/graph/throttling#best-practices-to-handle-throttling)
+
 ## 🎨 Interactive Features
 
 ### Graph Visualization
