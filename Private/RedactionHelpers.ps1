@@ -134,12 +134,15 @@ function Invoke-ScEntraDataRedaction {
     $roleNames = $roleNames | Where-Object { $_ } | Select-Object -Unique
 
     if ($GraphData -and $GraphData.nodes) {
+        $nonRedactedNodeTypes = @('apiPermission')
         $redactedNodes = $GraphData.nodes | ForEach-Object {
             $node = $_
-            if ($node.label -and $roleNames -notcontains $node.label) {
+            $shouldRedactLabel = $node.label -and $roleNames -notcontains $node.label -and ($nonRedactedNodeTypes -notcontains $node.type)
+            if ($shouldRedactLabel) {
                 $node.label = Get-ScEntraRedactedName -Value $node.label
             }
-            if ($node.title -and $roleNames -notcontains $node.title) {
+            $shouldRedactTitle = $node.title -and $roleNames -notcontains $node.title -and ($nonRedactedNodeTypes -notcontains $node.type)
+            if ($shouldRedactTitle) {
                 $node.title = Get-ScEntraRedactedName -Value $node.title
             }
             if ($node.userPrincipalName) {

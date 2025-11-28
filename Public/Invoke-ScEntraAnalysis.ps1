@@ -15,6 +15,23 @@ function Invoke-ScEntraAnalysis {
 
     .PARAMETER IncludeAllGroupNesting
         Reserved for future expansion to include all group nesting relationships in the graph.
+
+    .PARAMETER EncryptReport
+        When set, generates a self-decrypting HTML report that prompts for a password in the browser.
+
+    .PARAMETER EncryptionPassword
+        Optional password to use for encryption; if omitted you will be prompted.
+
+    .PARAMETER EncryptedOutputPath
+        Optional path for the encrypted HTML payload. Defaults to OutputPath.
+
+    .PARAMETER DeletePlaintextAfterEncryption
+        Legacy switch retained for compatibility. Encrypted reports are written directly so the
+        switch has no effect.
+
+    .PARAMETER AutoUnlock
+        Embeds the supplied password so the encrypted HTML decrypts automatically on load while
+        keeping the payload encrypted at rest.
     #>
 
     [CmdletBinding()]
@@ -26,8 +43,34 @@ function Invoke-ScEntraAnalysis {
         [switch]$SkipConnection,
 
         [Parameter(Mandatory = $false)]
-        [switch]$IncludeAllGroupNesting
+        [switch]$IncludeAllGroupNesting,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$EncryptReport,
+
+        [Parameter(Mandatory = $false)]
+        [System.Security.SecureString]$EncryptionPassword,
+
+        [Parameter(Mandatory = $false)]
+        [string]$EncryptedOutputPath,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$DeletePlaintextAfterEncryption,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$AutoUnlock
     )
+
+    if (-not $EncryptReport -and (
+            $PSBoundParameters.ContainsKey('EncryptionPassword') -or 
+            $PSBoundParameters.ContainsKey('EncryptedOutputPath') -or 
+            $DeletePlaintextAfterEncryption)) {
+        $EncryptReport = $true
+    }
+
+    if ($AutoUnlock -and -not $EncryptReport) {
+        $EncryptReport = $true
+    }
 
     function Show-ScEntraLogo {
         Write-Host @"
@@ -48,6 +91,50 @@ function Invoke-ScEntraAnalysis {
 "@ -ForegroundColor Cyan
     }
 
+    function Get-ScEntraEncryptionOptions {
+        param(
+            [string]$ContextDescription = "this report"
+        )
+
+        $options = @{}
+        $shouldEncrypt = $false
+
+        $globalEncrypt = $EncryptReport -or $PSBoundParameters.ContainsKey('EncryptionPassword') -or $DeletePlaintextAfterEncryption -or $PSBoundParameters.ContainsKey('EncryptedOutputPath')
+
+        if ($globalEncrypt) {
+            $shouldEncrypt = $true
+        }
+        else {
+            $response = (Read-Host "Encrypt $ContextDescription? (Y/N)").Trim()
+            if ($response -match '^[Yy]') {
+                $shouldEncrypt = $true
+            }
+        }
+
+        if (-not $shouldEncrypt) {
+            return $options
+        }
+
+        $options['EncryptReport'] = $true
+
+        if ($AutoUnlock) {
+            $options['AutoUnlock'] = $true
+        }
+
+        if ($PSBoundParameters.ContainsKey('EncryptedOutputPath') -and $EncryptedOutputPath) {
+            $options['EncryptedOutputPath'] = $EncryptedOutputPath
+        }
+
+        if ($PSBoundParameters.ContainsKey('EncryptionPassword') -and $EncryptionPassword) {
+            $options['EncryptionPassword'] = $EncryptionPassword
+        }
+        else {
+            $options['EncryptionPassword'] = Read-Host "Enter password to protect $ContextDescription" -AsSecureString
+        }
+
+        return $options
+    }
+
     # Display logo initially
     Show-ScEntraLogo
 
@@ -66,7 +153,12 @@ function Invoke-ScEntraAnalysis {
         param(
             [switch]$RedactPII,
             [string]$OutputSuffix = '',
-            [switch]$SkipConnectionOverride
+            [switch]$SkipConnectionOverride,
+            [switch]$EncryptReport,
+            [System.Security.SecureString]$EncryptionPassword,
+            [string]$EncryptedOutputPath,
+            [switch]$DeletePlaintextAfterEncryption,
+            [switch]$AutoUnlock
         )
 
         $analysisOutputPath = $OutputPath
@@ -216,10 +308,6 @@ function Invoke-ScEntraAnalysis {
             Write-Error "Failed to retrieve app registrations: $($appResult.Error)"
         }
 
-        Write-Host "  📊 Environment Profile: $($envConfig.Profile)" -ForegroundColor Cyan
-        Write-Host "    Users: $($users.Count) | Groups: $($groups.Count) | SPs: $($servicePrincipals.Count) | Apps: $($appRegistrations.Count)" -ForegroundColor Gray
-        Write-Host "    Batch Throttle: $($envConfig.BatchThrottleLimit) | Delay: $($envConfig.DelayBetweenBatches)ms | Max Batch Size: $($envConfig.MaxBatchSize)" -ForegroundColor Gray
-
         Write-Host "[3/5] 👑 Enumerating Role Assignments..." -ForegroundColor Cyan
         try {
             $roleAssignments = Get-ScEntraRoleAssignments
@@ -312,7 +400,12 @@ function Invoke-ScEntraAnalysis {
                 -EscalationRisks $escalationRisks `
                 -GraphData $graphData `
                 -OrganizationInfo $organizationInfo `
-                -OutputPath $analysisOutputPath
+                -OutputPath $analysisOutputPath `
+                -EncryptReport:$EncryptReport `
+                -EncryptionPassword $EncryptionPassword `
+                -AutoUnlock:$AutoUnlock `
+                -EncryptedOutputPath $EncryptedOutputPath `
+                -DeletePlaintextAfterEncryption:$DeletePlaintextAfterEncryption
         }
         catch {
             Write-Error "Failed to generate the report output: $($_.Exception.Message)"
@@ -363,7 +456,7 @@ function Invoke-ScEntraAnalysis {
         Write-Host "Report Location: $reportPath" -ForegroundColor Cyan
         Write-Host "Duration: $($duration.ToString('mm\:ss'))" -ForegroundColor Gray
 
-        Write-Host "\nPress any key to return to menu..." -ForegroundColor Gray
+        Write-Host "`nPress any key to return to menu..." -ForegroundColor Gray
         $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
         Clear-Host
         Show-ScEntraLogo
@@ -403,7 +496,12 @@ function Invoke-ScEntraAnalysis {
                     OutputSuffix = ''
                 }
                 Write-Host "`n▶ Starting Full Analysis..." -ForegroundColor Cyan
-                Invoke-ScEntraFullAnalysis @analysisOptions
+                Invoke-ScEntraFullAnalysis @analysisOptions `
+                    -EncryptReport:$EncryptReport `
+                    -EncryptionPassword $EncryptionPassword `
+                    -EncryptedOutputPath $EncryptedOutputPath `
+                    -DeletePlaintextAfterEncryption:$DeletePlaintextAfterEncryption `
+                    -AutoUnlock:$AutoUnlock
                 continue
             }
             "2" {
@@ -521,7 +619,12 @@ function Invoke-ScEntraAnalysis {
             "8" {
                 Write-Host "`n▶ Starting Full Analysis (Redacted)..." -ForegroundColor Cyan
                 Write-Host ""
-                Invoke-ScEntraFullAnalysis -RedactPII -OutputSuffix '-redacted'
+                Invoke-ScEntraFullAnalysis -RedactPII -OutputSuffix '-redacted' `
+                    -EncryptReport:$EncryptReport `
+                    -EncryptionPassword $EncryptionPassword `
+                    -EncryptedOutputPath $EncryptedOutputPath `
+                    -DeletePlaintextAfterEncryption:$DeletePlaintextAfterEncryption `
+                    -AutoUnlock:$AutoUnlock
                 continue
             }
             "9" {

@@ -32,7 +32,27 @@ function Export-ScEntraReport {
         Graph nodes and edges describing escalation relationships
 
     .PARAMETER OutputPath
-        Path where to save the HTML report
+        Path where to save the HTML report. Used for both plaintext and encrypted output unless
+        EncryptedOutputPath is supplied.
+
+    .PARAMETER EncryptReport
+        When supplied, wraps the report in a self-decrypting HTML shell that prompts for the
+        password in the browser using AES-256 (PBKDF2 + AES-CBC) client-side decryption.
+
+    .PARAMETER EncryptionPassword
+        Optional secure-string password to use when EncryptReport is requested. If omitted you
+        will be prompted interactively.
+
+    .PARAMETER AutoUnlock
+        When used with EncryptReport, embeds the password inside the HTML envelope so the browser
+        decrypts the report automatically without prompting. Data at rest remains encrypted.
+
+    .PARAMETER EncryptedOutputPath
+        Optional path for the encrypted HTML wrapper. Defaults to OutputPath when omitted.
+
+    .PARAMETER DeletePlaintextAfterEncryption
+        Legacy switch retained for backward compatibility. No plaintext HTML is written when
+        EncryptReport is enabled, so the switch has no effect.
 
     .EXAMPLE
         Export-ScEntraReport -Users $users -Groups $groups -OutputPath "C:\Reports\entra-report.html"
@@ -49,11 +69,27 @@ function Export-ScEntraReport {
         [Parameter(Mandatory = $false)][hashtable]$GraphData = $null,
         [Parameter(Mandatory = $false)][hashtable]$GroupMemberships = @{},
         [Parameter(Mandatory = $false)][hashtable]$OrganizationInfo = $null,
-        [Parameter(Mandatory = $false)][string]$OutputPath
+        [Parameter(Mandatory = $false)][string]$OutputPath,
+        [Parameter(Mandatory = $false)][System.Security.SecureString]$EncryptionPassword,
+        [Parameter(Mandatory = $false)][switch]$EncryptReport,
+        [Parameter(Mandatory = $false)][switch]$AutoUnlock,
+        [Parameter(Mandatory = $false)][string]$EncryptedOutputPath,
+        [Parameter(Mandatory = $false)][switch]$DeletePlaintextAfterEncryption
     )
 
+    if (-not $EncryptReport -and (
+            $PSBoundParameters.ContainsKey('EncryptionPassword') -or 
+            $PSBoundParameters.ContainsKey('EncryptedOutputPath') -or 
+            $DeletePlaintextAfterEncryption)) {
+        $EncryptReport = $true
+    }
+
+    if ($AutoUnlock -and -not $EncryptReport) {
+        $EncryptReport = $true
+    }
+
     Write-Verbose "Generating HTML report..."
-    
+
     # Set default output path if not specified (use reports folder)
     if (-not $OutputPath) {
         $reportsFolder = Join-Path (Get-Location) "reports"
@@ -61,6 +97,12 @@ function Export-ScEntraReport {
             New-Item -ItemType Directory -Path $reportsFolder -Force | Out-Null
         }
         $OutputPath = Join-Path $reportsFolder "ScEntra-Report-$(Get-Date -Format 'yyyyMMdd-HHmmss').html"
+    }
+
+    $targetOutputPath = if ($EncryptReport -and $EncryptedOutputPath) { $EncryptedOutputPath } else { $OutputPath }
+    $targetDirectory = Split-Path -Path $targetOutputPath -Parent
+    if ($targetDirectory -and -not (Test-Path $targetDirectory)) {
+        New-Item -ItemType Directory -Path $targetDirectory -Force | Out-Null
     }
 
     $stats = Get-ScEntraReportStatistics -Users $Users -Groups $Groups -ServicePrincipals $ServicePrincipals -AppRegistrations $AppRegistrations -RoleAssignments $RoleAssignments -PIMAssignments $PIMAssignments -EscalationRisks $EscalationRisks
@@ -71,10 +113,32 @@ function Export-ScEntraReport {
     $html = New-ScEntraReportDocument -Stats $stats -RoleDistribution $roleDistribution -RiskDistribution $riskDistribution -EscalationRisks $EscalationRisks -GraphData $GraphData -OrganizationInfo $OrganizationInfo -GeneratedOn $generatedOn
 
     try {
-        $html | Out-File -FilePath $OutputPath -Encoding UTF8
-        Write-Host "Report generated successfully: $OutputPath" -ForegroundColor Green
+        if ($EncryptReport) {
+            if (-not $EncryptionPassword) {
+                $EncryptionPassword = Read-Host "Enter password to protect report" -AsSecureString
+            }
 
-        $jsonPath = $OutputPath -replace '\.html$', '.json'
+            if ($DeletePlaintextAfterEncryption) {
+                Write-Warning "DeletePlaintextAfterEncryption is no longer required. Encrypted HTML is written directly, so the switch is ignored."
+            }
+
+            $docTitle = if ($OrganizationInfo -and $OrganizationInfo.DisplayName) {
+                "$($OrganizationInfo.DisplayName) | ScEntra Report"
+            }
+            else {
+                'ScEntra Encrypted Report'
+            }
+
+            $encryptedHtml = ConvertTo-ScEntraSelfDecryptingHtml -HtmlContent $html -Password $EncryptionPassword -DocumentTitle $docTitle -AutoUnlock:$AutoUnlock
+            [System.IO.File]::WriteAllText($targetOutputPath, $encryptedHtml, [System.Text.Encoding]::UTF8)
+            Write-Host "Encrypted report saved to: $targetOutputPath" -ForegroundColor Cyan
+        }
+        else {
+            $html | Out-File -FilePath $targetOutputPath -Encoding UTF8
+            Write-Host "Report generated successfully: $targetOutputPath" -ForegroundColor Green
+        }
+
+        $jsonPath = [System.IO.Path]::ChangeExtension($targetOutputPath, '.json')
         $jsonData = @{
             GeneratedAt = Get-Date -Format 'o'
             OrganizationInfo = $OrganizationInfo
@@ -93,7 +157,7 @@ function Export-ScEntraReport {
         $jsonData | ConvertTo-Json -Depth 10 | Out-File -FilePath $jsonPath -Encoding UTF8
         Write-Host "JSON data exported to: $jsonPath" -ForegroundColor Green
 
-        return $OutputPath
+        return $targetOutputPath
     }
     catch {
         Write-Error "Error generating report: $_"

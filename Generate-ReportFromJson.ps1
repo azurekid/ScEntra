@@ -11,6 +11,23 @@
     
 .PARAMETER RedactPII
     Redact personally identifiable information (names, UPNs, emails, etc.) from the report
+
+.PARAMETER EncryptReport
+    Wrap the regenerated HTML in a password-protected, self-decrypting HTML shell that uses AES-256
+    in the browser.
+
+.PARAMETER EncryptionPassword
+    Optional secure string password to use for encryption; prompted if omitted when encrypting
+
+.PARAMETER EncryptedOutputPath
+    Optional destination path for the encrypted HTML wrapper (defaults to the OutputPath value)
+
+.PARAMETER DeletePlaintextAfterEncryption
+    Legacy compatibility switch. No plaintext file is produced when EncryptReport is specified.
+
+.PARAMETER AutoUnlock
+    Embed the supplied password into the HTML shell so the browser decrypts automatically
+    without prompting while keeping the on-disk payload encrypted.
     
 .EXAMPLE
     ./Generate-ReportFromJson.ps1 -JsonPath "./ScEntra-Report-20251120-110942.json"
@@ -23,8 +40,29 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$JsonPath,
     [Parameter(Mandatory = $false)]
-    [switch]$RedactPII
+    [switch]$RedactPII,
+    [Parameter(Mandatory = $false)]
+    [switch]$EncryptReport,
+    [Parameter(Mandatory = $false)]
+    [switch]$AutoUnlock,
+    [Parameter(Mandatory = $false)]
+    [System.Security.SecureString]$EncryptionPassword,
+    [Parameter(Mandatory = $false)]
+    [string]$EncryptedOutputPath,
+    [Parameter(Mandatory = $false)]
+    [switch]$DeletePlaintextAfterEncryption
 )
+
+if (-not $EncryptReport -and (
+        $PSBoundParameters.ContainsKey('EncryptionPassword') -or 
+        $PSBoundParameters.ContainsKey('EncryptedOutputPath') -or 
+        $DeletePlaintextAfterEncryption)) {
+    $EncryptReport = $true
+}
+
+if ($AutoUnlock -and -not $EncryptReport) {
+    $EncryptReport = $true
+}
 
 # Import the module and shared helpers
 Import-Module ./ScEntra.psd1 -Force
@@ -121,6 +159,11 @@ if ($jsonData.OrganizationInfo) {
     }
 }
 
+# Prompt for password if encryption requested without supplied credentials
+if ($EncryptReport -and -not $EncryptionPassword) {
+    $EncryptionPassword = Read-Host "Enter password to protect regenerated report" -AsSecureString
+}
+
 # Call the export function with the data from JSON
 $reportPath = Export-ScEntraReport `
     -Users $jsonData.Users `
@@ -132,7 +175,12 @@ $reportPath = Export-ScEntraReport `
     -EscalationRisks $filteredRisks `
     -GraphData $graphData `
     -OrganizationInfo $orgInfo `
-    -OutputPath $outputPath
+    -OutputPath $outputPath `
+    -EncryptReport:$EncryptReport `
+    -EncryptionPassword $EncryptionPassword `
+    -AutoUnlock:$AutoUnlock `
+    -EncryptedOutputPath $EncryptedOutputPath `
+    -DeletePlaintextAfterEncryption:$DeletePlaintextAfterEncryption
 
 if ($reportPath) {
     Write-Host "`n✓ Report regenerated successfully!" -ForegroundColor Green
