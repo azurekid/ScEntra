@@ -91,48 +91,51 @@ function Invoke-ScEntraAnalysis {
 "@ -ForegroundColor Cyan
     }
 
-    function Get-ScEntraEncryptionOptions {
+    function Get-AnalysisReportOptions {
         param(
-            [string]$ContextDescription = "this report"
+            [string]$ContextDescription = "analysis"
         )
 
         $options = @{}
-        $shouldEncrypt = $false
 
-        $globalEncrypt = $EncryptReport -or $EncryptionPassword -or $DeletePlaintextAfterEncryption -or $EncryptedOutputPath
+        Write-Host "`n🔧 $ContextDescription Options:" -ForegroundColor Yellow
+        Write-Host "  [1] Standard Analysis/Report" -ForegroundColor White
+        Write-Host "  [2] Redacted Analysis/Report (removes PII)" -ForegroundColor White
+        Write-Host "  [3] Encrypted Report (password protected)" -ForegroundColor White
+        Write-Host "  [4] Redacted + Encrypted Report" -ForegroundColor White
+        Write-Host "  [5] Back to Main Menu" -ForegroundColor White
+        Write-Host ""
 
-        if ($globalEncrypt) {
-            $shouldEncrypt = $true
-        }
-        else {
-            $response = (Read-Host "Encrypt $ContextDescription? (Y/N)").Trim()
-            if ($response -match '^[Yy]') {
-                $shouldEncrypt = $true
+        $choice = Read-Host "Select option (1-5)"
+
+        switch ($choice) {
+            "1" {
+                # Standard - no options
+                return $options
+            }
+            "2" {
+                $options['RedactPII'] = $true
+                return $options
+            }
+            "3" {
+                $encryptOptions = Get-ScEntraEncryptionOptions -ContextDescription $ContextDescription
+                $options += $encryptOptions
+                return $options
+            }
+            "4" {
+                $options['RedactPII'] = $true
+                $encryptOptions = Get-ScEntraEncryptionOptions -ContextDescription $ContextDescription
+                $options += $encryptOptions
+                return $options
+            }
+            "5" {
+                return $null  # Back to main menu
+            }
+            default {
+                Write-Host "`n✗ Invalid option. Please select 1-5." -ForegroundColor Red
+                return Get-AnalysisReportOptions -ContextDescription $ContextDescription
             }
         }
-
-        if (-not $shouldEncrypt) {
-            return $options
-        }
-
-        $options['EncryptReport'] = $true
-
-        if ($AutoUnlock) {
-            $options['AutoUnlock'] = $true
-        }
-
-        if ($PSBoundParameters.ContainsKey('EncryptedOutputPath') -and $EncryptedOutputPath) {
-            $options['EncryptedOutputPath'] = $EncryptedOutputPath
-        }
-
-        if ($PSBoundParameters.ContainsKey('EncryptionPassword') -and $EncryptionPassword) {
-            $options['EncryptionPassword'] = $EncryptionPassword
-        }
-        else {
-            $options['EncryptionPassword'] = Read-Host "Enter password to protect $ContextDescription" -AsSecureString
-        }
-
-        return $options
     }
 
     function Show-ReportMenu {
@@ -198,6 +201,25 @@ function Invoke-ScEntraAnalysis {
 
     # Display logo initially
     Show-ScEntraLogo
+
+    # Show connection status
+    try {
+        if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
+            Write-Host "✗ Not connected to Microsoft Graph" -ForegroundColor Red
+        }
+        else {
+            Write-Host "✓ Connected to Microsoft Graph" -ForegroundColor Green
+            $tokenInfo = Get-GraphTokenScopeInfo
+            if ($tokenInfo) {
+                $accountType = if ($tokenInfo.IsServicePrincipal) { 'Service Principal' } else { 'User' }
+                $account = $tokenInfo.Account
+                Write-Host "  Account Type: $accountType" -ForegroundColor Gray
+                Write-Host "  Account: $account" -ForegroundColor Gray
+            }
+        }
+    } catch {
+        Write-Host "✗ Not connected to Microsoft Graph" -ForegroundColor Red
+    }
 
     # Create reports folder if it doesn't exist
     $reportsFolder = Join-Path (Get-Location) "reports"
@@ -557,7 +579,7 @@ function Invoke-ScEntraAnalysis {
         Write-Host "  [1] Run Full Analysis" -ForegroundColor White
         Write-Host "  [2] Connect to Microsoft Graph" -ForegroundColor White
         Write-Host "  [3] Connect with Current Context" -ForegroundColor White
-        Write-Host "  [4] Report Options" -ForegroundColor White
+        Write-Host "  [4] Generate Report from JSON" -ForegroundColor White
         Write-Host "  [5] Check Current Connection" -ForegroundColor White
         Write-Host "  [6] Open Latest Report" -ForegroundColor White
         Write-Host "  [7] Exit" -ForegroundColor White
@@ -567,12 +589,10 @@ function Invoke-ScEntraAnalysis {
 
         switch ($choice) {
             "1" {
-                $analysisOptions = @{
-                    RedactPII = $false
-                    OutputSuffix = ''
-                }
+                $options = Get-AnalysisReportOptions -ContextDescription "Full Analysis"
+                if ($options -eq $null) { continue }
                 Write-Host "`n▶ Starting Full Analysis..." -ForegroundColor Cyan
-                Invoke-ScEntraFullAnalysis @analysisOptions `
+                Invoke-ScEntraFullAnalysis @options `
                     -EncryptReport:$EncryptReport `
                     -EncryptionPassword $EncryptionPassword `
                     -EncryptedOutputPath $EncryptedOutputPath `
@@ -614,7 +634,21 @@ function Invoke-ScEntraAnalysis {
                 continue
             }
             "4" {
-                Show-ReportMenu
+                $options = Get-AnalysisReportOptions -ContextDescription "Report Generation"
+                if ($options -eq $null) { continue }
+                Write-Host "`n▶ Generating Report from JSON..." -ForegroundColor Cyan
+                $jsonPath = Read-Host "Enter path to JSON file"
+                if (Test-Path $jsonPath) {
+                    $scriptBlock = {
+                        param($jsonPath, $options)
+                        & "$PSScriptRoot\..\Generate-ReportFromJson.ps1" -JsonPath $jsonPath @options
+                    }
+                    & $scriptBlock $jsonPath $options
+                } else {
+                    Write-Host "✗ File not found: $jsonPath" -ForegroundColor Red
+                }
+                Write-Host "`nPress any key to continue..." -ForegroundColor Gray
+                $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
                 Clear-Host
                 Show-ScEntraLogo
                 continue
