@@ -673,7 +673,7 @@ function New-ScEntraGraphSection {
                     stabilization: { enabled: true, iterations: 400, updateInterval: 20 }
                 },
                 interaction: {
-                    hover: true,
+                    hover: false,
                     tooltipDelay: 100,
                     zoomView: true,
                     dragView: true,
@@ -1707,8 +1707,6 @@ function New-ScEntraGraphSection {
                         return n && !n.hidden;
                     });
 
-                    detangleConnectedNodes(nodeId);
-                    
                     // Center on the clicked node and fit to screen
                     if (nodesToFit.length > 1) {
                         // Fit to show the selected node and related nodes
