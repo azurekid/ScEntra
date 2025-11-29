@@ -1536,102 +1536,117 @@ function New-ScEntraGraphSection {
             }
 
             function detangleVisibleNodes() {
-                if (!selectedNodeId) {
+                if (selectedNodes.size === 0) {
                     return;
                 }
                 
                 stopGentleMotion();
                 
                 const allNodes = nodes.get();
-                const visibleNodes = allNodes.filter(node => !node.hidden && node.id !== selectedNodeId);
+                const allEdges = edges.get();
+                const selectedIds = Array.from(selectedNodes);
+                const lastSelectedId = selectedIds[selectedIds.length - 1];
                 
-                const selectedNode = nodes.get(selectedNodeId);
-                if (selectedNode && selectedNode.type === 'role' && selectedNode.label === 'Application Administrator') {
-                    visibleNodes = visibleNodes.filter(node => privilegedApps.has(node.id));
-                }
+                // Get direct neighbors of the last selected node
+                const neighborIds = network.getConnectedNodes(lastSelectedId) || [];
                 
-                if (visibleNodes.length === 0) {
-                    return;
-                }
+                // Visible nodes: selected nodes + neighbors of last selected
+                const visibleNodeIds = new Set([...selectedIds, ...neighborIds]);
                 
-                const positions = network.getPositions([selectedNodeId]);
-                const centerPosition = positions[selectedNodeId];
+                // Get positions
+                const positions = network.getPositions([lastSelectedId]);
+                const centerPosition = positions[lastSelectedId];
                 if (!centerPosition) {
                     return;
                 }
                 
-                // Calculate target positions in circular organic arrangement using phyllotaxis
-                const targets = {};
-                const placedNodes = new Set([selectedNodeId]);
+                // Position selected nodes horizontally (breadcrumb)
+                const selectedPositions = {};
+                const spacing = 200;
+                const startX = centerPosition.x - (selectedIds.length - 1) * spacing / 2;
+                selectedIds.forEach((id, index) => {
+                    selectedPositions[id] = { x: startX + index * spacing, y: centerPosition.y };
+                });
                 
-                // Arrange all visible nodes in phyllotaxis pattern around the center
-                const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-                const baseOrbit = 300;
-                const orbitStep = 100;
-                const minDistance = 200;
-                const noise = () => (Math.random() - 0.5) * 45;
-                
-                visibleNodes.forEach((node, index) => {
-                    const typeModifier = (() => {
-                        switch (node.type) {
-                            case 'role':
-                                return 1.25;
-                            case 'servicePrincipal':
-                            case 'application':
-                                return 1.15;
-                            case 'group':
-                                return 1.05;
-                            default:
-                                return 1;
-                        }
-                    })();
-                    
-                    const localDegree = (network.getConnectedEdges(node.id) || []).length;
-                    const degreeModifier = 1 + Math.min(localDegree, 8) * 0.04;
-                    const spiralIndex = index + 1;
-                    const angle = goldenAngle * spiralIndex;
-                    const organicRadius = baseOrbit + Math.sqrt(spiralIndex) * orbitStep * typeModifier * degreeModifier;
-                    const finalRadius = Math.max(minDistance, organicRadius + noise());
-                    
-                    targets[node.id] = {
-                        x: centerPosition.x + Math.cos(angle) * finalRadius,
-                        y: centerPosition.y + Math.sin(angle) * finalRadius
+                // Position neighbors in a circle with varying radii, shifted opposite to selected nodes
+                const neighborPositions = {};
+                const baseRadius = 500;
+                const radiusVariation = 100;
+                const yOffset = 300; // Shift neighbors down, opposite to horizontal selected nodes
+                const xOffset = 400; // Shift neighbors to the right
+                neighborIds.forEach((neighborId, index) => {
+                    const angle = (index / Math.max(1, neighborIds.length)) * Math.PI * 2;
+                    const radius = baseRadius + Math.sin(index * 0.5) * radiusVariation;
+                    neighborPositions[neighborId] = {
+                        x: centerPosition.x + xOffset + Math.cos(angle) * radius,
+                        y: centerPosition.y + yOffset + Math.sin(angle) * radius
                     };
                 });
                 
-                // Animate positions over 2 seconds
-                const duration = 2000; // ms
-                const startTime = Date.now();
-                const startPositions = {};
-                visibleNodes.forEach(node => {
-                    startPositions[node.id] = { x: node.x, y: node.y };
-                });
-                
-                const animate = () => {
-                    const elapsed = Date.now() - startTime;
-                    const progress = Math.min(elapsed / duration, 1);
-                    const easedProgress = 1 - Math.pow(1 - progress, 3); // ease out cubic
-                    
-                    const updates = [];
-                    visibleNodes.forEach(node => {
-                        const start = startPositions[node.id];
-                        const target = targets[node.id];
-                        const x = start.x + (target.x - start.x) * easedProgress;
-                        const y = start.y + (target.y - start.y) * easedProgress;
-                        updates.push({ id: node.id, x: x, y: y });
-                    });
-                    
-                    nodes.update(updates);
-                    
-                    if (progress < 1) {
-                        requestAnimationFrame(animate);
+                // Update node positions and visibility
+                const nodeUpdates = [];
+                allNodes.forEach(node => {
+                    if (selectedIds.includes(node.id)) {
+                        nodeUpdates.push({
+                            id: node.id,
+                            x: selectedPositions[node.id].x,
+                            y: selectedPositions[node.id].y,
+                            hidden: false
+                        });
+                    } else if (neighborIds.includes(node.id)) {
+                        nodeUpdates.push({
+                            id: node.id,
+                            x: neighborPositions[node.id].x,
+                            y: neighborPositions[node.id].y,
+                            hidden: false
+                        });
                     } else {
-                        // Fit after animation
-                        network.fit();
+                        nodeUpdates.push({ id: node.id, hidden: true });
                     }
-                };
+                });
+                nodes.update(nodeUpdates);
                 
-                requestAnimationFrame(animate);
+                // Update edge visibility: only breadcrumb edges and edges to neighbors
+                const edgeUpdates = [];
+                allEdges.forEach(edge => {
+                    const fromSelected = selectedIds.includes(edge.from);
+                    const toSelected = selectedIds.includes(edge.to);
+                    const fromNeighbor = neighborIds.includes(edge.from);
+                    const toNeighbor = neighborIds.includes(edge.to);
+                    
+                    const connectsSelected = fromSelected && toSelected;
+                    const connectsToNeighbor = (fromSelected && toNeighbor && edge.from === lastSelectedId) ||
+                                               (toSelected && fromNeighbor && edge.to === lastSelectedId);
+                    
+                    if (connectsSelected || connectsToNeighbor) {
+                        const baseStyle = originalEdgeStyles[edge.id] || {};
+                        let color = cloneColor(baseStyle.color) || { color: '#999', opacity: 0.7 };
+                        let width = baseStyle.width ?? edge.width ?? 2;
+                        
+                        if (connectsSelected) {
+                            // Yellow for breadcrumb edges
+                            color = { color: '#FFD700', opacity: 1 };
+                            width = 6;
+                        }
+                        
+                        edgeUpdates.push({
+                            id: edge.id,
+                            color: color,
+                            width: width,
+                            hidden: false,
+                            dashes: baseStyle.dashes ?? edge.dashes ?? false
+                        });
+                    } else {
+                        edgeUpdates.push({ id: edge.id, hidden: true });
+                    }
+                });
+                edges.update(edgeUpdates);
+                
+                // Fit the view
+                network.fit({
+                    nodes: Array.from(visibleNodeIds),
+                    animation: { duration: 500 }
+                });
             }
 
             network.on('click', function(params) {
