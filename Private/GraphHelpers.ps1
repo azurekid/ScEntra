@@ -380,7 +380,7 @@ function Get-ScEntraEnvironmentSize {
         throw "Not authenticated. Please run Connect-ScEntraGraph first."
     }
 
-    Write-Host "🔍 Determining environment size by querying Microsoft Graph API..." -ForegroundColor Cyan
+    Write-Host "Determining environment size by querying Microsoft Graph API..." -ForegroundColor Cyan
 
     $counts = @{
         Users = 0
@@ -402,7 +402,6 @@ function Get-ScEntraEnvironmentSize {
             Write-Verbose "Querying $resourceType count..."
             $count = Invoke-GraphRequest -Uri $endpoints[$resourceType] -Method GET
             $counts[$resourceType] = [int]$count
-            Write-Host "   $resourceType`: $($counts[$resourceType].ToString('N0'))" -ForegroundColor Gray
         }
         catch {
             Write-Warning "Could not query $resourceType count: $_"
@@ -411,8 +410,6 @@ function Get-ScEntraEnvironmentSize {
             return Get-ScEntraEnvironmentConfig -UserCount 100000 -GroupCount 50000 -ServicePrincipalCount 50000 -AppRegistrationCount 100000
         }
     }
-
-    Write-Host "✅ Environment detected: $($counts.Users.ToString('N0')) users, $($counts.Groups.ToString('N0')) groups, $($counts.ServicePrincipals.ToString('N0')) SPs, $($counts.Applications.ToString('N0')) apps" -ForegroundColor Green
 
     return Get-ScEntraEnvironmentConfig -UserCount $counts.Users -GroupCount $counts.Groups -ServicePrincipalCount $counts.ServicePrincipals -AppRegistrationCount $counts.Applications
 }

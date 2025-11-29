@@ -135,6 +135,67 @@ function Invoke-ScEntraAnalysis {
         return $options
     }
 
+    function Show-ReportMenu {
+        do {
+            Write-Host "`n📄 Report Options:" -ForegroundColor Yellow
+            Write-Host "  [1] Export Report (from existing JSON)" -ForegroundColor White
+            Write-Host "  [2] Export Redacted Report (from existing JSON)" -ForegroundColor White
+            Write-Host "  [3] Run Full Analysis (Redacted)" -ForegroundColor White
+            Write-Host "  [4] Back to Main Menu" -ForegroundColor White
+            Write-Host ""
+
+            $choice = Read-Host "Select option (1-4)"
+
+            switch ($choice) {
+                "1" {
+                    Write-Host "`n▶ Exporting Report from JSON..." -ForegroundColor Cyan
+                    $jsonPath = Read-Host "Enter path to JSON file"
+                    if (Test-Path $jsonPath) {
+                        & "$PSScriptRoot\..\Generate-ReportFromJson.ps1" -JsonPath $jsonPath
+                    } else {
+                        Write-Host "✗ File not found: $jsonPath" -ForegroundColor Red
+                    }
+                    Write-Host "`nPress any key to continue..." -ForegroundColor Gray
+                    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+                }
+                "2" {
+                    Write-Host "`n▶ Exporting Redacted Report from JSON..." -ForegroundColor Cyan
+                    $jsonPath = Read-Host "Enter path to JSON file"
+                    if (Test-Path $jsonPath) {
+                        & "$PSScriptRoot\..\Generate-ReportFromJson.ps1" -JsonPath $jsonPath -RedactPII
+                    } else {
+                        Write-Host "✗ File not found: $jsonPath" -ForegroundColor Red
+                    }
+                    Write-Host "`nPress any key to continue..." -ForegroundColor Gray
+                    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+                }
+                "3" {
+                    Write-Host "`n▶ Starting Full Analysis with Redaction..." -ForegroundColor Cyan
+                    $analysisOptions = @{
+                        RedactPII = $true
+                        OutputSuffix = '-redacted'
+                    }
+                    Invoke-ScEntraFullAnalysis @analysisOptions `
+                        -EncryptReport:$EncryptReport `
+                        -EncryptionPassword $EncryptionPassword `
+                        -EncryptedOutputPath $EncryptedOutputPath `
+                        -DeletePlaintextAfterEncryption:$DeletePlaintextAfterEncryption `
+                        -AutoUnlock:$AutoUnlock
+                    Write-Host "`nPress any key to continue..." -ForegroundColor Gray
+                    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+                }
+                "4" {
+                    return
+                }
+                default {
+                    Write-Host "`n✗ Invalid option. Please select 1-4." -ForegroundColor Red
+                    Write-Host "`nPress any key to continue..." -ForegroundColor Gray
+                    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+                }
+            }
+        } while ($true)
+    }
+
     # Display logo initially
     Show-ScEntraLogo
 
@@ -227,7 +288,7 @@ function Invoke-ScEntraAnalysis {
         Write-Host "[1/5] 🔍 Determining Environment Size..." -ForegroundColor Cyan
         try {
             $envConfig = Get-ScEntraEnvironmentSize
-            Write-Host "  📊 Environment Profile: $($envConfig.Profile)" -ForegroundColor Green
+            Write-Host "  Environment Profile: $($envConfig.Profile)" -ForegroundColor Green
             Write-Host "    Batch Throttle: $($envConfig.BatchThrottleLimit) | Delay: $($envConfig.DelayBetweenBatches)ms | Max Batch Size: $($envConfig.MaxBatchSize)" -ForegroundColor Gray
         }
         catch {
@@ -236,7 +297,7 @@ function Invoke-ScEntraAnalysis {
             $envConfig = Get-ScEntraEnvironmentConfig -UserCount 100000 -GroupCount 50000 -ServicePrincipalCount 50000 -AppRegistrationCount 100000
         }
 
-        Write-Host "[2/5] 📋 Collecting Inventory..." -ForegroundColor Cyan
+        Write-Host "[2/5] Collecting Inventory..." -ForegroundColor Cyan
 
         $organizationInfo = Get-ScEntraOrganizationInfo
         if ($organizationInfo) {
@@ -249,7 +310,7 @@ function Invoke-ScEntraAnalysis {
             }
         }
 
-        Write-Host "  📊 Starting parallel inventory collection..." -ForegroundColor Yellow
+        Write-Host "  Starting parallel inventory collection..." -ForegroundColor Yellow
 
         $parallelResults = 0..2 | ForEach-Object -Parallel {
             $index = $_
@@ -308,7 +369,7 @@ function Invoke-ScEntraAnalysis {
             Write-Error "Failed to retrieve app registrations: $($appResult.Error)"
         }
 
-        Write-Host "[3/5] 👑 Enumerating Role Assignments..." -ForegroundColor Cyan
+        Write-Host "[3/5] Enumerating Role Assignments..." -ForegroundColor Cyan
         try {
             $roleAssignments = Get-ScEntraRoleAssignments
         }
@@ -317,7 +378,7 @@ function Invoke-ScEntraAnalysis {
             $roleAssignments = @()
         }
 
-        Write-Host "[3/5] 🔐 Checking PIM Assignments..." -ForegroundColor Cyan
+        Write-Host "[3/5] Checking PIM Assignments..." -ForegroundColor Cyan
         try {
             $pimAssignments = Get-ScEntraPIMAssignments
         }
@@ -336,7 +397,7 @@ function Invoke-ScEntraAnalysis {
             Write-Warning "No role assignments were returned. Escalation map may be empty."
         }
 
-        Write-Host "[4/5] 🔍 Analyzing Escalation Paths..." -ForegroundColor Cyan
+        Write-Host "[4/5] Analyzing Escalation Paths..." -ForegroundColor Cyan
         try {
             $escalationResult = Get-ScEntraEscalationPaths `
                 -Users $users `
@@ -365,7 +426,7 @@ function Invoke-ScEntraAnalysis {
         $escalationRisks = $escalationResult.Risks
         $graphData = $escalationResult.GraphData
 
-        Write-Host "`n[5/5] 📊 Generating Report..." -ForegroundColor Cyan
+        Write-Host "`n[5/5] Generating Report..." -ForegroundColor Cyan
 
         if ($RedactPII) {
             Write-Host "Redacting PII data..." -ForegroundColor Yellow
@@ -429,8 +490,8 @@ function Invoke-ScEntraAnalysis {
             Set-Variable -Scope 1 -Name $pair.Key -Value $pair.Value
         }
 
-        Write-Host "`n" + ("=" * 60) -ForegroundColor Green
-        Write-Host "✓ Analysis Complete!" -ForegroundColor Green
+        Write-Host "`n" ("=" * 60) -ForegroundColor Green
+        Write-Host " Analysis Complete!" -ForegroundColor Green
         Write-Host ("=" * 60) -ForegroundColor Green
         Write-Host "`nSummary:"
         Write-Host "  • Users: $($users.Count)" -ForegroundColor White
@@ -474,20 +535,35 @@ function Invoke-ScEntraAnalysis {
     $graphData = $null
     $reportPath = $null
 
+    # Display logo initially
+    Show-ScEntraLogo
+
+    # Show connection status
+    try {
+        $context = Get-MgContext
+        if ($context) {
+            $accountType = if ($context.AppName) { "Service Principal" } else { "User" }
+            $account = if ($context.AppName) { $context.AppName } else { $context.Account }
+            Write-Host "✓ Connected to Microsoft Graph as $accountType`: $account" -ForegroundColor Green
+        } else {
+            Write-Host "✗ Not connected to Microsoft Graph" -ForegroundColor Red
+        }
+    } catch {
+        Write-Host "✗ Not connected to Microsoft Graph" -ForegroundColor Red
+    }
+
     do {
         Write-Host "`n📋 Available Functions:" -ForegroundColor Yellow
         Write-Host "  [1] Run Full Analysis" -ForegroundColor White
         Write-Host "  [2] Connect to Microsoft Graph" -ForegroundColor White
         Write-Host "  [3] Connect with Current Context" -ForegroundColor White
-        Write-Host "  [4] Export Report (from existing JSON)" -ForegroundColor White
+        Write-Host "  [4] Report Options" -ForegroundColor White
         Write-Host "  [5] Check Current Connection" -ForegroundColor White
         Write-Host "  [6] Open Latest Report" -ForegroundColor White
-        Write-Host "  [7] Export Redacted Report (from existing JSON)" -ForegroundColor White
-        Write-Host "  [8] Run Full Analysis (Redacted)" -ForegroundColor White
-        Write-Host "  [9] Exit" -ForegroundColor White
+        Write-Host "  [7] Exit" -ForegroundColor White
         Write-Host ""
 
-        $choice = Read-Host "Select option (1-9)"
+        $choice = Read-Host "Select option (1-7)"
 
         switch ($choice) {
             "1" {
@@ -538,17 +614,7 @@ function Invoke-ScEntraAnalysis {
                 continue
             }
             "4" {
-                Write-Host "`n▶ Export Report from JSON..." -ForegroundColor Cyan
-                $jsonPath = Read-Host "Enter path to JSON file"
-                if (Test-Path $jsonPath) {
-                    & "$PSScriptRoot\..\Generate-ReportFromJson.ps1" -JsonPath $jsonPath
-                    Write-Host "✓ Report generated successfully" -ForegroundColor Green
-                }
-                else {
-                    Write-Error "JSON file not found: $jsonPath"
-                }
-                Write-Host "`nPress any key to return to menu..." -ForegroundColor Gray
-                $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+                Show-ReportMenu
                 Clear-Host
                 Show-ScEntraLogo
                 continue
