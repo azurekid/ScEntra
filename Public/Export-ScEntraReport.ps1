@@ -77,10 +77,15 @@ function Export-ScEntraReport {
         [Parameter(Mandatory = $false)][switch]$DeletePlaintextAfterEncryption
     )
 
-    if (-not $EncryptReport -and (
-            $PSBoundParameters.ContainsKey('EncryptionPassword') -or 
-            $PSBoundParameters.ContainsKey('EncryptedOutputPath') -or 
-            $DeletePlaintextAfterEncryption)) {
+    if (-not $EncryptReport -and $EncryptionPassword) {
+        $EncryptReport = $true
+    }
+
+    if (-not $EncryptReport -and $EncryptedOutputPath) {
+        $EncryptReport = $true
+    }
+
+    if (-not $EncryptReport -and $DeletePlaintextAfterEncryption) {
         $EncryptReport = $true
     }
 

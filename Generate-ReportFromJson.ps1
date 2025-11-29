@@ -25,15 +25,11 @@
 .PARAMETER DeletePlaintextAfterEncryption
     Legacy compatibility switch. No plaintext file is produced when EncryptReport is specified.
 
-.PARAMETER AutoUnlock
-    Embed the supplied password into the HTML shell so the browser decrypts automatically
-    without prompting while keeping the on-disk payload encrypted.
+.PARAMETER NoEncryption
+    Explicitly disable encryption for the report, ensuring no password is required.
     
 .EXAMPLE
-    ./Generate-ReportFromJson.ps1 -JsonPath "./ScEntra-Report-20251120-110942.json"
-    
-.EXAMPLE
-    ./Generate-ReportFromJson.ps1 -JsonPath "./ScEntra-Report-20251120-110942.json" -RedactPII
+    ./Generate-ReportFromJson.ps1 -JsonPath "./ScEntra-Report-20251120-110942.json" -NoEncryption
 #>
 
 param(
@@ -44,6 +40,8 @@ param(
     [Parameter(Mandatory = $false)]
     [switch]$EncryptReport,
     [Parameter(Mandatory = $false)]
+    [switch]$NoEncryption,
+    [Parameter(Mandatory = $false)]
     [switch]$AutoUnlock,
     [Parameter(Mandatory = $false)]
     [System.Security.SecureString]$EncryptionPassword,
@@ -53,14 +51,23 @@ param(
     [switch]$DeletePlaintextAfterEncryption
 )
 
-if (-not $EncryptReport -and (
-        $PSBoundParameters.ContainsKey('EncryptionPassword') -or 
-        $PSBoundParameters.ContainsKey('EncryptedOutputPath') -or 
-        $DeletePlaintextAfterEncryption)) {
+if ($NoEncryption) {
+    $EncryptReport = $false
+}
+
+if (-not $EncryptReport -and $EncryptionPassword) {
     $EncryptReport = $true
 }
 
-if ($AutoUnlock -and -not $EncryptReport) {
+if (-not $EncryptReport -and $EncryptedOutputPath) {
+    $EncryptReport = $true
+}
+
+if (-not $EncryptReport -and $DeletePlaintextAfterEncryption) {
+    $EncryptReport = $true
+}
+
+if (-not $EncryptReport -and $AutoUnlock -and -not $NoEncryption) {
     $EncryptReport = $true
 }
 

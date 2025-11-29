@@ -99,7 +99,7 @@ function Invoke-ScEntraAnalysis {
         $options = @{}
         $shouldEncrypt = $false
 
-        $globalEncrypt = $EncryptReport -or $PSBoundParameters.ContainsKey('EncryptionPassword') -or $DeletePlaintextAfterEncryption -or $PSBoundParameters.ContainsKey('EncryptedOutputPath')
+        $globalEncrypt = $EncryptReport -or $EncryptionPassword -or $DeletePlaintextAfterEncryption -or $EncryptedOutputPath
 
         if ($globalEncrypt) {
             $shouldEncrypt = $true
