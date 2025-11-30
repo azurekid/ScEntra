@@ -96,6 +96,9 @@ function Invoke-ScEntraAnalysis {
             [string]$ContextDescription = "analysis"
         )
 
+        Clear-Host
+        Show-ScEntraLogo
+
         $options = @{}
 
         Write-Host "`n🔧 $ContextDescription Options:" -ForegroundColor Yellow
@@ -129,10 +132,13 @@ function Invoke-ScEntraAnalysis {
                 return $options
             }
             "5" {
+                Clear-Host
+                Show-ScEntraLogo
                 return $null  # Back to main menu
             }
             default {
                 Write-Host "`n✗ Invalid option. Please select 1-5." -ForegroundColor Red
+                Start-Sleep -Seconds 1
                 return Get-AnalysisReportOptions -ContextDescription $ContextDescription
             }
         }
