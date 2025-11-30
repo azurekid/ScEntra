@@ -906,15 +906,19 @@ function New-ScEntraGraphSection {
 
             const selectedNodes = new Set();
 
-            function getConnectedNodes(nodeId, visited = new Set(), excludeOtherPrincipals = false, originNodeId = null, originNodeType = null, depth = 0, excludePIMGroupsForGroupAdmin = false) {
+            function getConnectedNodes(nodeId, visited = new Set(), excludeOtherPrincipals = false, originNodeId = null, originNodeType = null, depth = 0, pimGroupFilter = null) {
                 if (visited.has(nodeId)) return visited;
                 visited.add(nodeId);
                 if (originNodeId === null) {
                     originNodeId = nodeId;
                     const originNode = nodes.get(nodeId);
                     originNodeType = originNode ? originNode.type : null;
-                    if (originNode && originNode.type === 'role' && originNode.label === 'Group Administrator') {
-                        excludePIMGroupsForGroupAdmin = true;
+                    if (originNode && originNode.type === 'role') {
+                        if (originNode.label === 'Group Administrator') {
+                            pimGroupFilter = 'exclude'; // Group Admins cannot manage PIM groups
+                        } else if (originNode.label === 'Privileged Role Administrator') {
+                            pimGroupFilter = 'only'; // Privileged Role Admins manage only PIM groups
+                        }
                     }
                 }
 
@@ -939,8 +943,14 @@ function New-ScEntraGraphSection {
                         let shouldSkip = false;
                         let shouldRecurse = true;
 
-                        if (excludePIMGroupsForGroupAdmin && connNode.shape === 'diamond') {
-                            shouldSkip = true;
+                        // Handle PIM group filtering based on role
+                        if (pimGroupFilter && connNode.type === 'group') {
+                            const isPIMGroup = connNode.shape === 'diamond';
+                            if (pimGroupFilter === 'exclude' && isPIMGroup) {
+                                shouldSkip = true; // Group Administrator cannot manage PIM groups
+                            } else if (pimGroupFilter === 'only' && !isPIMGroup) {
+                                shouldSkip = true; // Privileged Role Administrator manages only PIM groups
+                            }
                         }
 
                         if (excludeOtherPrincipals) {
@@ -992,7 +1002,7 @@ function New-ScEntraGraphSection {
                         if (!shouldSkip) {
                             visited.add(connId);
                             if (shouldRecurse) {
-                                getConnectedNodes(connId, visited, excludeOtherPrincipals, originNodeId, originNodeType, depth + 1, excludePIMGroupsForGroupAdmin);
+                                getConnectedNodes(connId, visited, excludeOtherPrincipals, originNodeId, originNodeType, depth + 1, pimGroupFilter);
                             }
                         }
                     }
@@ -1013,8 +1023,15 @@ function New-ScEntraGraphSection {
                 selectedNodes.forEach(selectedId => {
                     const selectedNode = nodes.get(selectedId);
                     const isPrincipalSelected = selectedNode && (selectedNode.type === 'user' || selectedNode.type === 'group');
-                    const excludePIM = selectedNode && selectedNode.type === 'role' && selectedNode.label === 'Group Administrator';
-                    const pathNodes = getConnectedNodes(selectedId, new Set(), isPrincipalSelected, null, null, 0, excludePIM);
+                    let pimFilter = null;
+                    if (selectedNode && selectedNode.type === 'role') {
+                        if (selectedNode.label === 'Group Administrator') {
+                            pimFilter = 'exclude';
+                        } else if (selectedNode.label === 'Privileged Role Administrator') {
+                            pimFilter = 'only';
+                        }
+                    }
+                    const pathNodes = getConnectedNodes(selectedId, new Set(), isPrincipalSelected, null, null, 0, pimFilter);
                     pathNodes.forEach(nId => allPathNodes.add(nId));
                     pathNodes.forEach(nId => {
                         const connEdges = network.getConnectedEdges(nId);
