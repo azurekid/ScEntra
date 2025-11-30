@@ -701,39 +701,12 @@ function Invoke-ScEntraAnalysis {
                 continue
             }
             "7" {
-                Write-Host "`n▶ Export Redacted Report (from existing JSON)..." -ForegroundColor Cyan
-                $jsonPath = Read-Host "Enter path to JSON file"
-                if (Test-Path $jsonPath) {
-                    & "$PSScriptRoot\..\Generate-ReportFromJson.ps1" -JsonPath $jsonPath -RedactPII
-                    Write-Host "✓ Redacted report generated successfully" -ForegroundColor Green
-                }
-                else {
-                    Write-Error "JSON file not found: $jsonPath"
-                }
-                Write-Host "`nPress any key to return to menu..." -ForegroundColor Gray
-                $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-                Clear-Host
-                Show-ScEntraLogo
-                continue
-            }
-            "8" {
-                Write-Host "`n▶ Starting Full Analysis (Redacted)..." -ForegroundColor Cyan
-                Write-Host ""
-                Invoke-ScEntraFullAnalysis -RedactPII -OutputSuffix '-redacted' `
-                    -EncryptReport:$EncryptReport `
-                    -EncryptionPassword $EncryptionPassword `
-                    -EncryptedOutputPath $EncryptedOutputPath `
-                    -DeletePlaintextAfterEncryption:$DeletePlaintextAfterEncryption `
-                    -AutoUnlock:$AutoUnlock
-                continue
-            }
-            "9" {
                 Write-Host "`nExiting ScEntra..." -ForegroundColor Gray
                 $continue = $false
                 return
             }
             default {
-                Write-Host "`n✗ Invalid option. Please select 1-9." -ForegroundColor Yellow
+                Write-Host "`n✗ Invalid option. Please select 1-7." -ForegroundColor Yellow
                 Start-Sleep -Seconds 1
                 Clear-Host
                 Show-ScEntraLogo

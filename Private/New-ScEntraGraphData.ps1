@@ -1344,42 +1344,168 @@ function New-ScEntraGraphData {
         }
     }
 
-    # Add "can_compromise" edges from User Administrator to non-admin users
-    # User Administrator can reset passwords and modify users who have NO role assignments
+    # Add "can_compromise" edges from User Administrator to users they can manage
+    # Per Microsoft documentation, User Administrator CAN reset passwords for users with these roles:
+    #   - Groups Administrator, Guest Inviter, Helpdesk Administrator, User Administrator, and users with no admin role
+    # User Administrator CANNOT reset passwords for users with most other admin roles
+    # Reference: https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/privileged-roles-permissions
     $userAdminRoleId = "role-User Administrator"
     if ($nodeIndex.ContainsKey($userAdminRoleId)) {
-        # Build a set of user IDs who have ANY role (direct, PIM, or via role-assignable group)
-        $allRoleAssignments = @($RoleAssignments; $PIMAssignments)
-        $usersWithRoles = [System.Collections.Generic.HashSet[string]]::new()
+        # Define roles that User Administrator CANNOT reset passwords for
+        # This list includes all privileged admin roles except the ones User Admin can manage
+        $protectedFromUserAdmin = @(
+            'Application Administrator',
+            'Application Developer',
+            'Attack Payload Author',
+            'Attack Simulation Administrator',
+            'Attribute Assignment Administrator',
+            'Attribute Assignment Reader',
+            'Attribute Definition Administrator',
+            'Attribute Definition Reader',
+            'Authentication Administrator',
+            'Authentication Extensibility Administrator',
+            'Authentication Policy Administrator',
+            'Azure DevOps Administrator',
+            'Azure Information Protection Administrator',
+            'B2C IEF Keyset Administrator',
+            'B2C IEF Policy Administrator',
+            'Billing Administrator',
+            'Cloud App Security Administrator',
+            'Cloud Application Administrator',
+            'Cloud Device Administrator',
+            'Compliance Administrator',
+            'Compliance Data Administrator',
+            'Conditional Access Administrator',
+            'Customer LockBox Access Approver',
+            'Desktop Analytics Administrator',
+            'Directory Readers',
+            'Directory Synchronization Accounts',
+            'Directory Writers',
+            'Domain Name Administrator',
+            'Dynamics 365 Administrator',
+            'Edge Administrator',
+            'Exchange Administrator',
+            'Exchange Recipient Administrator',
+            'External ID User Flow Administrator',
+            'External ID User Flow Attribute Administrator',
+            'External Identity Provider Administrator',
+            'Fabric Administrator',
+            'Global Administrator',
+            'Global Reader',
+            'Hybrid Identity Administrator',
+            'Identity Governance Administrator',
+            'Insights Administrator',
+            'Intune Administrator',
+            'Kaizala Administrator',
+            'Knowledge Administrator',
+            'Knowledge Manager',
+            'License Administrator',
+            'Lifecycle Workflows Administrator',
+            'Message Center Privacy Reader',
+            'Message Center Reader',
+            'Network Administrator',
+            'Office Apps Administrator',
+            'Organizational Messages Approver',
+            'Organizational Messages Writer',
+            'Password Administrator',
+            'Permissions Management Administrator',
+            'Power Platform Administrator',
+            'Printer Administrator',
+            'Printer Technician',
+            'Privileged Authentication Administrator',
+            'Privileged Role Administrator',
+            'Reports Reader',
+            'Search Administrator',
+            'Search Editor',
+            'Security Administrator',
+            'Security Operator',
+            'Security Reader',
+            'Service Support Administrator',
+            'SharePoint Administrator',
+            'Skype for Business Administrator',
+            'Teams Administrator',
+            'Teams Communications Administrator',
+            'Teams Communications Support Engineer',
+            'Teams Communications Support Specialist',
+            'Teams Devices Administrator',
+            'Usage Summary Reports Reader',
+            'User Experience Success Manager',
+            'Virtual Visits Administrator',
+            'Windows 365 Administrator',
+            'Windows Update Deployment Administrator',
+            'Yammer Administrator'
+        )
         
-        foreach ($assignment in $allRoleAssignments) {
-            if ($assignment.MemberId) {
-                [void]$usersWithRoles.Add($assignment.MemberId)
+        # Build a set of user IDs who have PROTECTED roles (direct, PIM, or via role-assignable groups)
+        # NOTE: We include PIM-Eligible roles because resetting their password allows privilege escalation:
+        #       reset password → impersonate user → activate PIM role → gain privileged access
+        $usersWithProtectedRoles = [System.Collections.Generic.HashSet[string]]::new()
+        
+        # Check direct role assignments
+        foreach ($assignment in $RoleAssignments) {
+            if ($assignment.RoleName -and $protectedFromUserAdmin -contains $assignment.RoleName) {
+                if ($assignment.MemberId) {
+                    [void]$usersWithProtectedRoles.Add($assignment.MemberId)
+                }
             }
         }
         
-        # Also add users who are members of role-assignable groups that have role assignments
+        # Check PIM assignments (both eligible and active)
+        foreach ($assignment in $PIMAssignments) {
+            if ($assignment.RoleName -and $protectedFromUserAdmin -contains $assignment.RoleName) {
+                if ($assignment.PrincipalId) {
+                    [void]$usersWithProtectedRoles.Add($assignment.PrincipalId)
+                }
+            }
+        }
+        
+        # Check users who are members of role-assignable groups with protected role assignments
         foreach ($group in $Groups) {
-            if ($group.isRoleAssignable) {
-                # Check if this group has any role assignments
-                $groupHasRole = $allRoleAssignments | Where-Object { $_.MemberId -eq $group.id }
-                if ($groupHasRole -and $group.members) {
+            if ($group.isRoleAssignable -and $group.members) {
+                # Check if this group has any protected role assignments
+                $groupHasProtectedRole = $false
+                
+                # Check direct assignments
+                foreach ($assignment in $RoleAssignments) {
+                    if ($assignment.MemberId -eq $group.id -and 
+                        $assignment.RoleName -and 
+                        $protectedFromUserAdmin -contains $assignment.RoleName) {
+                        $groupHasProtectedRole = $true
+                        break
+                    }
+                }
+                
+                # Check PIM assignments if no direct protected role found
+                if (-not $groupHasProtectedRole) {
+                    foreach ($assignment in $PIMAssignments) {
+                        if ($assignment.PrincipalId -eq $group.id -and 
+                            $assignment.RoleName -and 
+                            $protectedFromUserAdmin -contains $assignment.RoleName) {
+                            $groupHasProtectedRole = $true
+                            break
+                        }
+                    }
+                }
+                
+                # Add all members of this group to protected users list
+                if ($groupHasProtectedRole) {
                     foreach ($memberId in $group.members) {
-                        [void]$usersWithRoles.Add($memberId)
+                        [void]$usersWithProtectedRoles.Add($memberId)
                     }
                 }
             }
         }
         
-        # Create can_compromise edges to users without roles
+        # Create can_compromise edges to users WITHOUT protected roles
+        # This includes: users with no roles, users with Groups Admin, Guest Inviter, Helpdesk Admin, or other User Admins
         foreach ($user in $Users) {
-            if (-not $usersWithRoles.Contains($user.id) -and $nodeIndex.ContainsKey($user.id)) {
+            if (-not $usersWithProtectedRoles.Contains($user.id) -and $nodeIndex.ContainsKey($user.id)) {
                 $null = $edges.Add(@{
                     from = $userAdminRoleId
                     to = $user.id
                     type = 'can_compromise'
                     label = 'Can Reset Password'
-                    description = 'User Administrator can reset passwords and modify non-admin users'
+                    description = 'User Administrator can reset passwords for non-privileged users and limited admin roles (Groups Admin, Guest Inviter, Helpdesk Admin)'
                 })
             }
         }
@@ -1392,15 +1518,10 @@ function New-ScEntraGraphData {
     $groupsAdminRoleId = "role-Groups Administrator"
     if ($nodeIndex.ContainsKey($groupsAdminRoleId)) {
         foreach ($group in $Groups) {
-            # Check if group is PIM-enabled
+            # Check if group is PIM-enabled (property set directly on the group object)
             $isPIMEnabled = $false
-            if ($group.members) {
-                foreach ($member in $group.members) {
-                    if ($member -is [hashtable] -and $member.ContainsKey('isPIMEligible') -and $member.isPIMEligible) {
-                        $isPIMEnabled = $true
-                        break
-                    }
-                }
+            if ($group.PSObject.Properties.Name -contains 'isPIMEnabled') {
+                $isPIMEnabled = $group.isPIMEnabled -eq $true
             }
             
             # Groups Admin can only manage non-role-assignable, non-PIM groups

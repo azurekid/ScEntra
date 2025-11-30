@@ -945,7 +945,7 @@ function New-ScEntraGraphSection {
 
                         // Handle PIM group filtering based on role
                         if (pimGroupFilter && connNode.type === 'group') {
-                            const isPIMGroup = connNode.shape === 'diamond';
+                            const isPIMGroup = connNode.isPIMEnabled === true;
                             if (pimGroupFilter === 'exclude' && isPIMGroup) {
                                 shouldSkip = true; // Group Administrator cannot manage PIM groups
                             } else if (pimGroupFilter === 'only' && !isPIMGroup) {
@@ -1670,8 +1670,21 @@ function New-ScEntraGraphSection {
                 // Fit the view
                 network.fit({
                     nodes: Array.from(visibleNodeIds),
-                    animation: { duration: 500 }
+                    animation: { 
+                        duration: 500,
+                        easingFunction: 'easeInOutQuad'
+                    }
                 });
+                
+                // Ensure zoom remains enabled after fit animation
+                setTimeout(() => {
+                    network.setOptions({
+                        interaction: {
+                            zoomView: true,
+                            dragView: true
+                        }
+                    });
+                }, 550);
             }
 
             network.on('click', function(params) {
