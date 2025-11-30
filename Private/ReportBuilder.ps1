@@ -906,13 +906,16 @@ function New-ScEntraGraphSection {
 
             const selectedNodes = new Set();
 
-            function getConnectedNodes(nodeId, visited = new Set(), excludeOtherPrincipals = false, originNodeId = null, originNodeType = null, depth = 0) {
+            function getConnectedNodes(nodeId, visited = new Set(), excludeOtherPrincipals = false, originNodeId = null, originNodeType = null, depth = 0, excludePIMGroupsForGroupAdmin = false) {
                 if (visited.has(nodeId)) return visited;
                 visited.add(nodeId);
                 if (originNodeId === null) {
                     originNodeId = nodeId;
                     const originNode = nodes.get(nodeId);
                     originNodeType = originNode ? originNode.type : null;
+                    if (originNode && originNode.type === 'role' && originNode.label === 'Group Administrator') {
+                        excludePIMGroupsForGroupAdmin = true;
+                    }
                 }
 
                 const currentNode = nodes.get(nodeId);
@@ -935,6 +938,10 @@ function New-ScEntraGraphSection {
 
                         let shouldSkip = false;
                         let shouldRecurse = true;
+
+                        if (excludePIMGroupsForGroupAdmin && connNode.shape === 'diamond') {
+                            shouldSkip = true;
+                        }
 
                         if (excludeOtherPrincipals) {
                             if (connNode.type === 'user' && connId !== originNodeId) {
@@ -985,7 +992,7 @@ function New-ScEntraGraphSection {
                         if (!shouldSkip) {
                             visited.add(connId);
                             if (shouldRecurse) {
-                                getConnectedNodes(connId, visited, excludeOtherPrincipals, originNodeId, originNodeType, depth + 1);
+                                getConnectedNodes(connId, visited, excludeOtherPrincipals, originNodeId, originNodeType, depth + 1, excludePIMGroupsForGroupAdmin);
                             }
                         }
                     }
@@ -1006,7 +1013,8 @@ function New-ScEntraGraphSection {
                 selectedNodes.forEach(selectedId => {
                     const selectedNode = nodes.get(selectedId);
                     const isPrincipalSelected = selectedNode && (selectedNode.type === 'user' || selectedNode.type === 'group');
-                    const pathNodes = getConnectedNodes(selectedId, new Set(), isPrincipalSelected);
+                    const excludePIM = selectedNode && selectedNode.type === 'role' && selectedNode.label === 'Group Administrator';
+                    const pathNodes = getConnectedNodes(selectedId, new Set(), isPrincipalSelected, null, null, 0, excludePIM);
                     pathNodes.forEach(nId => allPathNodes.add(nId));
                     pathNodes.forEach(nId => {
                         const connEdges = network.getConnectedEdges(nId);
