@@ -121,14 +121,26 @@ function Invoke-ScEntraAnalysis {
                 return $options
             }
             "3" {
-                $encryptOptions = Get-ScEntraEncryptionOptions -ContextDescription $ContextDescription
-                $options += $encryptOptions
+                # Encrypted Report options
+                $encryptOptions = Get-EncryptionOptions -ContextDescription $ContextDescription
+                if ($null -eq $encryptOptions) {
+                    return Get-AnalysisReportOptions -ContextDescription $ContextDescription
+                }
+                foreach ($key in $encryptOptions.Keys) {
+                    $options[$key] = $encryptOptions[$key]
+                }
                 return $options
             }
             "4" {
+                # Redacted + Encrypted Report
                 $options['RedactPII'] = $true
-                $encryptOptions = Get-ScEntraEncryptionOptions -ContextDescription $ContextDescription
-                $options += $encryptOptions
+                $encryptOptions = Get-EncryptionOptions -ContextDescription $ContextDescription
+                if ($null -eq $encryptOptions) {
+                    return Get-AnalysisReportOptions -ContextDescription $ContextDescription
+                }
+                foreach ($key in $encryptOptions.Keys) {
+                    $options[$key] = $encryptOptions[$key]
+                }
                 return $options
             }
             "5" {
@@ -142,6 +154,39 @@ function Invoke-ScEntraAnalysis {
                 return Get-AnalysisReportOptions -ContextDescription $ContextDescription
             }
         }
+    }
+
+    function Get-EncryptionOptions {
+        param(
+            [string]$ContextDescription = "encryption"
+        )
+
+        $encryptOptions = @{}
+        $encryptOptions['EncryptReport'] = $true
+        
+        Write-Host "`n🔐 Encryption Options:" -ForegroundColor Cyan
+        $password = Read-Host "Enter encryption password" -AsSecureString
+        $confirmPassword = Read-Host "Confirm encryption password" -AsSecureString
+        
+        # Use cross-platform helper function for password comparison
+        $pwd1 = Convert-ScEntraSecureStringToText -SecureString $password
+        $pwd2 = Convert-ScEntraSecureStringToText -SecureString $confirmPassword
+        
+        if ($pwd1 -ne $pwd2) {
+            Write-Host "✗ Passwords do not match!" -ForegroundColor Red
+            Start-Sleep -Seconds 2
+            return $null
+        }
+        
+        $encryptOptions['EncryptionPassword'] = $password
+        
+        Write-Host "`nAuto-unlock (embed password for automatic decryption)? [y/N]" -ForegroundColor Yellow
+        $autoUnlock = Read-Host
+        if ($autoUnlock -eq 'y' -or $autoUnlock -eq 'Y') {
+            $encryptOptions['AutoUnlock'] = $true
+        }
+        
+        return $encryptOptions
     }
 
     function Show-ReportMenu {
@@ -598,12 +643,7 @@ function Invoke-ScEntraAnalysis {
                 $options = Get-AnalysisReportOptions -ContextDescription "Full Analysis"
                 if ($options -eq $null) { continue }
                 Write-Host "`n▶ Starting Full Analysis..." -ForegroundColor Cyan
-                Invoke-ScEntraFullAnalysis @options `
-                    -EncryptReport:$EncryptReport `
-                    -EncryptionPassword $EncryptionPassword `
-                    -EncryptedOutputPath $EncryptedOutputPath `
-                    -DeletePlaintextAfterEncryption:$DeletePlaintextAfterEncryption `
-                    -AutoUnlock:$AutoUnlock
+                Invoke-ScEntraFullAnalysis @options
                 continue
             }
             "2" {

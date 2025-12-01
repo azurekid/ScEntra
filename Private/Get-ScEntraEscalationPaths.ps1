@@ -292,6 +292,7 @@ function Get-ScEntraEscalationPaths {
                             # Mark as PIM-eligible regardless of active status
                             # Users who activated their eligibility appear in both /members and eligibilitySchedules
                             $existingMember | Add-Member -NotePropertyName 'isPIMEligible' -NotePropertyValue $true -Force
+                            $existingMember | Add-Member -NotePropertyName 'isPIMActive' -NotePropertyValue $isActive -Force
                             $groupName = ($Groups | Where-Object { $_.id -eq $groupId } | Select-Object -First 1).displayName
                             $status = if ($isActive) { "(Active)" } else { "" }
                             Write-Host "  PIM Eligible $status`: $($existingMember.displayName) → $groupName" -ForegroundColor Magenta
@@ -306,6 +307,7 @@ function Get-ScEntraEscalationPaths {
                                     userPrincipalName = $fullUser.userPrincipalName
                                     '@odata.type'     = '#microsoft.graph.user'
                                     isPIMEligible     = $true
+                                    isPIMActive       = $false
                                 }
                                 $groupMemberships[$groupId] += $memberObject
                                 $groupName = ($Groups | Where-Object { $_.id -eq $groupId } | Select-Object -First 1).displayName

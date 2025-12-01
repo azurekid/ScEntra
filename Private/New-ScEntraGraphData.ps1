@@ -787,7 +787,24 @@ function New-ScEntraGraphData {
                 } else {
                     $false
                 }
-                $membershipLabel = if ($isPIMEligible) { 'PIM Eligible' } else { 'Member' }
+                
+                # Check if this is an active PIM member
+                $isPIMActive = if ($member -is [hashtable]) {
+                    $member.ContainsKey('isPIMActive') -and $member.isPIMActive
+                } elseif ($member.PSObject.Properties.Name -contains 'isPIMActive') {
+                    $member.isPIMActive
+                } else {
+                    $false
+                }
+                
+                # Determine membership label: Active PIM takes precedence
+                $membershipLabel = if ($isPIMActive) { 
+                    'PIM Active' 
+                } elseif ($isPIMEligible) { 
+                    'PIM Eligible' 
+                } else { 
+                    'Member' 
+                }
                 
                 switch ($memberType) {
                     'user' {
@@ -800,6 +817,7 @@ function New-ScEntraGraphData {
                                 type = 'member_of'
                                 label = $membershipLabel
                                 isPIM = $isPIMEligible
+                                isPIMActive = $isPIMActive
                             })
                         }
                     }
@@ -1607,6 +1625,7 @@ function New-ScEntraGraphData {
         
         # Copy any additional properties
         if ($edge.ContainsKey('isPIM')) { $newEdge.isPIM = $edge.isPIM }
+        if ($edge.ContainsKey('isPIMActive')) { $newEdge.isPIMActive = $edge.isPIMActive }
         
         $newEdge
     }

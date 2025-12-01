@@ -615,7 +615,7 @@ function New-ScEntraGraphSection {
                         color: edgeColor,
                         opacity: edge.type === 'has_role' ? 0.9 : 0.7
                     },
-                    dashes: edge.isPIM || edge.type === 'owns' || edge.type === 'can_manage',
+                    dashes: (edge.isPIM && !edge.isPIMActive) || edge.type === 'owns' || edge.type === 'can_manage',
                     width: edgeWidth,
                     font: {
                         size: 10,
@@ -627,6 +627,7 @@ function New-ScEntraGraphSection {
                     length: resolvedLength,
                     edgeType: edge.type,
                     isPIM: edge.isPIM || false,
+                    isPIMActive: edge.isPIMActive || false,
                     isEscalationPath: edge.isEscalationPath || false
                 };
             }));

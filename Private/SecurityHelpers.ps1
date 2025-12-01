@@ -220,83 +220,111 @@ function ConvertTo-ScEntraSelfDecryptingHtml {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>$safeTitle</title>
     <style>
-        :root {
-            color-scheme: dark light;
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            line-height: 1.5;
-        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { height: 100%; }
         body {
-            margin: 0;
-            min-height: 100vh;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             display: flex;
             align-items: center;
             justify-content: center;
-            background: radial-gradient(circle at top, #0f172a 0%, #020617 45%, #000 100%);
-            color: #e2e8f0;
+            color: #fff;
         }
-        [data-role="shell"] {
-            width: min(420px, 92vw);
-            padding: 2.5rem;
-            background: rgba(15, 23, 42, 0.85);
-            border-radius: 18px;
-            box-shadow: 0 20px 55px rgba(0, 0, 0, 0.45);
-            border: 1px solid rgba(226, 232, 240, 0.08);
-            backdrop-filter: blur(10px);
+        #$($domIds.shell) {
+            width: min(460px, 94vw);
+            padding: 3rem 2.5rem;
+            background: rgba(255, 255, 255, 0.12);
+            border-radius: 20px;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
         }
         h1 {
-            margin-top: 0;
-            font-size: 1.45rem;
-            letter-spacing: 0.04em;
+            font-size: 1.75rem;
+            margin-bottom: 0.5rem;
+            font-weight: 700;
+            text-align: center;
         }
-        [data-role="message"] {
-            margin-top: 0.75rem;
+        #$($domIds.message) {
+            text-align: center;
+            margin: 1.25rem 0;
+            font-size: 0.95rem;
+            opacity: 0.92;
             min-height: 1.4rem;
+        }
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
             font-size: 0.9rem;
-            color: #cbd5f5;
-        }
-        [data-role="error"] {
-            margin-top: 0.75rem;
-            min-height: 1.4rem;
-            font-size: 0.85rem;
-            color: #fca5a5;
+            opacity: 0.95;
         }
         input[type="password"] {
             width: 100%;
-            padding: 0.85rem 1rem;
-            border-radius: 10px;
-            border: 1px solid rgba(148, 163, 184, 0.6);
-            background: rgba(15, 23, 42, 0.6);
-            color: inherit;
+            padding: 1rem;
+            border-radius: 12px;
+            border: 2px solid rgba(255, 255, 255, 0.25);
+            background: rgba(255, 255, 255, 0.15);
+            color: #fff;
             font-size: 1rem;
+            transition: all 0.2s;
+        }
+        input[type="password"]:focus {
+            outline: none;
+            border-color: rgba(255, 255, 255, 0.5);
+            background: rgba(255, 255, 255, 0.22);
+        }
+        input[type="password"]::placeholder {
+            color: rgba(255, 255, 255, 0.5);
         }
         button {
-            margin-top: 1.2rem;
+            margin-top: 1.5rem;
             width: 100%;
-            padding: 0.9rem 1rem;
-            border-radius: 999px;
+            padding: 1.1rem;
+            border-radius: 12px;
             border: none;
             font-weight: 600;
-            letter-spacing: 0.03em;
-            text-transform: uppercase;
+            font-size: 1rem;
+            letter-spacing: 0.5px;
             cursor: pointer;
-            background: linear-gradient(120deg, #38bdf8, #6366f1, #a855f7);
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
             color: #fff;
+            transition: transform 0.2s, box-shadow 0.2s;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+        }
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 25px rgba(0, 0, 0, 0.3);
         }
         button:disabled {
-            opacity: 0.65;
-            cursor: progress;
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        #$($domIds.error) {
+            margin-top: 1rem;
+            text-align: center;
+            font-size: 0.9rem;
+            color: #ffebee;
+            background: rgba(244, 67, 54, 0.3);
+            padding: 0.8rem;
+            border-radius: 8px;
+            min-height: 1.4rem;
+            display: none;
+        }
+        #$($domIds.error):not(:empty) {
+            display: block;
         }
     </style>
 </head>
 <body>
-    <main id="$($domIds.shell)" data-role="shell">
-        <h1>Unlock Report</h1>
-        <p id="$($domIds.message)" data-role="message"></p>
-        <form id="$($domIds.form)" data-role="form">
-            <label for="$($domIds.password)">Password</label>
-            <input id="$($domIds.password)" data-role="secret" type="password" name="password" autocomplete="current-password" required />
-            <button id="$($domIds.button)" data-role="submit" type="submit">Unlock</button>
-            <div id="$($domIds.error)" data-role="error" role="status" aria-live="polite"></div>
+    <main id="$($domIds.shell)">
+        <h1>🔒 Encrypted Report</h1>
+        <p id="$($domIds.message)"></p>
+        <form id="$($domIds.form)">
+            <label for="$($domIds.password)">Enter Password</label>
+            <input id="$($domIds.password)" type="password" placeholder="Password" autocomplete="current-password" required />
+            <button id="$($domIds.button)" type="submit">Unlock Report</button>
+            <div id="$($domIds.error)" role="alert" aria-live="polite"></div>
         </form>
     </main>
     <script>
@@ -383,7 +411,7 @@ function ConvertTo-ScEntraSelfDecryptingHtml {
             const setBusy = (active) => {
                 submit.disabled = active;
                 secret.disabled = active;
-                message.textContent = active ? text.busy : text.prompt;
+                submit.textContent = active ? text.busy : 'Unlock Report';
             };
 
             const showPrompt = () => {
