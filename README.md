@@ -29,18 +29,29 @@ ScEntra is a PowerShell security analysis tool for Microsoft Entra ID (formerly 
   - Azure CLI (`az login`)
   - Direct access token with required scopes
 
-### Required Microsoft Graph Scopes
+### Required Microsoft Graph Permissions
 
-```
-User.Read.All
-Group.Read.All
-GroupMember.Read.All
-Application.Read.All
-ServicePrincipalEndpoint.Read.All
-RoleManagement.Read.Directory
-PrivilegedAccess.Read.AzureAD
-Directory.Read.All
-```
+ScEntra requires **9 specific Microsoft Graph Application permissions** (read-only). These permissions have been validated against all Graph API calls in the codebase:
+
+| Permission | Purpose | Graph Endpoints Used |
+|------------|---------|---------------------|
+| `User.Read.All` | Read user accounts and profile information | `/users` |
+| `Group.Read.All` | Read group properties and ownership | `/groups`, `/groups/{id}/owners` |
+| `GroupMember.Read.All` | Read group membership details | `/groups/{id}/members`, `/groups/{id}/transitiveMembers` |
+| `Application.Read.All` | Read applications and service principals | `/applications`, `/servicePrincipals`, `/servicePrincipals/{id}/appRoleAssignments` |
+| `DelegatedPermissionGrant.Read.All` | Read OAuth2 permission grants | `/servicePrincipals/{id}/oauth2PermissionGrants` |
+| `RoleManagement.Read.Directory` | Read directory role assignments | `/directoryRoles`, `/directoryRoles/{id}/members`, `/roleManagement/directory/roleDefinitions` |
+| `RoleEligibilitySchedule.Read.Directory` | Read PIM eligible assignments | `/roleManagement/directory/roleEligibilitySchedules`, `/roleManagement/directory/roleEligibilityScheduleInstances` |
+| `RoleAssignmentSchedule.Read.Directory` | Read PIM active assignments | `/roleManagement/directory/roleAssignmentSchedules` |
+| `PrivilegedAccess.Read.AzureADGroup` | Read PIM for Groups | `/identityGovernance/privilegedAccess/group/eligibilityScheduleInstances`, `/identityGovernance/privilegedAccess/group/assignmentScheduleInstances` |
+
+**Security Notes:**
+- All permissions are **read-only** (no write/modify capabilities)
+- Follows Microsoft's **least-privilege principle**
+- Each permission is mapped to specific Graph API endpoints
+- Alternative: `Directory.Read.All` grants all of the above but is broader than necessary
+
+**For delegated (user) permissions**, use the equivalent delegated scopes with `.Read.All` suffix when authenticating interactively.
 
 ## 🚀 Quick Start
 
@@ -60,7 +71,7 @@ Import-Module ./ScEntra.psd1
 ### 3. Connect to Microsoft Graph
 
 ```powershell
-# Option 1: Using device code flow (recommended)
+# Option 1: Interactive authentication (recommended for manual analysis)
 Connect-AzAccount
 Connect-ScEntraGraph -UseDeviceCode
 
@@ -71,7 +82,34 @@ Connect-ScEntraGraph
 # Option 3: Using Azure PowerShell
 Connect-AzAccount
 Connect-ScEntraGraph
+
+# Option 4: Service Principal (recommended for automation)
+# See "Automated/Production Setup" section below
 ```
+
+### 3a. Automated/Production Setup (Service Principal)
+
+For automated scans or production environments, create a dedicated service principal:
+
+```powershell
+# Create service principal with required permissions
+$sp = New-ScEntraServicePrincipal -DisplayName "ScEntra Production"
+
+# Save the client secret (shown only once!)
+$sp | Format-List
+
+# Grant admin consent via Azure Portal
+# Navigate to: Azure AD > App registrations > ScEntra Production > API permissions
+# Click: "Grant admin consent for [Your Tenant]"
+
+# Use the service principal
+$clientSecret = ConvertTo-SecureString -String '<client_secret>' -AsPlainText -Force
+$credential = New-Object PSCredential('<application_id>', $clientSecret)
+Connect-ScEntraGraph -TenantId '<tenant_id>' -Credential $credential
+```
+
+📖 **For detailed setup instructions, certificate authentication, and security best practices**, see:  
+[SERVICE-PRINCIPAL-SETUP.md](SERVICE-PRINCIPAL-SETUP.md)
 
 ### 4. Run Analysis
 

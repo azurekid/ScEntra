@@ -42,6 +42,7 @@
         'Get-ScEntraEnvironmentConfig'
         'New-ScEntraGraphData'
         'Export-ScEntraReport'
+        'New-ScEntraServicePrincipal'
     )
 
     # Cmdlets to export from this module

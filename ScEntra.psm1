@@ -30,4 +30,5 @@ Export-ModuleMember -Function @(
     'Get-ScEntraEnvironmentSize'
     'Get-ScEntraEnvironmentConfig'
     'Export-ScEntraReport'
+    'New-ScEntraServicePrincipal'
 )
