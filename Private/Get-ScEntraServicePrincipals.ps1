@@ -25,7 +25,7 @@ function Get-ScEntraServicePrincipals {
     }
 
     $select = "id,displayName,appId,servicePrincipalType,accountEnabled,createdDateTime,appOwnerOrganizationId,appRoles,oauth2PermissionScopes"
-    $uri = "$script:GraphBaseUrl/servicePrincipals?`$top=999&`$select=$select"
+    $uri = "$script:GraphBaseUrl/servicePrincipals?`$top=100&`$select=$select"
 
     try {
         $servicePrincipals = Get-AllGraphItems -Uri $uri -ProgressActivity "Retrieving service principals from Entra ID"
@@ -39,39 +39,12 @@ function Get-ScEntraServicePrincipals {
         $appRoleAssignmentsByPrincipal = @{}
         $delegatedGrantsByClient = @{}
 
-        $batchSpSize = 50
+        $batchSpSize = 100
         $assignmentSelect = "id,principalId,principalDisplayName,principalType,resourceId,resourceDisplayName,appRoleId"
         $grantSelect = "id,clientId,resourceId,scope,consentType,principalId"
 
         $spCount = 0
         $totalSPs = [math]::Max(1, $servicePrincipals.Count)
-
-        $collectPagedItems = {
-            param($response)
-
-            $items = @()
-            if (-not $response) { return $items }
-            if ($response.body -and $response.body.value) {
-                $items += $response.body.value
-            }
-
-            $nextLink = if ($response.body) { $response.body.'@odata.nextLink' } else { $null }
-            while ($nextLink) {
-                try {
-                    $nextResult = Invoke-GraphRequest -Uri $nextLink -Method GET -ErrorAction Stop
-                    if ($nextResult.value) {
-                        $items += $nextResult.value
-                    }
-                    $nextLink = $nextResult.'@odata.nextLink'
-                }
-                catch {
-                    Write-Verbose "Failed to fetch additional page for batch response $($response.id): $_"
-                    break
-                }
-            }
-
-            return $items
-        }
 
         for ($i = 0; $i -lt $servicePrincipals.Count; $i += $batchSpSize) {
             $endIndex = [Math]::Min($i + $batchSpSize - 1, $servicePrincipals.Count - 1)
@@ -82,12 +55,12 @@ function Get-ScEntraServicePrincipals {
                 $batchRequests += @{
                     id     = "approles-$($sp.id)"
                     method = 'GET'
-                    url    = "/servicePrincipals/$($sp.id)/appRoleAssignments?`$select=$assignmentSelect"
+                    url    = "/servicePrincipals/$($sp.id)/appRoleAssignments?`$select=$assignmentSelect&`$top=999"
                 }
                 $batchRequests += @{
                     id     = "oauth2-$($sp.id)"
                     method = 'GET'
-                    url    = "/servicePrincipals/$($sp.id)/oauth2PermissionGrants?`$select=$grantSelect"
+                    url    = "/servicePrincipals/$($sp.id)/oauth2PermissionGrants?`$select=$grantSelect&`$top=999"
                 }
             }
 
@@ -111,7 +84,7 @@ function Get-ScEntraServicePrincipals {
                 if ($batchResponses.ContainsKey($appRoleResponseKey)) {
                     $appRoleResponse = $batchResponses[$appRoleResponseKey]
                     if ($appRoleResponse.status -eq 200) {
-                        $appRoleAssignments = & $collectPagedItems $appRoleResponse
+                        $appRoleAssignments = Get-PagedBatchItems -Response $appRoleResponse
                     }
                     else {
                         Write-Verbose "App role assignment batch request for $($sp.displayName) failed with status $($appRoleResponse.status)"
@@ -152,7 +125,7 @@ function Get-ScEntraServicePrincipals {
                 if ($batchResponses.ContainsKey($grantResponseKey)) {
                     $grantResponse = $batchResponses[$grantResponseKey]
                     if ($grantResponse.status -eq 200) {
-                        $delegatedAssignments = & $collectPagedItems $grantResponse
+                        $delegatedAssignments = Get-PagedBatchItems -Response $grantResponse
                     }
                     else {
                         Write-Verbose "OAuth2 grant batch request for $($sp.displayName) failed with status $($grantResponse.status)"

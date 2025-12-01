@@ -38,8 +38,11 @@
         'Get-ScEntraRoleAssignments'
         'Get-ScEntraPIMAssignments'
         'Get-ScEntraEscalationPaths'
+        'Get-ScEntraEnvironmentSize'
+        'Get-ScEntraEnvironmentConfig'
         'New-ScEntraGraphData'
         'Export-ScEntraReport'
+        'New-ScEntraServicePrincipal'
     )
 
     # Cmdlets to export from this module

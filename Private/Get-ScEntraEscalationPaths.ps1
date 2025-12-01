@@ -46,7 +46,25 @@ function Get-ScEntraEscalationPaths {
         [array]$ServicePrincipals = @(),
 
         [Parameter(Mandatory = $false)]
-        [array]$AppRegistrations = @()
+        [array]$AppRegistrations = @(),
+
+        [Parameter(Mandatory = $false)]
+        [int]$BatchThrottleLimit = 5,
+
+        [Parameter(Mandatory = $false)]
+        [int]$DelayBetweenBatches = 0,
+
+        [Parameter(Mandatory = $false)]
+        [int]$MaxBatchSize = 20,
+
+        [Parameter(Mandatory = $false)]
+        [bool]$UseParallelEscalation = $true,
+
+        [Parameter(Mandatory = $false)]
+        [int]$EscalationThrottleLimit = 5,
+
+        [Parameter(Mandatory = $false)]
+        [int]$CircuitBreakerThreshold = 20
     )
 
     if (-not (Test-GraphConnection)) {
@@ -60,6 +78,38 @@ function Get-ScEntraEscalationPaths {
     }
 
     Write-Verbose "Analyzing escalation paths..."
+
+    # Circuit breaker for excessive throttling
+    $throttleCount = 0
+    $circuitBreakerTripped = $false
+
+    # Helper function to handle throttling
+    function Test-ThrottlingResponse {
+        param($Response, $RequestDescription)
+        
+        if ($Response.status -eq 429) {
+            $script:throttleCount++
+            Write-Warning "Throttling detected on $RequestDescription (count: $script:throttleCount/$CircuitBreakerThreshold)"
+            
+            if ($script:throttleCount -ge $CircuitBreakerThreshold) {
+                $script:circuitBreakerTripped = $true
+                Write-Error "Circuit breaker tripped: Excessive throttling detected ($script:throttleCount requests throttled). Switching to minimal analysis mode."
+                return $false
+            }
+            
+            # Wait for retry-after header if present
+            if ($Response.headers -and $Response.headers.'retry-after') {
+                $retryAfter = [int]$Response.headers.'retry-after'[0]
+                Write-Verbose "Waiting $retryAfter seconds due to throttling..."
+                Start-Sleep -Seconds $retryAfter
+            }
+            else {
+                Start-Sleep -Seconds 5  # Default backoff
+            }
+            return $true  # Retry
+        }
+        return $false  # No throttling
+    }
 
     $escalationRisks = @()
 
@@ -161,14 +211,34 @@ function Get-ScEntraEscalationPaths {
     $batchResponses = @{}
     if ($batchRequests.Count -gt 0) {
         try {
-            $batchResponses = Invoke-GraphBatchRequest -Requests $batchRequests
+            $batchResponses = Invoke-GraphBatchRequest -Requests $batchRequests -ThrottleLimit $BatchThrottleLimit -DelayBetweenBatches $DelayBetweenBatches -MaxBatchSize $MaxBatchSize
         }
         catch {
-            Write-Warning "Batch request failed, falling back to individual requests: $_"
+            $throttleCount++
+            Write-Warning "Batch request failed (throttle count: $throttleCount/$CircuitBreakerThreshold): $_"
+            
+            if ($throttleCount -ge $CircuitBreakerThreshold) {
+                $circuitBreakerTripped = $true
+                Write-Error "Circuit breaker tripped: Excessive throttling detected. Performing minimal analysis only."
+            }
         }
     }
 
+    # If circuit breaker tripped, return minimal results
+    if ($circuitBreakerTripped) {
+        Write-Warning "Circuit breaker active: Skipping detailed escalation analysis to avoid further throttling."
+        return @(
+            [PSCustomObject]@{
+                RiskType = 'CircuitBreaker'
+                Severity = 'High'
+                Description = 'Analysis was limited due to excessive API throttling. Consider running during off-peak hours or reducing scope.'
+            }
+        )
+    }
+
     foreach ($groupId in $relevantGroupIds) {
+        if (-not $groupId) { continue }
+        
         $membersResponseKey = $batchResponses.Keys | Where-Object { $_ -like "*-members-$groupId" } | Select-Object -First 1
         if ($membersResponseKey) {
             $membersResponse = $batchResponses[$membersResponseKey]
@@ -222,6 +292,7 @@ function Get-ScEntraEscalationPaths {
                             # Mark as PIM-eligible regardless of active status
                             # Users who activated their eligibility appear in both /members and eligibilitySchedules
                             $existingMember | Add-Member -NotePropertyName 'isPIMEligible' -NotePropertyValue $true -Force
+                            $existingMember | Add-Member -NotePropertyName 'isPIMActive' -NotePropertyValue $isActive -Force
                             $groupName = ($Groups | Where-Object { $_.id -eq $groupId } | Select-Object -First 1).displayName
                             $status = if ($isActive) { "(Active)" } else { "" }
                             Write-Host "  PIM Eligible $status`: $($existingMember.displayName) → $groupName" -ForegroundColor Magenta
@@ -236,6 +307,7 @@ function Get-ScEntraEscalationPaths {
                                     userPrincipalName = $fullUser.userPrincipalName
                                     '@odata.type'     = '#microsoft.graph.user'
                                     isPIMEligible     = $true
+                                    isPIMActive       = $false
                                 }
                                 $groupMemberships[$groupId] += $memberObject
                                 $groupName = ($Groups | Where-Object { $_.id -eq $groupId } | Select-Object -First 1).displayName
@@ -273,6 +345,8 @@ function Get-ScEntraEscalationPaths {
     $totalGroups = $roleEnabledGroups.Count
 
     foreach ($groupId in $roleEnabledGroups) {
+        if (-not $groupId) { continue }
+        
         $groupCount++
         if ($totalGroups -gt 0) {
             $percentComplete = [math]::Round(20 + ($groupCount / $totalGroups) * 30)
@@ -312,6 +386,8 @@ function Get-ScEntraEscalationPaths {
     $groupCount = 0
     $totalGroups = $groupsWithRoles.Count
     foreach ($groupId in $groupsWithRoles) {
+        if (-not $groupId) { continue }
+        
         $groupCount++
         if ($totalGroups -gt 0) {
             $percentComplete = [math]::Round(50 + ($groupCount / $totalGroups) * 20)
@@ -381,14 +457,14 @@ function Get-ScEntraEscalationPaths {
         $spBatchRequests += @{
             id     = "$spRequestId-sp-owners-$($sp.id)"
             method = "GET"
-            url    = "/servicePrincipals/$($sp.id)/owners?`$select=id,displayName,userPrincipalName"
+            url    = "/servicePrincipals/$($sp.id)/owners?`$select=id,displayName,userPrincipalName&`$top=999"
         }
         $spRequestId++
 
         $spBatchRequests += @{
             id     = "$spRequestId-sp-approles-$($sp.id)"
             method = "GET"
-            url    = "/servicePrincipals/$($sp.id)/appRoleAssignedTo?`$select=principalId,principalDisplayName,principalType&`$top=100"
+            url    = "/servicePrincipals/$($sp.id)/appRoleAssignedTo?`$select=principalId,principalDisplayName,principalType&`$top=999"
         }
         $spRequestId++
     }
@@ -397,7 +473,7 @@ function Get-ScEntraEscalationPaths {
     if ($spBatchRequests.Count -gt 0) {
         Write-Verbose "Fetching service principal data using batch requests ($($spBatchRequests.Count) requests)"
         try {
-            $spBatchResponses = Invoke-GraphBatchRequest -Requests $spBatchRequests
+            $spBatchResponses = Invoke-GraphBatchRequest -Requests $spBatchRequests -ThrottleLimit $BatchThrottleLimit -DelayBetweenBatches $DelayBetweenBatches -MaxBatchSize $MaxBatchSize
         }
         catch {
             Write-Verbose "SP batch request failed, will use fallback: $_"
@@ -411,18 +487,19 @@ function Get-ScEntraEscalationPaths {
         $ownerResponseKey = $spBatchResponses.Keys | Where-Object { $_ -like "*-sp-owners-$($sp.id)" } | Select-Object -First 1
         if ($ownerResponseKey) {
             $ownerResponse = $spBatchResponses[$ownerResponseKey]
-            if ($ownerResponse -and $ownerResponse.status -eq 200 -and $ownerResponse.body.value) {
-                $spOwners[$sp.id] = $ownerResponse.body.value
-                $ownerCount = $ownerResponse.body.value.Count
+            if ($ownerResponse -and $ownerResponse.status -eq 200) {
+                $owners = Get-PagedBatchItems -Response $ownerResponse
+                $spOwners[$sp.id] = $owners
+                $ownerCount = $owners.Count
             }
         }
         else {
             try {
-                $ownersUri = "$script:GraphBaseUrl/servicePrincipals/$($sp.id)/owners?`$select=id,displayName,userPrincipalName"
-                $owners = Invoke-GraphRequest -Uri $ownersUri -Method GET -ErrorAction SilentlyContinue
-                if ($owners.value) {
-                    $spOwners[$sp.id] = $owners.value
-                    $ownerCount = $owners.value.Count
+                $ownersUri = "$script:GraphBaseUrl/servicePrincipals/$($sp.id)/owners?`$select=id,displayName,userPrincipalName&`$top=999"
+                $owners = Get-AllGraphItems -Uri $ownersUri -Method GET
+                if ($owners) {
+                    $spOwners[$sp.id] = $owners
+                    $ownerCount = $owners.Count
                 }
             }
             catch {
@@ -433,16 +510,17 @@ function Get-ScEntraEscalationPaths {
         $appRoleResponseKey = $spBatchResponses.Keys | Where-Object { $_ -like "*-sp-approles-$($sp.id)" } | Select-Object -First 1
         if ($appRoleResponseKey) {
             $appRoleResponse = $spBatchResponses[$appRoleResponseKey]
-            if ($appRoleResponse -and $appRoleResponse.status -eq 200 -and $appRoleResponse.body.value) {
-                $spAppRoleAssignments[$sp.id] = $appRoleResponse.body.value
+            if ($appRoleResponse -and $appRoleResponse.status -eq 200) {
+                $appRoles = Get-PagedBatchItems -Response $appRoleResponse
+                $spAppRoleAssignments[$sp.id] = $appRoles
             }
         }
         else {
             try {
-                $appRolesUri = "$script:GraphBaseUrl/servicePrincipals/$($sp.id)/appRoleAssignedTo?`$select=principalId,principalDisplayName,principalType&`$top=100"
-                $appRoles = Invoke-GraphRequest -Uri $appRolesUri -Method GET -ErrorAction SilentlyContinue
-                if ($appRoles.value) {
-                    $spAppRoleAssignments[$sp.id] = $appRoles.value
+                $appRolesUri = "$script:GraphBaseUrl/servicePrincipals/$($sp.id)/appRoleAssignedTo?`$select=principalId,principalDisplayName,principalType&`$top=999"
+                $appRoles = Get-AllGraphItems -Uri $appRolesUri -Method GET
+                if ($appRoles) {
+                    $spAppRoleAssignments[$sp.id] = $appRoles
                 }
             }
             catch {
@@ -521,7 +599,7 @@ function Get-ScEntraEscalationPaths {
     if ($appBatchRequests.Count -gt 0) {
         Write-Verbose "Fetching app registration owners using batch requests ($($appBatchRequests.Count) requests)"
         try {
-            $appBatchResponses = Invoke-GraphBatchRequest -Requests $appBatchRequests
+            $appBatchResponses = Invoke-GraphBatchRequest -Requests $appBatchRequests -ThrottleLimit $BatchThrottleLimit -DelayBetweenBatches $DelayBetweenBatches -MaxBatchSize $MaxBatchSize
         }
         catch {
             Write-Verbose "App batch request failed, will use fallback: $_"

@@ -50,11 +50,23 @@ function Connect-ScEntraGraph {
         $clientId = "14d82eec-204b-4c2f-b7e8-296a70dab67e"
         $scopeString = ($Scopes | ForEach-Object { "https://graph.microsoft.com/$_" }) -join " "
         
+        # Get module version for User-Agent
+        $moduleVersion = '1.0.0'
+        try {
+            $module = Get-Module -Name ScEntra -ErrorAction SilentlyContinue
+            if ($module) {
+                $moduleVersion = $module.Version.ToString()
+            }
+        } catch { }
+        
+        $userAgent = "ScEntra/$moduleVersion (PowerShell/$($PSVersionTable.PSVersion))"
+        
         # Request device code
         $deviceCodeRequest = @{
-            Uri     = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/devicecode"
-            Method  = 'POST'
-            Body    = @{
+            Uri        = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/devicecode"
+            Method     = 'POST'
+            UserAgent  = $userAgent
+            Body       = @{
                 client_id = $clientId
                 scope     = $scopeString
             }
@@ -68,8 +80,9 @@ function Connect-ScEntraGraph {
             
             # Poll for token
             $tokenRequest = @{
-                Uri    = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
-                Method = 'POST'
+                Uri       = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
+                Method    = 'POST'
+                UserAgent = $userAgent
             }
             
             $interval = if ($deviceCodeResponse.interval) { $deviceCodeResponse.interval } else { 5 }
@@ -88,20 +101,10 @@ function Connect-ScEntraGraph {
                     $tokenResponse = Invoke-RestMethod @tokenRequest -ErrorAction Stop
                     $script:GraphAccessToken = $tokenResponse.access_token
                     Write-Host "`n✓ Successfully authenticated with device code flow!" -ForegroundColor Green
-                    
-                    # Validate permissions
-                    $missingScopes = @()
-                    foreach ($scope in $Scopes) {
-                        if (-not (Test-GraphPermissions -RequiredPermissions @($scope) -ResourceName "Device code token")) {
-                            $missingScopes += $scope
-                        }
+                    $tokenInfo = Get-GraphTokenScopeInfo
+                    if ($tokenInfo -and $tokenInfo.Scopes) {
+                        Write-Verbose "Granted scopes: $($tokenInfo.Scopes -join ', ')"
                     }
-                    
-                    if ($missingScopes.Count -gt 0) {
-                        Write-Warning "Token is missing some permissions (may need admin consent):"
-                        $missingScopes | ForEach-Object { Write-Warning "  - $_" }
-                    }
-                    
                     return $true
                 }
                 catch {
@@ -136,24 +139,7 @@ function Connect-ScEntraGraph {
     if ($AccessToken) {
         $script:GraphAccessToken = $AccessToken
         Write-Verbose "Using provided access token"
-        
-        # Validate the token has required permissions
-        $missingScopes = @()
-        foreach ($scope in $Scopes) {
-            if (-not (Test-GraphPermissions -RequiredPermissions @($scope) -ResourceName "Initial validation")) {
-                $missingScopes += $scope
-            }
-        }
-        
-        if ($missingScopes.Count -gt 0) {
-            Write-Warning "Provided access token is missing required permissions:"
-            $missingScopes | ForEach-Object { Write-Warning "  - $_" }
-            Write-Host "`nYou can continue, but some functionality may not work." -ForegroundColor Yellow
-        }
-        else {
-            Write-Host "✓ Access token validated with all required permissions" -ForegroundColor Green
-        }
-        
+        Write-Host "✓ Access token loaded" -ForegroundColor Green
         return $true
     }
 
@@ -163,28 +149,7 @@ function Connect-ScEntraGraph {
             $token = Get-AzAccessToken -ResourceUrl "https://graph.microsoft.com" -ErrorAction SilentlyContinue
             if ($token) {
                 $script:GraphAccessToken = $token.Token | ConvertFrom-SecureString -AsPlainText
-                
-                # Validate the token has required permissions
-                $missingScopes = @()
-                foreach ($scope in $Scopes) {
-                    if (-not (Test-GraphPermissions -RequiredPermissions @($scope) -ResourceName "Azure PowerShell token")) {
-                        $missingScopes += $scope
-                    }
-                }
-                
-                if ($missingScopes.Count -gt 0) {
-                    Write-Warning "Azure PowerShell token is missing required API permissions:"
-                    $missingScopes | ForEach-Object { Write-Warning "  - $_" }
-                    Write-Host "`nThis is NOT a role assignment issue - even Global Admins need these API permissions consented." -ForegroundColor Yellow
-                    Write-Host "`nTo get a token with proper permissions, run:" -ForegroundColor Yellow
-                    Write-Host "  Connect-ScEntraGraph -UseDeviceCode" -ForegroundColor Cyan
-                    Write-Host "`nThis will open a browser for authentication and request the required permissions." -ForegroundColor White
-                    Write-Host "You can continue, but PIM and role assignment data will be incomplete.`n" -ForegroundColor Yellow
-                }
-                else {
-                    Write-Host "✓ Authenticated using Azure PowerShell context with all required permissions" -ForegroundColor Green
-                }
-                
+                Write-Host "✓ Authenticated using Azure PowerShell context" -ForegroundColor Green
                 return $true
             }
         }
@@ -197,28 +162,7 @@ function Connect-ScEntraGraph {
         $cliToken = az account get-access-token --resource https://graph.microsoft.com 2>$null | ConvertFrom-Json
         if ($cliToken -and $cliToken.accessToken) {
             $script:GraphAccessToken = $cliToken.accessToken
-            
-            # Validate the token has required permissions
-            $missingScopes = @()
-            foreach ($scope in $Scopes) {
-                if (-not (Test-GraphPermissions -RequiredPermissions @($scope) -ResourceName "Azure CLI token")) {
-                    $missingScopes += $scope
-                }
-            }
-            
-            if ($missingScopes.Count -gt 0) {
-                Write-Warning "Azure CLI token is missing required API permissions:"
-                $missingScopes | ForEach-Object { Write-Warning "  - $_" }
-                Write-Host "`nThis is NOT a role assignment issue - even Global Admins need these API permissions consented." -ForegroundColor Yellow
-                Write-Host "`nTo get a token with proper permissions, run:" -ForegroundColor Yellow
-                Write-Host "  Connect-ScEntraGraph -UseDeviceCode" -ForegroundColor Cyan
-                Write-Host "`nThis will open a browser for authentication and request the required permissions." -ForegroundColor White
-                Write-Host "You can continue, but PIM and role assignment data will be incomplete.`n" -ForegroundColor Yellow
-            }
-            else {
-                Write-Host "✓ Authenticated using Azure CLI with all required permissions" -ForegroundColor Green
-            }
-            
+            Write-Host "✓ Authenticated using Azure CLI context" -ForegroundColor Green
             return $true
         }
     }

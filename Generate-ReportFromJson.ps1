@@ -9,17 +9,74 @@
 .PARAMETER JsonPath
     Path to the JSON file to regenerate from
     
+.PARAMETER RedactPII
+    Redact personally identifiable information (names, UPNs, emails, etc.) from the report
+
+.PARAMETER EncryptReport
+    Wrap the regenerated HTML in a password-protected, self-decrypting HTML shell that uses AES-256
+    in the browser.
+
+.PARAMETER EncryptionPassword
+    Optional secure string password to use for encryption; prompted if omitted when encrypting
+
+.PARAMETER EncryptedOutputPath
+    Optional destination path for the encrypted HTML wrapper (defaults to the OutputPath value)
+
+.PARAMETER DeletePlaintextAfterEncryption
+    Legacy compatibility switch. No plaintext file is produced when EncryptReport is specified.
+
+.PARAMETER NoEncryption
+    Explicitly disable encryption for the report, ensuring no password is required.
+    
 .EXAMPLE
-    ./Generate-ReportFromJson.ps1 -JsonPath "./ScEntra-Report-20251120-110942.json"
+    ./Generate-ReportFromJson.ps1 -JsonPath "./ScEntra-Report-20251120-110942.json" -NoEncryption
 #>
 
 param(
     [Parameter(Mandatory = $true)]
-    [string]$JsonPath
+    [string]$JsonPath,
+    [Parameter(Mandatory = $false)]
+    [switch]$RedactPII,
+    [Parameter(Mandatory = $false)]
+    [switch]$EncryptReport,
+    [Parameter(Mandatory = $false)]
+    [switch]$NoEncryption,
+    [Parameter(Mandatory = $false)]
+    [switch]$AutoUnlock,
+    [Parameter(Mandatory = $false)]
+    [System.Security.SecureString]$EncryptionPassword,
+    [Parameter(Mandatory = $false)]
+    [string]$EncryptedOutputPath,
+    [Parameter(Mandatory = $false)]
+    [switch]$DeletePlaintextAfterEncryption
 )
 
-# Import the module
+if ($NoEncryption) {
+    $EncryptReport = $false
+}
+
+if (-not $EncryptReport -and $EncryptionPassword) {
+    $EncryptReport = $true
+}
+
+if (-not $EncryptReport -and $EncryptedOutputPath) {
+    $EncryptReport = $true
+}
+
+if (-not $EncryptReport -and $DeletePlaintextAfterEncryption) {
+    $EncryptReport = $true
+}
+
+if (-not $EncryptReport -and $AutoUnlock -and -not $NoEncryption) {
+    $EncryptReport = $true
+}
+
+# Import the module and shared helpers
 Import-Module ./ScEntra.psd1 -Force
+$redactionHelperPath = Join-Path $PSScriptRoot "Private/RedactionHelpers.ps1"
+if (Test-Path $redactionHelperPath) {
+    . $redactionHelperPath
+}
 
 # Check if JSON file exists
 if (-not (Test-Path $JsonPath)) {
@@ -31,6 +88,29 @@ if (-not (Test-Path $JsonPath)) {
 Write-Host "Reading JSON data from: $JsonPath" -ForegroundColor Cyan
 $jsonData = Get-Content $JsonPath -Raw | ConvertFrom-Json
 
+# Redact PII if requested
+if ($RedactPII) {
+    Write-Host "Redacting PII data..." -ForegroundColor Yellow
+    $redacted = Invoke-ScEntraDataRedaction `
+        -Users $jsonData.Users `
+        -Groups $jsonData.Groups `
+        -ServicePrincipals $jsonData.ServicePrincipals `
+        -AppRegistrations $jsonData.AppRegistrations `
+        -RoleAssignments $jsonData.RoleAssignments `
+        -PIMAssignments $jsonData.PIMAssignments `
+        -EscalationRisks $jsonData.EscalationRisks `
+        -GraphData $jsonData.GraphData `
+        -OrganizationInfo $jsonData.OrganizationInfo
+
+    if ($redacted.Users) { $jsonData.Users = $redacted.Users }
+    if ($redacted.Groups) { $jsonData.Groups = $redacted.Groups }
+    if ($redacted.ServicePrincipals) { $jsonData.ServicePrincipals = $redacted.ServicePrincipals }
+    if ($redacted.AppRegistrations) { $jsonData.AppRegistrations = $redacted.AppRegistrations }
+    if ($redacted.EscalationRisks) { $jsonData.EscalationRisks = $redacted.EscalationRisks }
+    if ($redacted.GraphData) { $jsonData.GraphData = $redacted.GraphData }
+    if ($redacted.OrganizationInfo) { $jsonData.OrganizationInfo = $redacted.OrganizationInfo }
+}
+
 # Convert GraphData from PSCustomObject to hashtable if it exists
 $graphData = $null
 if ($jsonData.GraphData) {
@@ -41,7 +121,8 @@ if ($jsonData.GraphData) {
 }
 
 # Determine output HTML path
-$outputPath = $JsonPath -replace '\.json$', '-regenerated.html'
+$suffix = if ($RedactPII) { '-redacted' } else { '-regenerated' }
+$outputPath = $JsonPath -replace '\.json$', "$suffix.html"
 
 Write-Host "Regenerating HTML report..." -ForegroundColor Cyan
 
@@ -85,6 +166,11 @@ if ($jsonData.OrganizationInfo) {
     }
 }
 
+# Prompt for password if encryption requested without supplied credentials
+if ($EncryptReport -and -not $EncryptionPassword) {
+    $EncryptionPassword = Read-Host "Enter password to protect regenerated report" -AsSecureString
+}
+
 # Call the export function with the data from JSON
 $reportPath = Export-ScEntraReport `
     -Users $jsonData.Users `
@@ -96,7 +182,12 @@ $reportPath = Export-ScEntraReport `
     -EscalationRisks $filteredRisks `
     -GraphData $graphData `
     -OrganizationInfo $orgInfo `
-    -OutputPath $outputPath
+    -OutputPath $outputPath `
+    -EncryptReport:$EncryptReport `
+    -EncryptionPassword $EncryptionPassword `
+    -AutoUnlock:$AutoUnlock `
+    -EncryptedOutputPath $EncryptedOutputPath `
+    -DeletePlaintextAfterEncryption:$DeletePlaintextAfterEncryption
 
 if ($reportPath) {
     Write-Host "`n✓ Report regenerated successfully!" -ForegroundColor Green

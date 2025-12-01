@@ -14,12 +14,12 @@
 #region Module Initialization
 $privateFolder = Join-Path -Path $PSScriptRoot -ChildPath 'Private'
 if (Test-Path $privateFolder) {
-    Get-ChildItem -Path $privateFolder -Filter '*.ps1' | ForEach-Object { . $_.FullName }
+    Get-ChildItem -Path $privateFolder -Filter '*.ps1' -File | ForEach-Object { . $_.FullName }
 }
 
 $publicFolder = Join-Path -Path $PSScriptRoot -ChildPath 'Public'
 if (Test-Path $publicFolder) {
-    Get-ChildItem -Path $publicFolder -Filter '*.ps1' | ForEach-Object { . $_.FullName }
+    Get-ChildItem -Path $publicFolder -Filter '*.ps1' -File | ForEach-Object { . $_.FullName }
 }
 #endregion
 
@@ -27,5 +27,8 @@ if (Test-Path $publicFolder) {
 Export-ModuleMember -Function @(
     'Connect-ScEntraGraph'
     'Invoke-ScEntraAnalysis'
+    'Get-ScEntraEnvironmentSize'
+    'Get-ScEntraEnvironmentConfig'
     'Export-ScEntraReport'
+    'New-ScEntraServicePrincipal'
 )
