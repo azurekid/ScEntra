@@ -88,6 +88,13 @@ if (-not (Test-Path $JsonPath)) {
 Write-Host "Reading JSON data from: $JsonPath" -ForegroundColor Cyan
 $jsonData = Get-Content $JsonPath -Raw | ConvertFrom-Json
 
+# Convert GraphData from PSCustomObject to hashtable if it exists
+if ($jsonData.GraphData) {
+    $graphDataHash = @{}
+    $jsonData.GraphData.PSObject.Properties | ForEach-Object { $graphDataHash[$_.Name] = $_.Value }
+    $jsonData.GraphData = $graphDataHash
+}
+
 # Redact PII if requested
 if ($RedactPII) {
     Write-Host "Redacting PII data..." -ForegroundColor Yellow

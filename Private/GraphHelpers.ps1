@@ -254,7 +254,9 @@ function Invoke-GraphRequest {
         [Parameter(Mandatory = $false)]
         [string]$Method = 'GET',
         [Parameter(Mandatory = $false)]
-        [object]$Body
+        [object]$Body,
+        [Parameter(Mandatory = $false)]
+        [int]$TimeoutSec
     )
 
     if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
@@ -287,6 +289,10 @@ function Invoke-GraphRequest {
 
     if ($Body) {
         $params['Body'] = ($Body | ConvertTo-Json -Depth 10)
+    }
+
+    if ($PSBoundParameters.ContainsKey('TimeoutSec') -and $TimeoutSec -gt 0) {
+        $params['TimeoutSec'] = $TimeoutSec
     }
 
     try {

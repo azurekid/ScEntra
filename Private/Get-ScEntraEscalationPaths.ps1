@@ -153,7 +153,7 @@ function Get-ScEntraEscalationPaths {
 
     Write-Host "Found $($roleEnabledGroups.Count) role-assignable groups" -ForegroundColor Yellow
     Write-Host "Found $($pimEnabledGroupIds.Count) PIM-enabled groups" -ForegroundColor Yellow
-    Write-Host "Analyzing $($relevantGroupIds.Count) groups with role assignments or PIM eligibility (optimized)" -ForegroundColor Cyan
+    Write-Host "Analyzing $($relevantGroupIds.Count) groups with role assignments or PIM eligibility" -ForegroundColor Cyan
 
     $batchRequests = @()
     $requestId = 0
@@ -295,7 +295,7 @@ function Get-ScEntraEscalationPaths {
                             $existingMember | Add-Member -NotePropertyName 'isPIMActive' -NotePropertyValue $isActive -Force
                             $groupName = ($Groups | Where-Object { $_.id -eq $groupId } | Select-Object -First 1).displayName
                             $status = if ($isActive) { "(Active)" } else { "" }
-                            Write-Host "  PIM Eligible $status`: $($existingMember.displayName) → $groupName" -ForegroundColor Magenta
+                            # Write-Host "  PIM Eligible $status`: $($existingMember.displayName) → $groupName" -ForegroundColor Magenta
                             Write-Verbose "  Marked existing member as PIM eligible: $($existingMember.displayName) (Active: $isActive)"
                         } else {
                             # Add user who is eligible but not yet activated (not in regular /members)
@@ -311,7 +311,7 @@ function Get-ScEntraEscalationPaths {
                                 }
                                 $groupMemberships[$groupId] += $memberObject
                                 $groupName = ($Groups | Where-Object { $_.id -eq $groupId } | Select-Object -First 1).displayName
-                                Write-Host "  PIM Eligible (Not Activated): $($fullUser.displayName) → $groupName" -ForegroundColor Magenta
+                                # Write-Host "  PIM Eligible (Not Activated): $($fullUser.displayName) → $groupName" -ForegroundColor Magenta
                                 Write-Verbose "  Added PIM eligible-only member: $($fullUser.displayName)"
                             }
                         }
@@ -414,7 +414,7 @@ function Get-ScEntraEscalationPaths {
             else {
                 try {
                     $transitiveUri = "$script:GraphBaseUrl/groups/$groupId/transitiveMembers?`$select=id&`$count=true"
-                    $transitiveResult = Invoke-GraphRequest -Uri $transitiveUri -Method GET -ErrorAction SilentlyContinue
+                    $transitiveResult = Invoke-GraphRequest -Uri $transitiveUri -Method GET -TimeoutSec 5 -ErrorAction Stop
                     $transitiveMemberCount = if ($transitiveResult.'@odata.count') { $transitiveResult.'@odata.count' } else { $transitiveResult.value.Count }
                 }
                 catch {
@@ -453,7 +453,7 @@ function Get-ScEntraEscalationPaths {
 
     $spBatchRequests = @()
     $spRequestId = 0
-    foreach ($sp in $spsWithRoles) {
+    foreach ($sp in $ServicePrincipals) {
         $spBatchRequests += @{
             id     = "$spRequestId-sp-owners-$($sp.id)"
             method = "GET"
@@ -464,7 +464,7 @@ function Get-ScEntraEscalationPaths {
         $spBatchRequests += @{
             id     = "$spRequestId-sp-approles-$($sp.id)"
             method = "GET"
-            url    = "/servicePrincipals/$($sp.id)/appRoleAssignedTo?`$select=principalId,principalDisplayName,principalType&`$top=999"
+            url    = "/servicePrincipals/$($sp.id)/appRoleAssignedTo?`$select=principalId,principalDisplayName,principalType,appRoleId,resourceId,resourceDisplayName&`$top=999"
         }
         $spRequestId++
     }
@@ -481,7 +481,8 @@ function Get-ScEntraEscalationPaths {
     }
 
     $spCount = 0
-    foreach ($sp in $spsWithRoles) {
+    # Collect owners and app role assignments for ALL service principals, not only those with directory roles
+    foreach ($sp in $ServicePrincipals) {
         $ownerCount = 0
 
         $ownerResponseKey = $spBatchResponses.Keys | Where-Object { $_ -like "*-sp-owners-$($sp.id)" } | Select-Object -First 1
@@ -517,7 +518,7 @@ function Get-ScEntraEscalationPaths {
         }
         else {
             try {
-                $appRolesUri = "$script:GraphBaseUrl/servicePrincipals/$($sp.id)/appRoleAssignedTo?`$select=principalId,principalDisplayName,principalType&`$top=999"
+                $appRolesUri = "$script:GraphBaseUrl/servicePrincipals/$($sp.id)/appRoleAssignedTo?`$select=principalId,principalDisplayName,principalType,appRoleId,resourceId,resourceDisplayName&`$top=999"
                 $appRoles = Get-AllGraphItems -Uri $appRolesUri -Method GET
                 if ($appRoles) {
                     $spAppRoleAssignments[$sp.id] = $appRoles
@@ -561,7 +562,7 @@ function Get-ScEntraEscalationPaths {
                 $permValue = $grant.AppRoleValue
                 if (-not $permValue) { continue }
 
-                if ($permissionEscalationLookup.ContainsKey($permValue)) {
+                if ($permValue -and $permissionEscalationLookup.ContainsKey($permValue)) {
                     $metadata = $permissionEscalationLookup[$permValue]
 
                     $risk = [PSCustomObject]@{

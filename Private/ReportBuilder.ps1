@@ -259,6 +259,7 @@ function New-ScEntraGraphSection {
                         <option value="group">Groups</option>
                         <option value="role">Roles</option>
                         <option value="servicePrincipal">Service Principals</option>
+                        <option value="appRoleAssignment">App Role Assignments</option>
                         <option value="application">Applications</option>
                         <option value="apiPermission">API Permissions</option>
                     </select>
@@ -323,6 +324,10 @@ function New-ScEntraGraphSection {
                 <div class="legend-item">
                     <img class="legend-icon" data-icon-type="managedIdentity" alt="Managed identity icon" />
                     <span>Managed Identity</span>
+                </div>
+                <div class="legend-item">
+                    <img class="legend-icon" data-icon-type="appRoleAssignment" alt="App role assignment icon" />
+                    <span>App Role Assignment</span>
                 </div>
                 <div class="legend-item">
                     <img class="legend-icon" data-icon-type="application" alt="Application icon" />
@@ -457,6 +462,8 @@ function New-ScEntraGraphSection {
             const userIconOverride = 'data:image/svg+xml;base64,PHN2ZyBpZD0iZTI0NjcxZjYtZjUwMS00OTUyLWEyZGItOGIwYjFkMzI5YzE3IiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOCAxOCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJiZTkyOTAxYi1lYzMzLTRjNjUtYWRmMS05YjBlZWQwNmQ2NzciIHgxPSI5IiB5MT0iNi44OCIgeDI9IjkiIHkyPSIyMC40NSIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPjxzdG9wIG9mZnNldD0iMC4yMiIgc3RvcC1jb2xvcj0iIzMyZDRmNSIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzE5OGFiMyIvPjwvbGluZWFyR3JhZGllbnQ+PGxpbmVhckdyYWRpZW50IGlkPSJiNDZmYzI0Ni0yNWQ4LTQzOTgtODc3OS0xMDQyZThjYWNhZTciIHgxPSI4LjYxIiB5MT0iLTAuNCIgeDI9IjkuNiIgeTI9IjExLjkyIiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHN0b3Agb2Zmc2V0PSIwLjIyIiBzdG9wLWNvbG9yPSIjMzJkNGY1Ii8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjMTk4YWIzIi8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PHRpdGxlPkljb24taWRlbnRpdHktMjMwPC90aXRsZT48cGF0aCBkPSJNMTUuNzIsMThhMS40NSwxLjQ1LDAsMCwwLDEuNDUtMS40NS40Ny40NywwLDAsMCwwLS4xN0MxNi41OSwxMS44MSwxNCw4LjA5LDksOC4wOVMxLjM0LDExLjI0LjgzLDE2LjM5QTEuNDYsMS40NiwwLDAsMCwyLjE0LDE4SDE1LjcyWiIgZmlsbD0idXJsKCNiZTkyOTAxYi1lYzMzLTRjNjUtYWRmMS05YjBlZWQwNmQ2NzcpIi8+PHBhdGggZD0iTTksOS4xN2E0LjU5LDQuNTksMCwwLDEtMi40OC0uNzNMOSwxNC44NmwyLjQ0LTYuMzhBNC41Myw0LjUzLDAsMCwxLDksOS4xN1oiIGZpbGw9IiNmZmYiIG9wYWNpdHk9IjAuOCIvPjxjaXJjbGUgY3g9IjkuMDEiIGN5PSI0LjU4IiByPSI0LjU4IiBmaWxsPSJ1cmwoI2I0NmZjMjQ2LTI1ZDgtNDM5OC04Nzc5LTEwNDJlOGNhY2FlNykiLz48L3N2Zz4=';
             const userIconDataUri = (userIconOverride && !userIconOverride.includes('…')) ? userIconOverride : svgIcon(defaultUserIconSvg);
 
+            const linkedAssignmentIconSvg = '<svg id="ba7e3c83-4ea6-40d5-820f-746ccedb8156" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="e74ddf23-fe74-4f89-9a49-c7f2e22be284" x1="3.707" y1="5.123" x2="3.707" y2="2.061" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#0078d4"/><stop offset="1" stop-color="#5ea0ef"/></linearGradient><linearGradient id="bcce3b94-6b83-44c5-9bf7-a89d666f3d1e" x1="12.741" y1="10.558" x2="12.741" y2="5.161" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#0078d4"/><stop offset="1" stop-color="#5ea0ef"/></linearGradient><linearGradient id="f9b0803f-41e5-4165-9230-e220427ec475" x1="3.707" y1="13.723" x2="3.707" y2="10.378" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#0078d4"/><stop offset="1" stop-color="#5ea0ef"/></linearGradient></defs><g><g><rect x="7.923" y="1.922" width="0.98" height="6.183" transform="translate(0.013 10.048) rotate(-61.725)" fill="#003067"/><path d="M7.081,4.2V1.5H.33v2.7h0v0c0,.716,1.511,1.3,3.376,1.3s3.376-.58,3.376-1.3Z" fill="url(#e74ddf23-fe74-4f89-9a49-c7f2e22be284)"/><ellipse cx="3.707" cy="1.546" rx="3.376" ry="1.296" fill="#83b9f9"/><path d="M16.115,8.616v-2.7H9.365v2.7h0v0c0,.716,1.511,1.3,3.376,1.3s3.376-.58,3.376-1.3Z" fill="url(#bcce3b94-6b83-44c5-9bf7-a89d666f3d1e)"/><ellipse cx="12.741" cy="5.96" rx="3.376" ry="1.296" fill="#83b9f9"/><rect x="3.22" y="4.168" width="0.98" height="7.962" fill="#003067"/><circle cx="3.75" cy="3.337" r="1.157" fill="#c3f1ff"/><path d="M7.081,12.824v-2.7H.33v2.7h0v0c0,.716,1.511,1.3,3.376,1.3s3.376-.58,3.376-1.3Z" fill="url(#f9b0803f-41e5-4165-9230-e220427ec475)"/><ellipse cx="3.707" cy="10.167" rx="3.376" ry="1.296" fill="#83b9f9"/><rect x="3.708" y="9.164" width="9.741" height="0.98" transform="translate(-3.376 4.767) rotate(-26.14)" fill="#003067"/><circle cx="3.701" cy="11.939" r="1.157" fill="#c3f1ff"/><circle cx="12.743" cy="7.548" r="1.157" fill="#c3f1ff"/></g><g></g></g></svg>';
+
             const nodeIcons = {
                 user: svgIcon('<svg id="ed8fbe5c-618b-47ce-8d68-3dbd1e10f81a" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="e78519cd-36d2-4ee5-987f-be84be24d95e" x1="7.93" y1="17.95" x2="7.93" y2="5.62" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#5e9624"/><stop offset="1" stop-color="#b4ec36"/></linearGradient><linearGradient id="ac3f95ec-6391-4f34-b431-9534d4cdf013" x1="7.95" y1="9.21" x2="7.95" y2="-2.02" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#5e9624"/><stop offset="1" stop-color="#b4ec36"/></linearGradient></defs><path d="M14,16.85a1.3,1.3,0,0,0,1.32-1.31.81.81,0,0,0,0-.16c-.52-4.15-2.88-7.53-7.4-7.53S1,10.71.51,15.39A1.34,1.34,0,0,0,1.7,16.85H14Z" fill="url(#e78519cd-36d2-4ee5-987f-be84be24d95e)"/><path d="M8,8.83a4.16,4.16,0,0,1-2.26-.66L7.92,14l2.22-5.79A4.2,4.2,0,0,1,8,8.83Z" fill="#fff"/><circle cx="7.95" cy="4.67" r="4.17" fill="url(#ac3f95ec-6391-4f34-b431-9534d4cdf013)"/></svg>'),
                 pimEnabledGroup: svgIcon('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="b0670cdb-9407-42e5-ae8f-f3558902da1a" x1="7.89" y1="6.9" x2="7.89" y2="19.35" gradientUnits="userSpaceOnUse"><stop offset="0.22" stop-color="#32d4f5"/><stop offset="1" stop-color="#198ab3"/></linearGradient><linearGradient id="fd04ffc0-49c3-4a18-9b27-999b23712bcb" x1="7.53" y1="0.22" x2="8.44" y2="11.53" gradientUnits="userSpaceOnUse"><stop offset="0.22" stop-color="#32d4f5"/><stop offset="1" stop-color="#198ab3"/></linearGradient><radialGradient id="aa3ecbb1-1061-42c8-aaf2-d5c01a3fcfd9" cx="-19.24" cy="6.51" r="6.13" gradientTransform="matrix(0.94, 0.01, -0.01, 0.94, 32.03, 6.26)" gradientUnits="userSpaceOnUse"><stop offset="0.27" stop-color="#ffd70f"/><stop offset="1" stop-color="#fea11b"/></radialGradient></defs><g id="b245b541-7d80-40be-a5d7-51667bcba1b3"><g><g><title>Icon-identity-223</title><path d="M17.22,13.92a.79.79,0,0,0,.8-.79A.28.28,0,0,0,18,13c-.31-2.5-1.74-4.54-4.46-4.54S9.35,10.22,9.07,13a.81.81,0,0,0,.72.88h7.43Z" fill="#0078d4"/><path d="M13.55,9.09a2.44,2.44,0,0,1-1.36-.4l1.35,3.52,1.33-3.49A2.54,2.54,0,0,1,13.55,9.09Z" fill="#fff" opacity="0.8"/><circle cx="13.55" cy="6.58" r="2.51" fill="#1078d4"/><path d="M14.05,17.11a1.34,1.34,0,0,0,1.34-1.33.81.81,0,0,0,0-.16C14.86,11.42,12.47,8,7.9,8S.86,10.9.4,15.63A1.34,1.34,0,0,0,1.59,17.1H14.05Z" fill="url(#b0670cdb-9407-42e5-ae8f-f3558902da1a)"/><path d="M7.9,9a4.09,4.09,0,0,1-2.27-.67l2.25,5.89,2.24-5.85A4.17,4.17,0,0,1,7.9,9Z" fill="#fff" opacity="0.8"/><circle cx="7.9" cy="4.8" r="4.21" fill="url(#fd04ffc0-49c3-4a18-9b27-999b23712bcb)"/></g><g><path id="f2ddd4d7-46fc-4e48-ae24-8fde036c39bb" d="M17.27,11.45a1.13,1.13,0,0,0,0-1.6h0l-1.94-2a1.12,1.12,0,0,0-1.6,0h0l-2,1.94a1.14,1.14,0,0,0,0,1.61l1.61,1.64a.31.31,0,0,1,.09.22l0,3a.36.36,0,0,0,.12.28l.73.75a.27.27,0,0,0,.37,0l.72-.72h0l.42-.43a.14.14,0,0,0,0-.2l-.31-.31a.17.17,0,0,1,0-.23l.31-.31a.13.13,0,0,0,0-.2l-.3-.31a.17.17,0,0,1,0-.23l.31-.31a.14.14,0,0,0,0-.2l-.42-.43V13.3ZM14.54,8.34a.66.66,0,0,1,.64.65.63.63,0,0,1-.65.64.65.65,0,0,1,0-1.29Z" fill="url(#aa3ecbb1-1061-42c8-aaf2-d5c01a3fcfd9)"/><path id="e15034b6-eebb-4253-ac69-86068a1d4276" d="M14,16.38h0a.14.14,0,0,0,.24-.1V13.83a.16.16,0,0,0-.06-.13h0a.14.14,0,0,0-.22.12v2.46A.13.13,0,0,0,14,16.38Z" fill="#ff9300" opacity="0.75"/><rect id="f3d2a589-08f4-4e99-9635-cc67abadc8f4" x="14.38" y="9.07" width="0.38" height="3.21" rx="0.17" transform="translate(3.8 25.17) rotate(-89.65)" fill="#ff9300" opacity="0.75"/><rect id="bc7793e0-f7bc-4cc4-abb0-181c6c62350c" x="14.37" y="9.68" width="0.38" height="3.21" rx="0.17" transform="translate(3.18 25.78) rotate(-89.65)" fill="#ff9300" opacity="0.75"/></g></g></g></svg>'),
@@ -466,7 +473,9 @@ function New-ScEntraGraphSection {
                 servicePrincipal: svgIcon('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="b05ecef1-bdba-47cb-a2a6-665a5bf9ae79" x1="9" y1="19.049" x2="9" y2="1.048" gradientUnits="userSpaceOnUse"><stop offset="0.2" stop-color="#0078d4"/><stop offset="0.287" stop-color="#1380da"/><stop offset="0.495" stop-color="#3c91e5"/><stop offset="0.659" stop-color="#559cec"/><stop offset="0.759" stop-color="#5ea0ef"/></linearGradient></defs><g id="adc593fc-9575-4f0f-b9cc-4803103092a4"><g><rect x="1" y="1" width="16" height="16" rx="0.534" fill="url(#b05ecef1-bdba-47cb-a2a6-665a5bf9ae79)"/><g><g opacity="0.95"><rect x="2.361" y="2.777" width="3.617" height="3.368" rx="0.14" fill="#fff"/><rect x="7.192" y="2.777" width="3.617" height="3.368" rx="0.14" fill="#fff"/><rect x="12.023" y="2.777" width="3.617" height="3.368" rx="0.14" fill="#fff"/></g><rect x="2.361" y="7.28" width="8.394" height="3.368" rx="0.14" fill="#fff" opacity="0.45"/><rect x="12.009" y="7.28" width="3.617" height="3.368" rx="0.14" fill="#fff" opacity="0.9"/><rect x="2.361" y="11.854" width="13.186" height="3.368" rx="0.14" fill="#fff" opacity="0.75"/></g></g></g></svg>'),
                 managedIdentity: svgIcon('<svg id="uuid-fdd7680e-8ace-441a-8a3a-73410c3b1f21" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="uuid-38c07977-ab9a-48eb-a668-cda3102bbd85" x1="7.697" y1="779.168" x2="14.082" y2="786.631" gradientTransform="translate(0 791.516) scale(1 -1)" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#225086"/><stop offset="1" stop-color="#0055c5"/></linearGradient><linearGradient id="uuid-aed4a7bc-b380-4c34-b841-2d0f34d24f17" x1="6.364" y1="778.164" x2="6.364" y2="794.412" gradientTransform="translate(0 791.516) scale(1 -1)" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#6df"/><stop offset="1" stop-color="#0294e4"/></linearGradient><linearGradient id="uuid-e2a7b7f2-bf16-4a76-ba27-7d149ab8a194" x1="9.001" y1="775.956" x2="9.001" y2="794.845" gradientTransform="translate(0 791.516) scale(1 -1)" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#44dbf9"/><stop offset="1" stop-color="#cbf8ff"/></linearGradient><linearGradient id="uuid-c67f3364-071c-41f9-a175-d3de1f837e0a" x1="13.5" y1="774.721" x2="13.5" y2="790.782" gradientTransform="translate(0 791.516) scale(1 -1)" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#041642"/><stop offset="1" stop-color="#041642" stop-opacity=".25"/></linearGradient></defs><g><path d="m17.647,9.906L10.147,1.445c-.599-.676-1.694-.676-2.294,0L.353,9.906c-.579.654-.428,1.641.323,2.111l7.499,4.688c.5.313,1.148.313,1.648,0l7.499-4.688c.751-.469.902-1.457.323-2.111h0Z" fill="url(#uuid-38c07977-ab9a-48eb-a668-cda3102bbd85)" stroke-width="0"/><path d="m10.148,1.445c-.599-.676-1.694-.676-2.294,0L.354,9.906c-.579.654-.428,1.641.323,2.111,0,0,2.776,1.735,3.126,1.954.388.242,1.033.511,1.715.511.621,0,1.197-.18,1.676-.487,0,0,0,0,.002-.001l1.804-1.128-4.364-2.728,4.474-5.047c.55-.627,1.377-1.026,2.302-1.026.472,0,.917.107,1.314.292l-2.579-2.909v-.002Z" fill="url(#uuid-aed4a7bc-b380-4c34-b841-2d0f34d24f17)" stroke-width="0"/><polygon points="4.636 10.138 4.688 10.17 9.001 12.866 9.001 12.866 13.365 10.138 13.366 10.138 13.365 10.138 9.001 5.214 4.636 10.138" fill="url(#uuid-e2a7b7f2-bf16-4a76-ba27-7d149ab8a194)" stroke-width="0"/><path d="m9.001,16.939c.287,0,.574-.078.824-.234l7.499-4.688c.751-.469.902-1.457.323-2.111L10.148,1.445c-.3-.338-.723-.507-1.147-.507v16.001Z" fill="url(#uuid-c67f3364-071c-41f9-a175-d3de1f837e0a)" fill-opacity=".5" isolation="isolate" opacity=".5" stroke-width="0"/></g><g><path id="uuid-f6648d86-048a-4f40-a6df-7ce120116a98" d="m16.512,10.831c.464-.458.468-1.206.01-1.67-.003-.003-.006-.006-.01-.01h0l-2.035-2.035c-.461-.461-1.208-.461-1.669,0h0l-2.035,2.035c-.456.467-.456,1.213,0,1.679l1.7,1.7c.061.063.094.147.092.234v3.155c-.003.108.041.213.122.285l.773.773c.095.104.255.112.359.017.006-.005.012-.011.017-.017l.743-.743h0l.448-.448c.058-.059.058-.154,0-.214l-.316-.315c-.067-.059-.074-.162-.014-.23.005-.005.009-.01.014-.014l.316-.316c.059-.063.059-.161,0-.224l-.316-.316c-.065-.054-.073-.15-.019-.215.006-.007.012-.013.019-.019l.316-.326c.058-.059.058-.154,0-.214l-.448-.448v-.163l1.934-1.944Zm-2.87-3.226c.371,0,.672.301.672.672s-.301.672-.672.672-.672-.301-.672-.672h0c0-.371.301-.672.672-.672Z" fill="#ffca00" stroke-width="0"/><path id="uuid-e1697bf4-8e5d-4d62-90c9-6569d79d4944" d="m13.133,16.042h0c.055.057.145.058.201.003.031-.03.047-.072.043-.115v-2.605c.002-.051-.021-.1-.061-.132h0c-.064-.045-.153-.03-.199.034-.02.029-.029.064-.025.098v2.555c-.02.058-.004.122.041.163Z" fill="#ff9300" isolation="isolate" opacity=".75" stroke-width="0"/><rect id="uuid-c930d4c2-9f41-48c7-adf7-acbd73af6fbf" x="12.014" y="9.834" width="3.348" height=".397" rx=".183" ry=".183" fill="#ff9300" isolation="isolate" opacity=".75" stroke-width="0"/><rect id="uuid-755aaa46-8b89-45f5-9da0-8a42782c5ddd" x="12.014" y="10.475" width="3.348" height=".397" rx=".183" ry=".183" fill="#ff9300" isolation="isolate" opacity=".75" stroke-width="0"/></g></svg>'),
                 application: svgIcon('<svg id="a76a0103-ce03-4d58-859d-4c27e02925d2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="efeb8e96-2af0-4681-9a6a-45f9b0262f19" x1="-6518.78" y1="1118.86" x2="-6518.78" y2="1090.06" gradientTransform="matrix(0.5, 0, 0, -0.5, 3267.42, 559.99)" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#5ea0ef"/><stop offset="0.18" stop-color="#589eed"/><stop offset="0.41" stop-color="#4897e9"/><stop offset="0.66" stop-color="#2e8ce1"/><stop offset="0.94" stop-color="#0a7cd7"/><stop offset="1" stop-color="#0078d4"/></linearGradient></defs><path d="M5.67,10.61H10v4.32H5.67Zm-5-5.76H5V.53H1.23a.6.6,0,0,0-.6.6Zm.6,10.08H5V10.61H.63v3.72A.6.6,0,0,0,1.23,14.93Zm-.6-5H5V5.57H.63Zm10.08,5h3.72a.6.6,0,0,0,.6-.6V10.61H10.71Zm-5-5H10V5.57H5.67Zm5,0H15V5.57H10.71Zm0-9.36V4.85H15V1.13a.6.6,0,0,0-.6-.6Zm-5,4.32H10V.53H5.67Z" fill="url(#efeb8e96-2af0-4681-9a6a-45f9b0262f19)"/><polygon points="17.37 10.7 17.37 15.21 13.5 17.47 13.5 12.96 17.37 10.7" fill="#32bedd"/><polygon points="17.37 10.7 13.5 12.97 9.63 10.7 13.5 8.44 17.37 10.7" fill="#9cebff"/><polygon points="13.5 12.97 13.5 17.47 9.63 15.21 9.63 10.7 13.5 12.97" fill="#50e6ff"/><polygon points="9.63 15.21 13.5 12.96 13.5 17.47 9.63 15.21" fill="#9cebff"/><polygon points="17.37 15.21 13.5 12.96 13.5 17.47 17.37 15.21" fill="#50e6ff"/></svg>'),
-                apiPermission: svgIcon('<svg id="uuid-431a759c-a29d-4678-89ee-5b1b2666f890" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="uuid-10478e68-1009-47b7-9e5e-1dad26a11858" x1="9" y1="18" x2="9" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#198ab3"/><stop offset="1" stop-color="#32bedd"/></linearGradient><linearGradient id="uuid-7623d8a9-ce5d-405d-98e0-ff8e832bdf61" x1="7.203" y1="11.089" x2="7.203" y2="3.888" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#6f4bb2"/><stop offset="1" stop-color="#c69aeb"/></linearGradient></defs><path d="m11.844,12.791c-.316-.081-.641-.073-.947.015l-1.295-2.124c-.04-.065-.124-.087-.19-.049l-.536.309c-.068.039-.091.128-.05.195l1.296,2.127c-.667.668-.737,1.797.01,2.551.12.121.259.223.41.302.276.143.568.213.857.213.463,0,.916-.18,1.273-.527.125-.121.23-.263.31-.417.302-.579.28-1.233-.037-1.769-.245-.413-.636-.707-1.102-.826Zm.424,1.965c-.06.232-.207.428-.414.55-.207.122-.449.156-.682.097-.278-.071-.503-.267-.614-.541-.141-.349-.041-.762.245-1.007.171-.147.379-.222.592-.222.075,0,.151.009.225.029.233.06.428.206.551.413h0c.122.207.157.448.097.681Zm3.555-9.443c-1.012,0-1.863.695-2.106,1.631h-2.54c-.078,0-.141.063-.141.141v.806c0,.078.063.141.141.141h2.54c.243.937,1.093,1.631,2.106,1.631,1.201,0,2.177-.976,2.177-2.175s-.977-2.175-2.177-2.175Zm1.068,2.388c-.082.428-.427.772-.854.854-.766.146-1.428-.515-1.282-1.28.082-.428.426-.772.854-.854.766-.147,1.429.515,1.283,1.28ZM2.978,2.953c.121.03.244.045.366.045.144,0,.286-.022.423-.063l.884,1.447c.04.065.124.087.19.049l.406-.234c.068-.039.091-.128.05-.195l-.887-1.453c.468-.475.577-1.224.218-1.821-.206-.343-.534-.585-.923-.682-.445-.111-.909-.016-1.28.267-.547.417-.737,1.18-.45,1.805.195.424.559.725,1.004.835Zm-.083-2.056c.133-.097.288-.148.445-.148.061,0,.122.008.183.023.232.058.42.219.514.446.13.315.02.691-.258.889-.182.13-.405.172-.619.118-.232-.058-.42-.219-.514-.446-.129-.312-.023-.683.249-.883Zm2.717,10.093l-.828-.477c-.067-.039-.154-.016-.192.052l-1.473,2.577c-1.227-.327-2.587.325-3.009,1.668-.091.289-.125.595-.1.897.071.849.537,1.569,1.253,1.973.377.212.793.321,1.214.321.374,0,.752-.086,1.109-.259.289-.14.549-.34.758-.583.56-.652.743-1.497.522-2.293-.12-.432-.352-.813-.668-1.116l1.468-2.567c.038-.067.015-.153-.052-.192Zm-2.055,5.145l-.213.234c-.161.177-.367.315-.601.366-.298.065-.605.02-.873-.131-.288-.162-.495-.427-.584-.745-.089-.318-.048-.652.115-.939.227-.402.648-.628,1.08-.628.206,0,.415.051.606.16.288.162.495.427.584.745.089.318.048.652-.115.939Z" fill="url(#uuid-10478e68-1009-47b7-9e5e-1dad26a11858)"/><path d="m9.921,5.287l-2.172-1.253c-.339-.195-.757-.195-1.096,0l-2.172,1.253c-.339.196-.548.557-.548.948v2.505c0,.391.209.753.548.949l2.174,1.253c.339.195.757.195,1.096,0l2.174-1.253c.339-.196.548-.557.548-.949v-2.505c-.001-.392-.212-.754-.552-.948Z" fill="url(#uuid-7623d8a9-ce5d-405d-98e0-ff8e832bdf61)"/></svg>')
+                apiPermission: svgIcon('<svg id="uuid-431a759c-a29d-4678-89ee-5b1b2666f890" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="uuid-10478e68-1009-47b7-9e5e-1dad26a11858" x1="9" y1="18" x2="9" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#198ab3"/><stop offset="1" stop-color="#32bedd"/></linearGradient><linearGradient id="uuid-7623d8a9-ce5d-405d-98e0-ff8e832bdf61" x1="7.203" y1="11.089" x2="7.203" y2="3.888" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#6f4bb2"/><stop offset="1" stop-color="#c69aeb"/></linearGradient></defs><path d="m11.844,12.791c-.316-.081-.641-.073-.947.015l-1.295-2.124c-.04-.065-.124-.087-.19-.049l-.536.309c-.068.039-.091.128-.05.195l1.296,2.127c-.667.668-.737,1.797.01,2.551.12.121.259.223.41.302.276.143.568.213.857.213.463,0,.916-.18,1.273-.527.125-.121.23-.263.31-.417.302-.579.28-1.233-.037-1.769-.245-.413-.636-.707-1.102-.826Zm.424,1.965c-.06.232-.207.428-.414.55-.207.122-.449.156-.682.097-.278-.071-.503-.267-.614-.541-.141-.349-.041-.762.245-1.007.171-.147.379-.222.592-.222.075,0,.151.009.225.029.233.06.428.206.551.413h0c.122.207.157.448.097.681Zm3.555-9.443c-1.012,0-1.863.695-2.106,1.631h-2.54c-.078,0-.141.063-.141.141v.806c0,.078.063.141.141.141h2.54c.243.937,1.093,1.631,2.106,1.631,1.201,0,2.177-.976,2.177-2.175s-.977-2.175-2.177-2.175Zm1.068,2.388c-.082.428-.427.772-.854.854-.766.146-1.428-.515-1.282-1.28.082-.428.426-.772.854-.854.766-.147,1.429.515,1.283,1.28ZM2.978,2.953c.121.03.244.045.366.045.144,0,.286-.022.423-.063l.884,1.447c.04.065.124.087.19.049l.406-.234c.068-.039.091-.128.05-.195l-.887-1.453c.468-.475.577-1.224.218-1.821-.206-.343-.534-.585-.923-.682-.445-.111-.909-.016-1.28.267-.547.417-.737,1.18-.45,1.805.195.424.559.725,1.004.835Zm-.083-2.056c.133-.097.288-.148.445-.148.061,0,.122.008.183.023.232.058.42.219.514.446.13.315.02.691-.258.889-.182.13-.405.172-.619.118-.232-.058-.42-.219-.514-.446-.129-.312-.023-.683.249-.883Zm2.717,10.093l-.828-.477c-.067-.039-.154-.016-.192.052l-1.473,2.577c-1.227-.327-2.587.325-3.009,1.668-.091.289-.125.595-.1.897.071.849.537,1.569,1.253,1.973.377.212.793.321,1.214.321.374,0,.752-.086,1.109-.259.289-.14.549-.34.758-.583.56-.652.743-1.497.522-2.293-.12-.432-.352-.813-.668-1.116l1.468-2.567c.038-.067.015-.153-.052-.192Zm-2.055,5.145l-.213.234c-.161.177-.367.315-.601.366-.298.065-.605.02-.873-.131-.288-.162-.495-.427-.584-.745-.089-.318-.048-.652.115-.939.227-.402.648-.628,1.08-.628.206,0,.415.051.606.16.288.162.495.427.584.745.089.318.048.652-.115.939Z" fill="url(#uuid-10478e68-1009-47b7-9e5e-1dad26a11858)"/><path d="m9.921,5.287l-2.172-1.253c-.339-.195-.757-.195-1.096,0l-2.172,1.253c-.339.196-.548.557-.548.948v2.505c0,.391.209.753.548.949l2.174,1.253c.339.195.757.195,1.096,0l2.174-1.253c.339-.196.548-.557.548-.949v-2.505c-.001-.392-.212-.754-.552-.948Z" fill="url(#uuid-7623d8a9-ce5d-405d-98e0-ff8e832bdf61)"/></svg>'),
+                appRoleAssignment: svgIcon(linkedAssignmentIconSvg),
+                linkedAssignment: svgIcon(linkedAssignmentIconSvg)
             };
 
             const nodes = new vis.DataSet(filteredNodes.map(node => {
@@ -487,7 +496,8 @@ function New-ScEntraGraphSection {
                                   node.type === 'group' ? '#2196F3' :
                                   node.type === 'role' ? '#FF5722' :
                                   node.type === 'servicePrincipal' ? '#9C27B0' :
-                                  node.type === 'application' ? '#FF9800' : '#999';
+                                  node.type === 'application' ? '#FF9800' :
+                                  node.type === 'appRoleAssignment' ? '#8e9aa3' : '#999';
                 const fallbackShape = node.shape || (node.type === 'role' ? 'diamond' : (node.type === 'group' ? 'box' : 'dot'));
                 const detailTags = [];
                 if (node.type === 'group') {
@@ -1794,7 +1804,8 @@ function New-ScEntraGraphSection {
                     role: '#FF5722',
                     servicePrincipal: '#9C27B0',
                     application: '#FF9800',
-                    apiPermission: '#6A5ACD'
+                    apiPermission: '#6A5ACD',
+                    appRoleAssignment: '#0ea5e9'
                 };
                 const typeColor = typeColors[node.type] || '#999';
                 const isCriticalPathNode = criticalPathNodeIds.has(node.id);
@@ -1901,6 +1912,16 @@ function New-ScEntraGraphSection {
                         const css = node.isManagedIdentity ? 'status-info' : 'status-positive';
                         detailsHtml += '<tr><td class="detail-label">Identity Kind</td><td class="detail-value">' + statusChip(text, css) + '</td></tr>';
                     }
+                } else if (node.type === 'appRoleAssignment') {
+                    if (Array.isArray(node.resourceNames) && node.resourceNames.length > 0) {
+                        detailsHtml += '<tr><td class="detail-label">Target Resources</td><td class="detail-value">' + node.resourceNames.join(', ') + '</td></tr>';
+                    }
+                    if (typeof node.principalCount === 'number') {
+                        detailsHtml += '<tr><td class="detail-label">Linked Principals</td><td class="detail-value">' + node.principalCount + '</td></tr>';
+                    }
+                    if (typeof node.assignmentCount === 'number') {
+                        detailsHtml += '<tr><td class="detail-label">Total Grants</td><td class="detail-value">' + node.assignmentCount + '</td></tr>';
+                    }
                 } else if (node.type === 'apiPermission') {
                     if (node.resource) {
                         detailsHtml += '<tr><td class="detail-label">Resource</td><td class="detail-value">' + node.resource + '</td></tr>';
@@ -1972,6 +1993,62 @@ function New-ScEntraGraphSection {
                 }
 
                 detailsHtml += '</table></div>';
+
+                if (node.type === 'appRoleAssignment' && Array.isArray(node.assignmentPrincipals) && node.assignmentPrincipals.length > 0) {
+                    const maxPrincipalRows = 25;
+                    detailsHtml += '<div class="detail-section">';
+                    detailsHtml += '<h4>Principal Assignments</h4>';
+                    detailsHtml += '<table class="detail-table assignment-detail-table">';
+                    detailsHtml += '<tr><th>Principal</th><th>Type</th><th>Roles Granted</th></tr>';
+                    node.assignmentPrincipals.slice(0, maxPrincipalRows).forEach(principal => {
+                        const displayName = principal.principalDisplayName || principal.principalId || 'Unknown principal';
+                        const principalType = principal.principalType || 'Unknown';
+                        const grantCount = (typeof principal.assignmentCount === 'number' && principal.assignmentCount > 1)
+                            ? ' (' + principal.assignmentCount + ' grants)'
+                            : '';
+                        const roleSummary = (Array.isArray(principal.roleNames) && principal.roleNames.length > 0)
+                            ? principal.roleNames.join(', ')
+                            : 'All application permissions';
+                        const roleLabel = principal.roleCount === 1 ? ' role' : ' roles';
+                        const roleCountPrefix = (typeof principal.roleCount === 'number' && principal.roleCount > 0)
+                            ? principal.roleCount + roleLabel + ': '
+                            : '';
+                        const roleDetails = Array.isArray(principal.roleDetails)
+                            ? principal.roleDetails.filter(detail => detail && (detail.name || detail.description))
+                            : [];
+                        let roleValueHtml = '';
+                        if (roleCountPrefix) {
+                            roleValueHtml += '<div class="role-grant-summary">' + roleCountPrefix + '</div>';
+                        }
+                        if (roleDetails.length > 0) {
+                            roleValueHtml += '<div class="role-grant-list">';
+                            roleDetails.forEach(detail => {
+                                const detailName = detail.name || 'Application permission';
+                                const detailDescription = detail.description || '';
+                                roleValueHtml += '<div class="role-grant-item">';
+                                roleValueHtml += '<div class="role-grant-title">' + detailName + '</div>';
+                                if (detailDescription) {
+                                    roleValueHtml += '<div class="role-grant-description">' + detailDescription + '</div>';
+                                }
+                                roleValueHtml += '</div>';
+                            });
+                            roleValueHtml += '</div>';
+                        } else {
+                            roleValueHtml += roleSummary;
+                        }
+                        detailsHtml += '<tr>' +
+                            '<td class="detail-label">' + displayName + grantCount + '</td>' +
+                            '<td class="detail-value">' + principalType + '</td>' +
+                            '<td class="detail-value">' + roleValueHtml + '</td>' +
+                            '</tr>';
+                    });
+                    detailsHtml += '</table>';
+                    if (node.assignmentPrincipals.length > maxPrincipalRows) {
+                        const remaining = node.assignmentPrincipals.length - maxPrincipalRows;
+                        detailsHtml += '<div class="detail-more">+' + remaining + ' additional principals not shown</div>';
+                    }
+                    detailsHtml += '</div>';
+                }
 
                 if (node.type === 'apiPermission' && (node.permissionDescription || node.escalationDescription)) {
                     detailsHtml += '<div class="detail-section">';
@@ -3494,6 +3571,40 @@ function New-ScEntraReportDocument {
         .detail-table {
             width: 100%;
             border-collapse: collapse;
+        }
+        .assignment-detail-table th {
+            text-align: left;
+            padding-bottom: 8px;
+            font-size: 0.9em;
+            color: var(--muted-text-color);
+        }
+        .assignment-detail-table td {
+            padding-top: 10px;
+            border-top: 1px solid var(--border-color);
+        }
+        .role-grant-summary {
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+        .role-grant-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .role-grant-item {
+            padding: 8px 10px;
+            border-radius: 6px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+        }
+        .role-grant-title {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .role-grant-description {
+            font-size: 0.9em;
+            color: var(--muted-text-color);
+            line-height: 1.4;
         }
         .detail-label {
             color: var(--muted-text-color);
