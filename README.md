@@ -24,8 +24,6 @@ ScEntra is a PowerShell security analysis tool for Microsoft Entra ID (formerly 
 ## 📋 Prerequisites
 
 - **PowerShell 7.0+** (PowerShell Core)
-- **Azure PowerShell Modules** (for service principal creation):
-  - `Az.Accounts` - for Azure authentication
 - **Microsoft Graph API Permissions** (one of):
   - Azure PowerShell (`Connect-AzAccount`) with appropriate role
   - Azure CLI (`az login`)
