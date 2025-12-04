@@ -41,7 +41,6 @@ function Connect-ScEntraGraph {
             "RoleManagement.Read.Directory",
             "RoleEligibilitySchedule.Read.Directory",
             "RoleAssignmentSchedule.Read.Directory",
-            "PrivilegedAccess.Read.AzureADGroup",
             "DelegatedPermissionGrant.Read.All"
         ),
 
@@ -54,8 +53,11 @@ function Connect-ScEntraGraph {
         Write-Host "`nInitiating OAuth2 Device Code Flow..." -ForegroundColor Cyan
         
         # Use custom client ID if provided, otherwise use Microsoft Graph PowerShell client ID
-        $clientId = if ($ClientId) { $ClientId } else { "5caa888d-218c-44a6-a081-016410ff8b3b" }
-        $scopeString = ($Scopes | ForEach-Object { "https://graph.microsoft.com/$_" }) -join " "
+        $clientId = if ($ClientId) { $ClientId } else { "14d82eec-204b-4c2f-b7e8-296a70dab67e" }
+        
+        # Build scope string with proper resource prefix
+        # Each scope needs to be in the format: https://graph.microsoft.com/.default OR individual scopes with resource prefix
+        $scopeString = "https://graph.microsoft.com/.default offline_access"
         
         # Get module version for User-Agent
         $moduleVersion = '1.0.0'
@@ -205,7 +207,7 @@ function Connect-ScEntraGraph {
                 Write-Verbose "Token scopes: $($tokenInfo.Scopes -join ', ')"
                 $missingScopes = $Scopes | Where-Object { $_ -notin $tokenInfo.Scopes }
                 if ($missingScopes) {
-                    Write-Warning "Azure CLI token is missing required scopes: $($missingScopes -join ', ')"
+                    # Write-Warning "Azure CLI token is missing required scopes: $($missingScopes -join ', ')"
                     Write-Host "Consider using device code flow for full permissions: Connect-ScEntraGraph -UseDeviceCode" -ForegroundColor Yellow
                 }
             }
