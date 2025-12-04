@@ -107,9 +107,8 @@ function ConvertTo-ScEntraSelfDecryptingHtml {
     param(
         [Parameter(Mandatory = $true)][string]$HtmlContent,
         [Parameter(Mandatory = $true)][System.Security.SecureString]$Password,
-        [Parameter(Mandatory = $false)][int]$IterationCount = 200000,
-        [Parameter(Mandatory = $false)][string]$DocumentTitle = 'ScEntra Encrypted Report',
-        [Parameter(Mandatory = $false)][switch]$AutoUnlock
+        [Parameter(Mandatory = $false)][int]$IterationCount = 1000,
+        [Parameter(Mandatory = $false)][string]$DocumentTitle = 'ScEntra Encrypted Report'
     )
 
     if ($null -eq $HtmlContent) {
@@ -151,10 +150,6 @@ function ConvertTo-ScEntraSelfDecryptingHtml {
         $cryptoStream.Dispose()
         $memoryStream.Dispose()
         $aes.Dispose()
-
-        if ($AutoUnlock) {
-            $embeddedSecret = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($passwordText))
-        }
     }
     finally {
         $passwordText = $null
@@ -170,10 +165,6 @@ function ConvertTo-ScEntraSelfDecryptingHtml {
         payload    = [System.Convert]::ToBase64String($cipherBytes)
     }
 
-    if ($AutoUnlock -and $embeddedSecret) {
-        $envelope.autoUnlock = $true
-        $envelope.secret = $embeddedSecret
-    }
     $envelopeJson = $envelope | ConvertTo-Json -Depth 5 -Compress
 
     $safeTitle = if ([string]::IsNullOrWhiteSpace($DocumentTitle)) {
@@ -183,18 +174,13 @@ function ConvertTo-ScEntraSelfDecryptingHtml {
         [System.Net.WebUtility]::HtmlEncode($DocumentTitle)
     }
 
-    $generateId = {
-        param([string]$prefix)
-        "$prefix$([System.Guid]::NewGuid().ToString('N').Substring(0, 6))"
-    }
-
     $domIds = [ordered]@{
-        shell    = & $generateId 'x'
-        message  = & $generateId 'x'
-        form     = & $generateId 'x'
-        password = & $generateId 'x'
-        button   = & $generateId 'x'
-        error    = & $generateId 'x'
+        shell    = 'encrypted-shell'
+        message  = 'status-message'
+        form     = 'password-form'
+        password = 'password-input'
+        button   = 'unlock-button'
+        error    = 'error-message'
     }
 
     $idJson = $domIds | ConvertTo-Json -Compress
@@ -216,12 +202,20 @@ function ConvertTo-ScEntraSelfDecryptingHtml {
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>$safeTitle</title>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        html, body { height: 100%; }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html, body {
+            height: 100%;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -230,6 +224,7 @@ function ConvertTo-ScEntraSelfDecryptingHtml {
             justify-content: center;
             color: #fff;
         }
+
         #$($domIds.shell) {
             width: min(460px, 94vw);
             padding: 3rem 2.5rem;
@@ -239,12 +234,14 @@ function ConvertTo-ScEntraSelfDecryptingHtml {
             backdrop-filter: blur(16px);
             border: 1px solid rgba(255, 255, 255, 0.18);
         }
+
         h1 {
             font-size: 1.75rem;
             margin-bottom: 0.5rem;
             font-weight: 700;
             text-align: center;
         }
+
         #$($domIds.message) {
             text-align: center;
             margin: 1.25rem 0;
@@ -252,6 +249,7 @@ function ConvertTo-ScEntraSelfDecryptingHtml {
             opacity: 0.92;
             min-height: 1.4rem;
         }
+
         label {
             display: block;
             margin-bottom: 0.5rem;
@@ -259,6 +257,7 @@ function ConvertTo-ScEntraSelfDecryptingHtml {
             font-size: 0.9rem;
             opacity: 0.95;
         }
+
         input[type="password"] {
             width: 100%;
             padding: 1rem;
@@ -269,14 +268,17 @@ function ConvertTo-ScEntraSelfDecryptingHtml {
             font-size: 1rem;
             transition: all 0.2s;
         }
+
         input[type="password"]:focus {
             outline: none;
             border-color: rgba(255, 255, 255, 0.5);
             background: rgba(255, 255, 255, 0.22);
         }
+
         input[type="password"]::placeholder {
             color: rgba(255, 255, 255, 0.5);
         }
+
         button {
             margin-top: 1.5rem;
             width: 100%;
@@ -292,14 +294,17 @@ function ConvertTo-ScEntraSelfDecryptingHtml {
             transition: transform 0.2s, box-shadow 0.2s;
             box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
         }
+
         button:hover:not(:disabled) {
             transform: translateY(-2px);
             box-shadow: 0 12px 25px rgba(0, 0, 0, 0.3);
         }
+
         button:disabled {
             opacity: 0.6;
             cursor: not-allowed;
         }
+
         #$($domIds.error) {
             margin-top: 1rem;
             text-align: center;
@@ -311,6 +316,7 @@ function ConvertTo-ScEntraSelfDecryptingHtml {
             min-height: 1.4rem;
             display: none;
         }
+
         #$($domIds.error):not(:empty) {
             display: block;
         }
@@ -322,138 +328,123 @@ function ConvertTo-ScEntraSelfDecryptingHtml {
         <p id="$($domIds.message)"></p>
         <form id="$($domIds.form)">
             <label for="$($domIds.password)">Enter Password</label>
-            <input id="$($domIds.password)" type="password" placeholder="Password" autocomplete="current-password" required />
+            <input id="$($domIds.password)" type="password" placeholder="Password" autocomplete="current-password" required>
             <button id="$($domIds.button)" type="submit">Unlock Report</button>
             <div id="$($domIds.error)" role="alert" aria-live="polite"></div>
         </form>
     </main>
     <script>
-        const e = $envelopeJson;
-        (function () {
-            const doc = document;
-            const ids = $idJson;
-            const phrases = $encodedTextsJson;
+        const envelope = JSON.parse('$envelopeJson');
+        (function() {
+            const document = window.document;
+            const ids = JSON.parse('$idJson');
+            const encodedTexts = JSON.parse('$encodedTextsJson');
 
-            const fromBase64 = (value) => {
+            const decodeText = (encoded) => {
                 try {
-                    return decodeURIComponent(window.atob(value).split('').map((ch) => '%' + ('00' + ch.charCodeAt(0).toString(16)).slice(-2)).join(''));
-                }
-                catch (err) {
-                    return window.atob(value);
+                    return decodeURIComponent(window.atob(encoded).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+                } catch (e) {
+                    return window.atob(encoded);
                 }
             };
 
-            const text = {};
-            Object.keys(phrases).forEach((key) => {
-                text[key] = fromBase64(phrases[key]);
+            const texts = {};
+            Object.keys(encodedTexts).forEach(key => {
+                texts[key] = decodeText(encodedTexts[key]);
             });
 
-            const lookup = (key) => doc.getElementById(ids[key]);
-            const form = lookup('form');
-            const secret = lookup('password');
-            const submit = lookup('button');
-            const message = lookup('message');
-            const error = lookup('error');
+            const getElement = (key) => document.getElementById(ids[key]);
+            const form = getElement('form');
+            const passwordInput = getElement('password');
+            const button = getElement('button');
+            const message = getElement('message');
+            const errorDiv = getElement('error');
 
-            message.textContent = text.prompt;
+            message.textContent = texts.prompt;
 
-            const cryptoApi = (window.crypto || {}).subtle;
-            if (!cryptoApi) {
-                message.textContent = text.warn;
+            const crypto = window.crypto?.subtle;
+            if (!crypto) {
+                message.textContent = texts.warn;
                 form.style.display = 'none';
                 return;
             }
 
             const encoder = new TextEncoder();
             const decoder = new TextDecoder();
-            let autoUnlockSecret = (e.autoUnlock === true && typeof e.secret === 'string' && e.secret.length > 0) ? fromBase64(e.secret) : null;
 
-            const b64ToBytes = (b64) => {
-                const binary = window.atob(b64);
-                const bytes = new Uint8Array(binary.length);
-                for (let i = 0; i < binary.length; i += 1) {
-                    bytes[i] = binary.charCodeAt(i);
+            const base64ToBytes = (base64) => {
+                const binaryString = window.atob(base64);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
                 }
                 return bytes;
             };
 
             const deriveKey = async (password, salt) => {
-                const material = await cryptoApi.importKey('raw', encoder.encode(password), { name: 'PBKDF2' }, false, ['deriveKey']);
-                return cryptoApi.deriveKey(
-                    { name: 'PBKDF2', salt, iterations: e.iterations, hash: 'SHA-256' },
-                    material,
+                return crypto.deriveKey(
+                    {
+                        name: 'PBKDF2',
+                        salt: salt,
+                        iterations: envelope.iterations,
+                        hash: 'SHA-256'
+                    },
+                    await crypto.importKey('raw', encoder.encode(password), { name: 'PBKDF2' }, false, ['deriveKey']),
                     { name: 'AES-CBC', length: 256 },
                     false,
                     ['decrypt']
                 );
             };
 
-            const decryptHtml = async (password) => {
-                const salt = b64ToBytes(e.salt);
-                const iv = b64ToBytes(e.iv);
-                const payload = b64ToBytes(e.payload);
+            const decryptData = async (password) => {
+                const salt = base64ToBytes(envelope.salt);
+                const iv = base64ToBytes(envelope.iv);
+                const payload = base64ToBytes(envelope.payload);
                 const key = await deriveKey(password, salt);
-                const buffer = await cryptoApi.decrypt({ name: 'AES-CBC', iv }, key, payload);
-                return decoder.decode(buffer);
+                return decoder.decode(await crypto.decrypt({ name: 'AES-CBC', iv: iv }, key, payload));
             };
 
-            const renderReport = (html) => {
+            const displayReport = (html) => {
                 document.open();
                 document.write(html);
                 document.close();
             };
 
-            const unlockWithPassword = async (password) => {
-                const decrypted = await decryptHtml(password);
-                renderReport(decrypted);
+            const unlockReport = async (password) => {
+                const html = await decryptData(password);
+                displayReport(html);
             };
 
-            const setBusy = (active) => {
-                submit.disabled = active;
-                secret.disabled = active;
-                submit.textContent = active ? text.busy : 'Unlock Report';
+            const setBusy = (busy) => {
+                button.disabled = passwordInput.disabled = busy;
+                button.textContent = busy ? texts.busy : 'Unlock Report';
             };
 
-            const showPrompt = () => {
+            const resetForm = () => {
                 form.style.removeProperty('display');
                 setBusy(false);
-                message.textContent = text.prompt;
-                error.textContent = '';
-                secret.focus();
-                secret.select();
+                message.textContent = texts.prompt;
+                errorDiv.textContent = '';
+                passwordInput.focus();
+                passwordInput.select();
             };
 
             form.addEventListener('submit', async (event) => {
                 event.preventDefault();
-                error.textContent = '';
+                errorDiv.textContent = '';
                 setBusy(true);
-
                 try {
-                    await unlockWithPassword(secret.value);
-                }
-                catch (err) {
-                    console.error('Failed to decrypt report', err);
-                    error.textContent = text.error;
+                    await unlockReport(passwordInput.value);
+                } catch (error) {
+                    console.error('Failed to decrypt report', error);
+                    errorDiv.textContent = texts.error;
                     setBusy(false);
-                    secret.focus();
-                    secret.select();
+                    passwordInput.focus();
+                    passwordInput.select();
                 }
             });
 
-            if (autoUnlockSecret) {
-                form.style.display = 'none';
-                setBusy(true);
-                message.textContent = text.busy;
-
-                unlockWithPassword(autoUnlockSecret).catch((err) => {
-                    console.warn('Auto unlock failed', err);
-                    autoUnlockSecret = null;
-                    showPrompt();
-                });
-            }
-            else {
-                secret.focus();
-            }
+            passwordInput.focus();
         })();
     </script>
 </body>

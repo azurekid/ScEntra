@@ -30,14 +30,14 @@ function Get-ScEntraEscalationPaths {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)]
-        [array]$Users,
+        [Parameter(Mandatory = $false)]
+        [array]$Users = @(),
 
-        [Parameter(Mandatory = $true)]
-        [array]$Groups,
+        [Parameter(Mandatory = $false)]
+        [array]$Groups = @(),
 
-        [Parameter(Mandatory = $true)]
-        [array]$RoleAssignments,
+        [Parameter(Mandatory = $false)]
+        [array]$RoleAssignments = @(),
 
         [Parameter(Mandatory = $false)]
         [array]$PIMAssignments = @(),
@@ -66,6 +66,23 @@ function Get-ScEntraEscalationPaths {
         [Parameter(Mandatory = $false)]
         [int]$CircuitBreakerThreshold = 20
     )
+
+    # Return early if no data to analyze
+    if (($Users.Count -eq 0) -and ($Groups.Count -eq 0) -and ($RoleAssignments.Count -eq 0)) {
+        Write-Warning "No data available for escalation path analysis."
+        return @{
+            Risks = @()
+            GraphData = @{
+                nodes = @()
+                edges = @()
+                escalationStats = @{
+                    totalEdges = 0
+                    criticalRoles = 0
+                    escalationEdges = 0
+                }
+            }
+        }
+    }
 
     if (-not (Test-GraphConnection)) {
         return @()
@@ -145,11 +162,11 @@ function Get-ScEntraEscalationPaths {
         $permissionEscalationLookup[$entry.Permission] = $entry
     }
 
-    $groupsWithRoles = $RoleAssignments | Where-Object { $_.MemberType -eq 'group' } | Select-Object -ExpandProperty MemberId -Unique
-    $pimEnabledGroupIds = $Groups | Where-Object { $_.isPIMEnabled -eq $true } | Select-Object -ExpandProperty id -Unique
-    $roleEnabledGroups = $Groups | Where-Object { $_.isAssignableToRole -eq $true } | Select-Object -ExpandProperty id
+    $groupsWithRoles = @($RoleAssignments | Where-Object { $_.MemberType -eq 'group' } | Select-Object -ExpandProperty MemberId -Unique)
+    $pimEnabledGroupIds = @($Groups | Where-Object { $_.isPIMEnabled -eq $true } | Select-Object -ExpandProperty id -Unique)
+    $roleEnabledGroups = @($Groups | Where-Object { $_.isAssignableToRole -eq $true } | Select-Object -ExpandProperty id)
 
-    $relevantGroupIds = @($groupsWithRoles; $pimEnabledGroupIds; $roleEnabledGroups) | Select-Object -Unique
+    $relevantGroupIds = @($groupsWithRoles + $pimEnabledGroupIds + $roleEnabledGroups) | Select-Object -Unique
 
     Write-Host "Found $($roleEnabledGroups.Count) role-assignable groups" -ForegroundColor Yellow
     Write-Host "Found $($pimEnabledGroupIds.Count) PIM-enabled groups" -ForegroundColor Yellow
@@ -735,7 +752,7 @@ function Get-ScEntraEscalationPaths {
     Write-Verbose "Building graph data structure for visualization..."
     Write-Progress -Activity "Analyzing escalation paths" -Status "Building graph visualization data" -PercentComplete 95 -Id 5
 
-    $allRoleAssignments = @($RoleAssignments; $PIMAssignments)
+    $allRoleAssignments = @($RoleAssignments + $PIMAssignments)
 
     $graphData = New-ScEntraGraphData `
         -Users $Users `

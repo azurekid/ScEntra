@@ -28,10 +28,6 @@ function Invoke-ScEntraAnalysis {
     .PARAMETER DeletePlaintextAfterEncryption
         Legacy switch retained for compatibility. Encrypted reports are written directly so the
         switch has no effect.
-
-    .PARAMETER AutoUnlock
-        Embeds the supplied password so the encrypted HTML decrypts automatically on load while
-        keeping the payload encrypted at rest.
     #>
 
     [CmdletBinding()]
@@ -55,20 +51,13 @@ function Invoke-ScEntraAnalysis {
         [string]$EncryptedOutputPath,
 
         [Parameter(Mandatory = $false)]
-        [switch]$DeletePlaintextAfterEncryption,
-
-        [Parameter(Mandatory = $false)]
-        [switch]$AutoUnlock
+        [switch]$DeletePlaintextAfterEncryption
     )
 
     if (-not $EncryptReport -and (
             $PSBoundParameters.ContainsKey('EncryptionPassword') -or 
             $PSBoundParameters.ContainsKey('EncryptedOutputPath') -or 
             $DeletePlaintextAfterEncryption)) {
-        $EncryptReport = $true
-    }
-
-    if ($AutoUnlock -and -not $EncryptReport) {
         $EncryptReport = $true
     }
 
@@ -180,12 +169,6 @@ function Invoke-ScEntraAnalysis {
         
         $encryptOptions['EncryptionPassword'] = $password
         
-        Write-Host "`nAuto-unlock (embed password for automatic decryption)? [y/N]" -ForegroundColor Yellow
-        $autoUnlock = Read-Host
-        if ($autoUnlock -eq 'y' -or $autoUnlock -eq 'Y') {
-            $encryptOptions['AutoUnlock'] = $true
-        }
-        
         return $encryptOptions
     }
 
@@ -233,8 +216,7 @@ function Invoke-ScEntraAnalysis {
                         -EncryptReport:$EncryptReport `
                         -EncryptionPassword $EncryptionPassword `
                         -EncryptedOutputPath $EncryptedOutputPath `
-                        -DeletePlaintextAfterEncryption:$DeletePlaintextAfterEncryption `
-                        -AutoUnlock:$AutoUnlock
+                        -DeletePlaintextAfterEncryption:$DeletePlaintextAfterEncryption
                     Write-Host "`nPress any key to continue..." -ForegroundColor Gray
                     $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
                 }
@@ -249,9 +231,6 @@ function Invoke-ScEntraAnalysis {
             }
         } while ($true)
     }
-
-    # Display logo initially
-    Show-ScEntraLogo
 
     # Show connection status
     try {
@@ -291,8 +270,7 @@ function Invoke-ScEntraAnalysis {
             [switch]$EncryptReport,
             [System.Security.SecureString]$EncryptionPassword,
             [string]$EncryptedOutputPath,
-            [switch]$DeletePlaintextAfterEncryption,
-            [switch]$AutoUnlock
+            [switch]$DeletePlaintextAfterEncryption
         )
 
         $analysisOutputPath = $OutputPath
@@ -423,54 +401,66 @@ function Invoke-ScEntraAnalysis {
             }
         } -ThrottleLimit 3
 
-        $inventoryResult = $parallelResults | Where-Object { $_.Type -eq 'inventory' }
-        $spResult = $parallelResults | Where-Object { $_.Type -eq 'sp' }
-        $appResult = $parallelResults | Where-Object { $_.Type -eq 'app' }
+        $inventoryResult = $parallelResults | Where-Object { $_.Type -eq 'inventory' } | Select-Object -First 1
+        $spResult = $parallelResults | Where-Object { $_.Type -eq 'sp' } | Select-Object -First 1
+        $appResult = $parallelResults | Where-Object { $_.Type -eq 'app' } | Select-Object -First 1
 
-        $users = $inventoryResult.Users
-        $groups = $inventoryResult.Groups
-        $servicePrincipals = $spResult.ServicePrincipals
-        $appRegistrations = $appResult.AppRegistrations
+        $users = if ($inventoryResult -and $inventoryResult.Users) { $inventoryResult.Users } else { @() }
+        $groups = if ($inventoryResult -and $inventoryResult.Groups) { $inventoryResult.Groups } else { @() }
+        $servicePrincipals = if ($spResult -and $spResult.ServicePrincipals) { $spResult.ServicePrincipals } else { @() }
+        $appRegistrations = if ($appResult -and $appResult.AppRegistrations) { $appResult.AppRegistrations } else { @() }
 
-        if ($inventoryResult.Error) {
+        Write-Host "  ✓ Collected: $($users.Count) users, $($groups.Count) groups, $($servicePrincipals.Count) service principals, $($appRegistrations.Count) app registrations" -ForegroundColor Green
+
+        if ($inventoryResult -and $inventoryResult.Error) {
             Write-Warning "Error retrieving users and groups: $($inventoryResult.Error)"
         }
-        if ($spResult.Error) {
-            Write-Error "Failed to retrieve service principals: $($spResult.Error)"
+        if ($spResult -and $spResult.Error) {
+            Write-Warning "Failed to retrieve service principals: $($spResult.Error)"
         }
-        if ($appResult.Error) {
-            Write-Error "Failed to retrieve app registrations: $($appResult.Error)"
+        if ($appResult -and $appResult.Error) {
+            Write-Warning "Failed to retrieve app registrations: $($appResult.Error)"
         }
 
         Write-Host "[3/5] Enumerating Role Assignments..." -ForegroundColor Cyan
+        $roleAssignments = @()
         try {
-            $roleAssignments = Get-ScEntraRoleAssignments
+            $result = Get-ScEntraRoleAssignments
+            if ($result) {
+                $roleAssignments = $result
+            } else {
+                # Write-Host "DEBUG: Result was null/empty, keeping empty array" -ForegroundColor Yellow
+            }
         }
         catch {
-            Write-Error "Failed to retrieve role assignments: $($_.Exception.Message)"
-            $roleAssignments = @()
+            Write-Warning "Failed to retrieve role assignments: $($_.Exception.Message)"
         }
 
         Write-Host "[3/5] Checking PIM Assignments..." -ForegroundColor Cyan
+        $pimAssignments = @()
         try {
-            $pimAssignments = Get-ScEntraPIMAssignments
+            $result = Get-ScEntraPIMAssignments
+            if ($result) {
+                $pimAssignments = $result
+            }
         }
         catch {
-            Write-Error "Failed to retrieve PIM assignments: $($_.Exception.Message)"
-            $pimAssignments = @()
+            Write-Warning "Failed to retrieve PIM assignments: $($_.Exception.Message)"
         }
 
         $missingPermissions = Get-MissingPermissionsSummary
         if (-not $roleAssignments -or $roleAssignments.Count -eq 0) {
             if ($missingPermissions -and ($missingPermissions -contains 'RoleManagement.Read.Directory')) {
-                Write-Error "Role assignments could not be collected because RoleManagement.Read.Directory is missing. Cannot analyze escalation paths without this dataset."
-                return
+                Write-Warning "Role assignments could not be collected because RoleManagement.Read.Directory is missing. Escalation path analysis will be limited."
+            } else {
+                Write-Warning "No role assignments were returned. Escalation map may be empty."
             }
-
-            Write-Warning "No role assignments were returned. Escalation map may be empty."
         }
 
         Write-Host "[4/5] Analyzing Escalation Paths..." -ForegroundColor Cyan
+        $escalationRisks = @()
+        $graphData = $null
+        
         try {
             $escalationResult = Get-ScEntraEscalationPaths `
                 -Users $users `
@@ -485,19 +475,17 @@ function Invoke-ScEntraAnalysis {
                 -UseParallelEscalation $envConfig.UseParallelEscalation `
                 -EscalationThrottleLimit $envConfig.EscalationThrottleLimit `
                 -CircuitBreakerThreshold $envConfig.CircuitBreakerThreshold
+                
+            if ($escalationResult) {
+                $escalationRisks = $escalationResult.Risks
+                $graphData = $escalationResult.GraphData
+            } else {
+                Write-Warning "Escalation analysis returned no data. Report will be generated with inventory data only."
+            }
         }
         catch {
-            Write-Error "Failed to analyze escalation paths: $($_.Exception.Message)"
-            return
+            Write-Warning "Failed to analyze escalation paths: $($_.Exception.Message). Continuing with inventory data only."
         }
-
-        if (-not $escalationResult) {
-            Write-Error "Escalation analysis returned no data. Unable to continue without graph insights."
-            return
-        }
-
-        $escalationRisks = $escalationResult.Risks
-        $graphData = $escalationResult.GraphData
 
         Write-Host "`n[5/5] Generating Report..." -ForegroundColor Cyan
 
@@ -523,6 +511,15 @@ function Invoke-ScEntraAnalysis {
             if ($redacted.OrganizationInfo) { $organizationInfo = $redacted.OrganizationInfo }
         }
 
+        # Final safety check: ensure all required parameters are never null
+        if (-not $users) { $users = @() }
+        if (-not $groups) { $groups = @() }
+        if (-not $servicePrincipals) { $servicePrincipals = @() }
+        if (-not $appRegistrations) { $appRegistrations = @() }
+        if (-not $roleAssignments) { $roleAssignments = @() }
+        if (-not $pimAssignments) { $pimAssignments = @() }
+        if (-not $escalationRisks) { $escalationRisks = @() }
+        
         try {
             $reportPath = Export-ScEntraReport `
                 -Users $users `
@@ -537,7 +534,6 @@ function Invoke-ScEntraAnalysis {
                 -OutputPath $analysisOutputPath `
                 -EncryptReport:$EncryptReport `
                 -EncryptionPassword $EncryptionPassword `
-                -AutoUnlock:$AutoUnlock `
                 -EncryptedOutputPath $EncryptedOutputPath `
                 -DeletePlaintextAfterEncryption:$DeletePlaintextAfterEncryption
         }
@@ -628,7 +624,7 @@ function Invoke-ScEntraAnalysis {
     do {
         Write-Host "`n📋 Available Functions:" -ForegroundColor Yellow
         Write-Host "  [1] Run Full Analysis" -ForegroundColor White
-        Write-Host "  [2] Connect to Microsoft Graph" -ForegroundColor White
+        Write-Host "  [2] Connect via Device Code Flow" -ForegroundColor White
         Write-Host "  [3] Connect with Current Context" -ForegroundColor White
         Write-Host "  [4] Generate Report from JSON" -ForegroundColor White
         Write-Host "  [5] Check Current Connection" -ForegroundColor White
@@ -647,7 +643,8 @@ function Invoke-ScEntraAnalysis {
                 continue
             }
             "2" {
-                Write-Host "`n▶ Initiating Graph Connection..." -ForegroundColor Cyan
+                Write-Host "`n▶ Initiating Device Code Flow Authentication..." -ForegroundColor Cyan
+                Write-Host "Note: Some organizations block device code flow. Use option 3 if this fails." -ForegroundColor Yellow
                 $requiredScopes = @(
                     "User.Read.All"
                     "Group.Read.All"
@@ -657,7 +654,7 @@ function Invoke-ScEntraAnalysis {
                     "RoleAssignmentSchedule.Read.Directory"
                     "PrivilegedAccess.Read.AzureADGroup"
                 )
-                $connected = Connect-ScEntraGraph -Scopes $requiredScopes -UseDeviceCode
+                $connected = Connect-ScEntraGraph -UseDeviceCode
                 if ($connected) {
                     Write-Host "✓ Successfully connected to Microsoft Graph" -ForegroundColor Green
                 }
@@ -696,7 +693,7 @@ function Invoke-ScEntraAnalysis {
                 Write-Host "`nPress any key to continue..." -ForegroundColor Gray
                 $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
                 Clear-Host
-                Show-ScEntraLogo
+                try { Show-ScEntraLogo } catch { }
                 continue
             }
             "5" {

@@ -9,6 +9,12 @@ function Connect-ScEntraGraph {
     .PARAMETER AccessToken
         Existing access token to use for authentication
 
+    .PARAMETER UseDeviceCode
+        Use OAuth2 device code flow for interactive authentication using the Microsoft Graph PowerShell client ID. Note: Some organizations may block device code flow for security reasons. Use Azure PowerShell (Connect-AzAccount) or Azure CLI (az login) instead when possible.
+
+    .PARAMETER ClientId
+        Custom client ID to use for device code flow authentication. If not specified, uses the Microsoft Graph PowerShell client ID.
+
     .PARAMETER Scopes
         Array of permission scopes required
 
@@ -27,10 +33,11 @@ function Connect-ScEntraGraph {
         [switch]$UseDeviceCode,
 
         [Parameter(Mandatory = $false)]
+        [string]$ClientId,
+
+        [Parameter(Mandatory = $false)]
         [string[]]$Scopes = @(
-            "User.Read.All",
-            "Group.Read.All",
-            "Application.Read.All",
+            "Directory.Read.All",
             "RoleManagement.Read.Directory",
             "RoleEligibilitySchedule.Read.Directory",
             "RoleAssignmentSchedule.Read.Directory",
@@ -46,8 +53,8 @@ function Connect-ScEntraGraph {
     if ($UseDeviceCode) {
         Write-Host "`nInitiating OAuth2 Device Code Flow..." -ForegroundColor Cyan
         
-        # Microsoft Graph PowerShell public client ID (supports custom scopes)
-        $clientId = "14d82eec-204b-4c2f-b7e8-296a70dab67e"
+        # Use custom client ID if provided, otherwise use Microsoft Graph PowerShell client ID
+        $clientId = if ($ClientId) { $ClientId } else { "5caa888d-218c-44a6-a081-016410ff8b3b" }
         $scopeString = ($Scopes | ForEach-Object { "https://graph.microsoft.com/$_" }) -join " "
         
         # Get module version for User-Agent
@@ -101,9 +108,15 @@ function Connect-ScEntraGraph {
                     $tokenResponse = Invoke-RestMethod @tokenRequest -ErrorAction Stop
                     $script:GraphAccessToken = $tokenResponse.access_token
                     Write-Host "`n✓ Successfully authenticated with device code flow!" -ForegroundColor Green
+                    
+                    # Validate token has required scopes
                     $tokenInfo = Get-GraphTokenScopeInfo
                     if ($tokenInfo -and $tokenInfo.Scopes) {
                         Write-Verbose "Granted scopes: $($tokenInfo.Scopes -join ', ')"
+                        $missingScopes = $Scopes | Where-Object { $_ -notin $tokenInfo.Scopes }
+                        if ($missingScopes) {
+                            Write-Warning "Some requested scopes were not granted: $($missingScopes -join ', ')"
+                        }
                     }
                     return $true
                 }
@@ -140,6 +153,17 @@ function Connect-ScEntraGraph {
         $script:GraphAccessToken = $AccessToken
         Write-Verbose "Using provided access token"
         Write-Host "✓ Access token loaded" -ForegroundColor Green
+        
+        # Validate token has required scopes
+        $tokenInfo = Get-GraphTokenScopeInfo
+        if ($tokenInfo -and $tokenInfo.Scopes) {
+            Write-Verbose "Token scopes: $($tokenInfo.Scopes -join ', ')"
+            $missingScopes = $Scopes | Where-Object { $_ -notin $tokenInfo.Scopes }
+            if ($missingScopes) {
+                Write-Warning "Provided token is missing required scopes: $($missingScopes -join ', ')"
+                Write-Host "Consider using device code flow for full permissions: Connect-ScEntraGraph -UseDeviceCode" -ForegroundColor Yellow
+            }
+        }
         return $true
     }
 
@@ -150,6 +174,17 @@ function Connect-ScEntraGraph {
             if ($token) {
                 $script:GraphAccessToken = $token.Token | ConvertFrom-SecureString -AsPlainText
                 Write-Host "✓ Authenticated using Azure PowerShell context" -ForegroundColor Green
+                
+                # Validate token has required scopes
+                $tokenInfo = Get-GraphTokenScopeInfo
+                if ($tokenInfo -and $tokenInfo.Scopes) {
+                    Write-Verbose "Token scopes: $($tokenInfo.Scopes -join ', ')"
+                    $missingScopes = $Scopes | Where-Object { $_ -notin $tokenInfo.Scopes }
+                    if ($missingScopes) {
+                        Write-Warning "Azure PowerShell token is missing required scopes: $($missingScopes -join ', ')"
+                        Write-Host "Consider using device code flow for full permissions: Connect-ScEntraGraph -UseDeviceCode" -ForegroundColor Yellow
+                    }
+                }
                 return $true
             }
         }
@@ -163,6 +198,17 @@ function Connect-ScEntraGraph {
         if ($cliToken -and $cliToken.accessToken) {
             $script:GraphAccessToken = $cliToken.accessToken
             Write-Host "✓ Authenticated using Azure CLI context" -ForegroundColor Green
+            
+            # Validate token has required scopes
+            $tokenInfo = Get-GraphTokenScopeInfo
+            if ($tokenInfo -and $tokenInfo.Scopes) {
+                Write-Verbose "Token scopes: $($tokenInfo.Scopes -join ', ')"
+                $missingScopes = $Scopes | Where-Object { $_ -notin $tokenInfo.Scopes }
+                if ($missingScopes) {
+                    Write-Warning "Azure CLI token is missing required scopes: $($missingScopes -join ', ')"
+                    Write-Host "Consider using device code flow for full permissions: Connect-ScEntraGraph -UseDeviceCode" -ForegroundColor Yellow
+                }
+            }
             return $true
         }
     }
@@ -170,11 +216,12 @@ function Connect-ScEntraGraph {
         Write-Verbose "Azure CLI not available: $_"
     }
 
-    Write-Warning "No existing authentication found. Please provide an access token or authenticate using Azure PowerShell/CLI first."
-    Write-Host "`nTo authenticate, use one of the following methods:" -ForegroundColor Yellow
+    Write-Warning "No existing authentication found. Please authenticate using one of the methods below."
+    Write-Host "`nRecommended authentication methods:" -ForegroundColor Yellow
     Write-Host "1. Azure PowerShell: Connect-AzAccount" -ForegroundColor Cyan
     Write-Host "2. Azure CLI: az login" -ForegroundColor Cyan
     Write-Host "3. Provide access token: Connect-ScEntraGraph -AccessToken <token>" -ForegroundColor Cyan
+    Write-Host "4. Device Code Flow (if not blocked): Connect-ScEntraGraph -UseDeviceCode" -ForegroundColor Cyan
 
     return $false
 }

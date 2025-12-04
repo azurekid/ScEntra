@@ -43,10 +43,6 @@ function Export-ScEntraReport {
         Optional secure-string password to use when EncryptReport is requested. If omitted you
         will be prompted interactively.
 
-    .PARAMETER AutoUnlock
-        When used with EncryptReport, embeds the password inside the HTML envelope so the browser
-        decrypts the report automatically without prompting. Data at rest remains encrypted.
-
     .PARAMETER EncryptedOutputPath
         Optional path for the encrypted HTML wrapper. Defaults to OutputPath when omitted.
 
@@ -59,11 +55,11 @@ function Export-ScEntraReport {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)][array]$Users,
-        [Parameter(Mandatory = $true)][array]$Groups,
-        [Parameter(Mandatory = $true)][array]$ServicePrincipals,
-        [Parameter(Mandatory = $true)][array]$AppRegistrations,
-        [Parameter(Mandatory = $true)][array]$RoleAssignments,
+        [Parameter(Mandatory = $false)][array]$Users = @(),
+        [Parameter(Mandatory = $false)][array]$Groups = @(),
+        [Parameter(Mandatory = $false)][array]$ServicePrincipals = @(),
+        [Parameter(Mandatory = $false)][array]$AppRegistrations = @(),
+        [Parameter(Mandatory = $false)][array]$RoleAssignments = @(),
         [Parameter(Mandatory = $false)][array]$PIMAssignments = @(),
         [Parameter(Mandatory = $false)][array]$EscalationRisks = @(),
         [Parameter(Mandatory = $false)][hashtable]$GraphData = $null,
@@ -72,7 +68,6 @@ function Export-ScEntraReport {
         [Parameter(Mandatory = $false)][string]$OutputPath,
         [Parameter(Mandatory = $false)][System.Security.SecureString]$EncryptionPassword,
         [Parameter(Mandatory = $false)][switch]$EncryptReport,
-        [Parameter(Mandatory = $false)][switch]$AutoUnlock,
         [Parameter(Mandatory = $false)][string]$EncryptedOutputPath,
         [Parameter(Mandatory = $false)][switch]$DeletePlaintextAfterEncryption
     )
@@ -86,10 +81,6 @@ function Export-ScEntraReport {
     }
 
     if (-not $EncryptReport -and $DeletePlaintextAfterEncryption) {
-        $EncryptReport = $true
-    }
-
-    if ($AutoUnlock -and -not $EncryptReport) {
         $EncryptReport = $true
     }
 
@@ -109,6 +100,15 @@ function Export-ScEntraReport {
     if ($targetDirectory -and -not (Test-Path $targetDirectory)) {
         New-Item -ItemType Directory -Path $targetDirectory -Force | Out-Null
     }
+
+    # Ensure no parameters are null
+    if (-not $Users) { $Users = @() }
+    if (-not $Groups) { $Groups = @() }
+    if (-not $ServicePrincipals) { $ServicePrincipals = @() }
+    if (-not $AppRegistrations) { $AppRegistrations = @() }
+    if (-not $RoleAssignments) { $RoleAssignments = @() }
+    if (-not $PIMAssignments) { $PIMAssignments = @() }
+    if (-not $EscalationRisks) { $EscalationRisks = @() }
 
     $stats = Get-ScEntraReportStatistics -Users $Users -Groups $Groups -ServicePrincipals $ServicePrincipals -AppRegistrations $AppRegistrations -RoleAssignments $RoleAssignments -PIMAssignments $PIMAssignments -EscalationRisks $EscalationRisks
     $roleDistribution = Get-ScEntraRoleDistribution -RoleAssignments $RoleAssignments
@@ -134,12 +134,12 @@ function Export-ScEntraReport {
                 'ScEntra Encrypted Report'
             }
 
-            $encryptedHtml = ConvertTo-ScEntraSelfDecryptingHtml -HtmlContent $html -Password $EncryptionPassword -DocumentTitle $docTitle -AutoUnlock:$AutoUnlock
+            $encryptedHtml = ConvertTo-ScEntraSelfDecryptingHtml -HtmlContent $html -Password $EncryptionPassword -DocumentTitle $docTitle
             [System.IO.File]::WriteAllText($targetOutputPath, $encryptedHtml, [System.Text.Encoding]::UTF8)
             Write-Host "Encrypted report saved to: $targetOutputPath" -ForegroundColor Cyan
         }
         else {
-            $html | Out-File -FilePath $targetOutputPath -Encoding UTF8
+            [System.IO.File]::WriteAllText($targetOutputPath, $html, [System.Text.Encoding]::UTF8)
             Write-Host "Report generated successfully: $targetOutputPath" -ForegroundColor Green
         }
 

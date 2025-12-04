@@ -25,6 +25,7 @@
 
     # Modules that must be imported into the global environment prior to importing this module
     # Note: No longer requires Microsoft.Graph PowerShell modules - uses direct REST API calls
+    # Az modules are checked at runtime in functions that require them
     RequiredModules = @()
 
     # Functions to export from this module

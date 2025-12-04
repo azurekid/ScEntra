@@ -6,8 +6,8 @@ $script:GraphApiVersion = 'beta'
 $script:GraphBaseUrl = "https://graph.microsoft.com/$script:GraphApiVersion"
 $script:MissingPermissions = @()
 $script:GraphPermissionHierarchy = @{
-    'Directory.Read.All'            = @('User.Read.All', 'Group.Read.All', 'Application.Read.All', 'ServicePrincipalEndpoint.Read.All', 'RoleManagement.Read.Directory', 'RoleManagement.Read.All')
-    'Directory.ReadWrite.All'       = @('User.ReadWrite.All', 'Group.ReadWrite.All', 'Application.ReadWrite.All', 'Directory.Read.All', 'User.Read.All', 'Group.Read.All', 'Application.Read.All', 'RoleManagement.Read.Directory', 'RoleManagement.Read.All')
+    'Directory.Read.All'            = @('User.Read.All', 'Group.Read.All', 'Application.Read.All', 'ServicePrincipalEndpoint.Read.All', 'DelegatedPermissionGrant.Read.All', 'RoleManagement.Read.Directory', 'RoleManagement.Read.All')
+    'Directory.ReadWrite.All'       = @('User.ReadWrite.All', 'Group.ReadWrite.All', 'Application.ReadWrite.All', 'DelegatedPermissionGrant.ReadWrite.All', 'Directory.Read.All', 'User.Read.All', 'Group.Read.All', 'Application.Read.All', 'DelegatedPermissionGrant.Read.All', 'RoleManagement.Read.Directory', 'RoleManagement.Read.All')
     'User.ReadWrite.All'            = @('User.Read.All')
     'Group.ReadWrite.All'           = @('Group.Read.All')
     'Application.ReadWrite.All'     = @('Application.Read.All')
@@ -186,13 +186,13 @@ function Test-GraphPermissions {
     if ($missing.Count -gt 0) {
         $missingList = $missing -join ', '
         $tokenType = if ($tokenInfo.IsServicePrincipal) { "service principal" } else { "user token" }
-        Write-Warning "⚠️  Missing required permissions for $ResourceName ($tokenType): $missingList"
+        # Write-Warning "⚠️  Missing required permissions for $ResourceName ($tokenType): $missingList"
 
         if ($tokenInfo.IsServicePrincipal) {
             Write-Host "   Service Principal needs these application permissions granted with admin consent" -ForegroundColor Yellow
         }
         else {
-            Write-Host "   To resolve: Reconnect with required permissions or use an account with higher privileges" -ForegroundColor Yellow
+            # Write-Host "   To resolve: Reconnect with required permissions or use an account with higher privileges" -ForegroundColor Yellow
         }
 
         foreach ($perm in $missing) {

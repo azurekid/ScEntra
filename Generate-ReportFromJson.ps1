@@ -42,8 +42,6 @@ param(
     [Parameter(Mandatory = $false)]
     [switch]$NoEncryption,
     [Parameter(Mandatory = $false)]
-    [switch]$AutoUnlock,
-    [Parameter(Mandatory = $false)]
     [System.Security.SecureString]$EncryptionPassword,
     [Parameter(Mandatory = $false)]
     [string]$EncryptedOutputPath,
@@ -67,16 +65,8 @@ if (-not $EncryptReport -and $DeletePlaintextAfterEncryption) {
     $EncryptReport = $true
 }
 
-if (-not $EncryptReport -and $AutoUnlock -and -not $NoEncryption) {
-    $EncryptReport = $true
-}
-
-# Import the module and shared helpers
-Import-Module ./ScEntra.psd1 -Force
-$redactionHelperPath = Join-Path $PSScriptRoot "Private/RedactionHelpers.ps1"
-if (Test-Path $redactionHelperPath) {
-    . $redactionHelperPath
-}
+# Import the ScEntra module
+Import-Module (Join-Path $PSScriptRoot "ScEntra.psd1") -Force
 
 # Check if JSON file exists
 if (-not (Test-Path $JsonPath)) {
@@ -87,13 +77,6 @@ if (-not (Test-Path $JsonPath)) {
 # Read the JSON data
 Write-Host "Reading JSON data from: $JsonPath" -ForegroundColor Cyan
 $jsonData = Get-Content $JsonPath -Raw | ConvertFrom-Json
-
-# Convert GraphData from PSCustomObject to hashtable if it exists
-if ($jsonData.GraphData) {
-    $graphDataHash = @{}
-    $jsonData.GraphData.PSObject.Properties | ForEach-Object { $graphDataHash[$_.Name] = $_.Value }
-    $jsonData.GraphData = $graphDataHash
-}
 
 # Redact PII if requested
 if ($RedactPII) {
@@ -118,12 +101,12 @@ if ($RedactPII) {
     if ($redacted.OrganizationInfo) { $jsonData.OrganizationInfo = $redacted.OrganizationInfo }
 }
 
-# Convert GraphData from PSCustomObject to hashtable if it exists
+# Convert GraphData from PSCustomObject to hashtable if it exists, preserving all properties
 $graphData = $null
 if ($jsonData.GraphData) {
-    $graphData = @{
-        nodes = @($jsonData.GraphData.nodes)
-        edges = @($jsonData.GraphData.edges)
+    $graphData = @{}
+    $jsonData.GraphData.PSObject.Properties | ForEach-Object { 
+        $graphData[$_.Name] = $_.Value 
     }
 }
 
@@ -192,7 +175,6 @@ $reportPath = Export-ScEntraReport `
     -OutputPath $outputPath `
     -EncryptReport:$EncryptReport `
     -EncryptionPassword $EncryptionPassword `
-    -AutoUnlock:$AutoUnlock `
     -EncryptedOutputPath $EncryptedOutputPath `
     -DeletePlaintextAfterEncryption:$DeletePlaintextAfterEncryption
 

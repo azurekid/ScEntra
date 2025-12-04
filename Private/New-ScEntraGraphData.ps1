@@ -57,8 +57,8 @@ function New-ScEntraGraphData {
         [Parameter(Mandatory = $false)]
         [array]$AppRegistrations = @(),
         
-        [Parameter(Mandatory = $true)]
-        [array]$RoleAssignments,
+        [Parameter(Mandatory = $false)]
+        [array]$RoleAssignments = @(),
         
         [Parameter(Mandatory = $false)]
         [array]$PIMAssignments = @(),
@@ -1448,8 +1448,7 @@ function New-ScEntraGraphData {
 
                 foreach ($scopeEntry in $scopeEntries) {
                     $identifier = if ($scopeEntry.ScopeId) { $scopeEntry.ScopeId } else { $scopeEntry.ScopeName }
-                    if (-not $identifier -and $grant.GrantId) { $identifier = "$($grant.GrantId)-scope" }
-                    $permissionNodeId = & $buildPermissionNodeId $resourceKey $identifier $permissionValue
+                    if (-not $identifier -and $grant.GrantId) { $identifier = "$( $grant.GrantId)-scope" }
 
                     $permissionMetadata = if ($scopeEntry.ScopeId) { & $resolvePermissionMetadata $scopeEntry.ScopeId } else { $null }
                     $displayName = if ($scopeEntry.ScopeDisplayName) {
@@ -1464,6 +1463,7 @@ function New-ScEntraGraphData {
                     else {
                         'Delegated Scope'
                     }
+
                     $permissionValue = if ($scopeEntry.ScopeName) {
                         $scopeEntry.ScopeName
                     }
@@ -1473,6 +1473,9 @@ function New-ScEntraGraphData {
                     else {
                         $displayName
                     }
+
+                    $permissionNodeId = & $buildPermissionNodeId $resourceKey $identifier $permissionValue
+
                     $permissionDescription = if ($scopeEntry.ScopeDescription) {
                         $scopeEntry.ScopeDescription
                     }
@@ -1790,7 +1793,77 @@ function New-ScEntraGraphData {
     # 2. PIM-enabled groups (Privileged Access Groups)
     $groupsAdminRoleId = "role-Groups Administrator"
     if ($nodeIndex.ContainsKey($groupsAdminRoleId)) {
+        $stringComparer = [System.StringComparer]::OrdinalIgnoreCase
+        $groupsWithPermissions = [System.Collections.Generic.HashSet[string]]::new($stringComparer)
+        $groupsWithPrivilegedAssignments = [System.Collections.Generic.HashSet[string]]::new($stringComparer)
+
+        foreach ($assignment in $RoleAssignments) {
+            if ($assignment.MemberType -ne 'group' -or -not $assignment.MemberId) { continue }
+            [void]$groupsWithPermissions.Add($assignment.MemberId)
+            if ($assignment.RoleName -and $highPrivilegeRoles -contains $assignment.RoleName) {
+                [void]$groupsWithPrivilegedAssignments.Add($assignment.MemberId)
+            }
+        }
+
+        foreach ($assignment in $PIMAssignments) {
+            if ($assignment.PrincipalType -ne 'group' -or -not $assignment.PrincipalId) { continue }
+            [void]$groupsWithPermissions.Add($assignment.PrincipalId)
+            if ($assignment.RoleName -and $highPrivilegeRoles -contains $assignment.RoleName) {
+                [void]$groupsWithPrivilegedAssignments.Add($assignment.PrincipalId)
+            }
+        }
+
+        $groupsNestedInPrivileged = [System.Collections.Generic.HashSet[string]]::new($stringComparer)
+        $groupPropagationQueue = [System.Collections.Queue]::new()
+
+        foreach ($groupId in $groupsWithPrivilegedAssignments) {
+            if (-not $groupId -or $groupsNestedInPrivileged.Contains($groupId)) { continue }
+            [void]$groupsNestedInPrivileged.Add($groupId)
+            $groupPropagationQueue.Enqueue($groupId)
+        }
+
+        while ($groupPropagationQueue.Count -gt 0) {
+            $currentGroupId = $groupPropagationQueue.Dequeue()
+            if (-not $currentGroupId -or -not $GroupMemberships.ContainsKey($currentGroupId)) { continue }
+            $members = $GroupMemberships[$currentGroupId]
+            if (-not $members) { continue }
+
+            foreach ($member in $members) {
+                $memberType = 'unknown'
+                $memberId = $null
+
+                if ($member -is [hashtable]) {
+                    if ($member.ContainsKey('@odata.type') -and $member.'@odata.type') {
+                        $memberType = $member.'@odata.type' -replace '#microsoft.graph.', ''
+                    }
+                    elseif ($member.ContainsKey('type') -and $member.type) {
+                        $memberType = $member.type
+                    }
+                    if ($member.ContainsKey('id')) { $memberId = $member.id }
+                }
+                else {
+                    if ($member.PSObject.Properties.Name -contains '@odata.type' -and $member.'@odata.type') {
+                        $memberType = $member.'@odata.type' -replace '#microsoft.graph.', ''
+                    }
+                    elseif ($member.PSObject.Properties.Name -contains 'type' -and $member.type) {
+                        $memberType = $member.type
+                    }
+                    if ($member.PSObject.Properties.Name -contains 'id') { $memberId = $member.id }
+                }
+
+                if ($memberType -eq 'group' -and $memberId -and -not $groupsNestedInPrivileged.Contains($memberId)) {
+                    [void]$groupsNestedInPrivileged.Add($memberId)
+                    $groupPropagationQueue.Enqueue($memberId)
+                }
+            }
+        }
+
+        $targetGroupIds = [System.Collections.Generic.HashSet[string]]::new($stringComparer)
+        foreach ($groupId in $groupsWithPermissions) { if ($groupId) { [void]$targetGroupIds.Add($groupId) } }
+        foreach ($groupId in $groupsNestedInPrivileged) { if ($groupId) { [void]$targetGroupIds.Add($groupId) } }
+
         foreach ($group in $Groups) {
+            if (-not $group -or -not $group.id -or -not $targetGroupIds.Contains($group.id)) { continue }
             # Check if group is PIM-enabled (property set directly on the group object)
             $isPIMEnabled = $false
             if ($group.PSObject.Properties.Name -contains 'isPIMEnabled') {
