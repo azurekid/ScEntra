@@ -1,0 +1,191 @@
+#!/usr/bin/env pwsh
+<#
+.SYNOPSIS
+    Regenerates an HTML report from an existing JSON export
+    
+.DESCRIPTION
+    Takes a ScEntra JSON export file and regenerates the HTML report with the latest template
+    
+.PARAMETER JsonPath
+    Path to the JSON file to regenerate from
+    
+.PARAMETER RedactPII
+    Redact personally identifiable information (names, UPNs, emails, etc.) from the report
+
+.PARAMETER EncryptReport
+    Wrap the regenerated HTML in a password-protected, self-decrypting HTML shell that uses AES-256
+    in the browser.
+
+.PARAMETER EncryptionPassword
+    Optional secure string password to use for encryption; prompted if omitted when encrypting
+
+.PARAMETER EncryptedOutputPath
+    Optional destination path for the encrypted HTML wrapper (defaults to the OutputPath value)
+
+.PARAMETER DeletePlaintextAfterEncryption
+    Legacy compatibility switch. No plaintext file is produced when EncryptReport is specified.
+
+.PARAMETER NoEncryption
+    Explicitly disable encryption for the report, ensuring no password is required.
+    
+.EXAMPLE
+    ./Generate-ReportFromJson.ps1 -JsonPath "./ScEntra-Report-20251120-110942.json" -NoEncryption
+#>
+
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$JsonPath,
+    [Parameter(Mandatory = $false)]
+    [switch]$RedactPII,
+    [Parameter(Mandatory = $false)]
+    [switch]$EncryptReport,
+    [Parameter(Mandatory = $false)]
+    [switch]$NoEncryption,
+    [Parameter(Mandatory = $false)]
+    [System.Security.SecureString]$EncryptionPassword,
+    [Parameter(Mandatory = $false)]
+    [string]$EncryptedOutputPath,
+    [Parameter(Mandatory = $false)]
+    [switch]$DeletePlaintextAfterEncryption
+)
+
+if ($NoEncryption) {
+    $EncryptReport = $false
+}
+
+if (-not $EncryptReport -and $EncryptionPassword) {
+    $EncryptReport = $true
+}
+
+if (-not $EncryptReport -and $EncryptedOutputPath) {
+    $EncryptReport = $true
+}
+
+if (-not $EncryptReport -and $DeletePlaintextAfterEncryption) {
+    $EncryptReport = $true
+}
+
+# Import the ScEntra module
+Import-Module (Join-Path $PSScriptRoot "ScEntra.psd1") -Force
+
+# Check if JSON file exists
+if (-not (Test-Path $JsonPath)) {
+    Write-Error "JSON file not found: $JsonPath"
+    exit 1
+}
+
+# Read the JSON data
+Write-Host "Reading JSON data from: $JsonPath" -ForegroundColor Cyan
+$jsonData = Get-Content $JsonPath -Raw | ConvertFrom-Json
+
+# Redact PII if requested
+if ($RedactPII) {
+    Write-Host "Redacting PII data..." -ForegroundColor Yellow
+    $redacted = Invoke-ScEntraDataRedaction `
+        -Users $jsonData.Users `
+        -Groups $jsonData.Groups `
+        -ServicePrincipals $jsonData.ServicePrincipals `
+        -AppRegistrations $jsonData.AppRegistrations `
+        -RoleAssignments $jsonData.RoleAssignments `
+        -PIMAssignments $jsonData.PIMAssignments `
+        -EscalationRisks $jsonData.EscalationRisks `
+        -GraphData $jsonData.GraphData `
+        -OrganizationInfo $jsonData.OrganizationInfo
+
+    if ($redacted.Users) { $jsonData.Users = $redacted.Users }
+    if ($redacted.Groups) { $jsonData.Groups = $redacted.Groups }
+    if ($redacted.ServicePrincipals) { $jsonData.ServicePrincipals = $redacted.ServicePrincipals }
+    if ($redacted.AppRegistrations) { $jsonData.AppRegistrations = $redacted.AppRegistrations }
+    if ($redacted.EscalationRisks) { $jsonData.EscalationRisks = $redacted.EscalationRisks }
+    if ($redacted.GraphData) { $jsonData.GraphData = $redacted.GraphData }
+    if ($redacted.OrganizationInfo) { $jsonData.OrganizationInfo = $redacted.OrganizationInfo }
+}
+
+# Convert GraphData from PSCustomObject to hashtable if it exists, preserving all properties
+$graphData = $null
+if ($jsonData.GraphData) {
+    $graphData = @{}
+    $jsonData.GraphData.PSObject.Properties | ForEach-Object { 
+        $graphData[$_.Name] = $_.Value 
+    }
+}
+
+# Determine output HTML path
+$suffix = if ($RedactPII) { '-redacted' } else { '-regenerated' }
+$outputPath = $JsonPath -replace '\.json$', "$suffix.html"
+
+Write-Host "Regenerating HTML report..." -ForegroundColor Cyan
+
+# Filter escalation risks to exclude empty groups and non-highly-privileged roles
+$highPrivilegeRoles = @(
+    'Global Administrator',
+    'Privileged Role Administrator',
+    'Security Administrator',
+    'Cloud Application Administrator',
+    'Application Administrator',
+    'User Administrator',
+    'Exchange Administrator',
+    'SharePoint Administrator'
+)
+
+$filteredRisks = $jsonData.EscalationRisks | Where-Object {
+    $risk = $_
+    
+    # Filter RoleEnabledGroup risks
+    if ($risk.RiskType -eq 'RoleEnabledGroup') {
+        # Exclude if group has 0 members or role is not highly privileged
+        return ($risk.MemberCount -gt 0) -and ($highPrivilegeRoles -contains $risk.RoleName)
+    }
+    
+    # Keep all other risk types
+    return $true
+}
+
+Write-Host "Filtered risks: $($jsonData.EscalationRisks.Count) -> $($filteredRisks.Count)" -ForegroundColor Yellow
+
+# Convert OrganizationInfo from PSCustomObject to hashtable if needed
+$orgInfo = $null
+if ($jsonData.OrganizationInfo) {
+    if ($jsonData.OrganizationInfo -is [hashtable]) {
+        $orgInfo = $jsonData.OrganizationInfo
+    } else {
+        $orgInfo = @{}
+        $jsonData.OrganizationInfo.PSObject.Properties | ForEach-Object {
+            $orgInfo[$_.Name] = $_.Value
+        }
+    }
+}
+
+# Prompt for password if encryption requested without supplied credentials
+if ($EncryptReport -and -not $EncryptionPassword) {
+    $EncryptionPassword = Read-Host "Enter password to protect regenerated report" -AsSecureString
+}
+
+# Call the export function with the data from JSON
+$reportPath = Export-ScEntraReport `
+    -Users $jsonData.Users `
+    -Groups $jsonData.Groups `
+    -ServicePrincipals $jsonData.ServicePrincipals `
+    -AppRegistrations $jsonData.AppRegistrations `
+    -RoleAssignments $jsonData.RoleAssignments `
+    -PIMAssignments $jsonData.PIMAssignments `
+    -EscalationRisks $filteredRisks `
+    -GraphData $graphData `
+    -OrganizationInfo $orgInfo `
+    -OutputPath $outputPath `
+    -EncryptReport:$EncryptReport `
+    -EncryptionPassword $EncryptionPassword `
+    -EncryptedOutputPath $EncryptedOutputPath `
+    -DeletePlaintextAfterEncryption:$DeletePlaintextAfterEncryption
+
+if ($reportPath) {
+    Write-Host "`n✓ Report regenerated successfully!" -ForegroundColor Green
+    Write-Host "Location: $reportPath" -ForegroundColor Cyan
+    
+    # Open in browser
+    Invoke-Item $reportPath
+}
+else {
+    Write-Error "Failed to regenerate report"
+    exit 1
+}

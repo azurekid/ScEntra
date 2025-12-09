@@ -1,0 +1,32 @@
+# Build artifacts
+*.html
+*.json
+
+# PowerShell artifacts
+*.ps1xml
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test outputs
+TestResults/
+*.trx
+
+# Exception: Don't ignore module files
+!ScEntra.psd1
+!ScEntra.psm1
+docs/
+*.md
