@@ -573,8 +573,9 @@ function Invoke-GraphBatchRequest {
 
             try {
                 $headers = @{
-                    'Authorization' = "Bearer $graphAccessToken"
-                    'Content-Type'  = 'application/json'
+                    'Authorization'    = "Bearer $graphAccessToken"
+                    'Content-Type'     = 'application/json'
+                    'ConsistencyLevel' = 'eventual'
                 }
 
                 $batchUri = "$graphBaseUrl/`$batch"
@@ -619,8 +620,9 @@ function Invoke-GraphBatchRequest {
 
             try {
                 $headers = @{
-                    'Authorization' = "Bearer $using:graphAccessToken"
-                    'Content-Type'  = 'application/json'
+                    'Authorization'    = "Bearer $using:graphAccessToken"
+                    'Content-Type'     = 'application/json'
+                    'ConsistencyLevel' = 'eventual'
                 }
 
                 $batchUri = "$using:graphBaseUrl/`$batch"
