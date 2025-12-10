@@ -11,7 +11,7 @@ ScEntra is a PowerShell security analysis tool for Microsoft Entra ID (formerly 
 <img width="1309" height="793" alt="image" src="https://github.com/user-attachments/assets/dc3d7158-686a-4e9e-b919-d0bea7c003fa" />
 
 
-## 🎯 Key Features
+## Key Features
 
 - **Privilege Escalation Detection**: Identifies potential attack paths through group memberships, role assignments, ownership chains, and dangerous API permissions
 - **Interactive Graph Visualization**: Explore identity relationships with vis-network powered graph with clustering, filtering, and auto-detangling
@@ -23,7 +23,7 @@ ScEntra is a PowerShell security analysis tool for Microsoft Entra ID (formerly 
 
 - **Zero Dependencies**: Uses direct Microsoft Graph REST API calls - no Microsoft.Graph PowerShell modules required
 
-## 📋 Prerequisites
+## Prerequisites
 
 - **PowerShell 7.0+** (PowerShell Core)
 - **Microsoft Graph API Permissions** (one of):
@@ -55,7 +55,7 @@ ScEntra requires **9 specific Microsoft Graph Application permissions** (read-on
 
 **For delegated (user) permissions**, use the equivalent delegated scopes with `.Read.All` suffix when authenticating interactively.
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Clone the Repository
 
@@ -124,7 +124,7 @@ Invoke-ScEntraAnalysis
 <img width="502" height="361" alt="image" src="https://github.com/user-attachments/assets/18b0385c-bd77-4856-aa07-61b2239237c4" />
 
 
-## 📊 Example Output
+## Example Output
 
 The analysis generates:
 - **HTML Report** (`ScEntra-Report-YYYYMMDD-HHmmss.html`) - Interactive visualization with:
@@ -255,7 +255,7 @@ For a tenant with 60k users, 80k groups, 120k service principals, and 260k app r
 - [JSON Batching Best Practices](https://learn.microsoft.com/en-us/graph/json-batching)
 - [Throttling Best Practices](https://learn.microsoft.com/en-us/graph/throttling#best-practices-to-handle-throttling)
 
-## 🎨 Interactive Features
+## Interactive Features
 
 ### Graph Visualization
 - **Click risks** in the table to filter and focus the graph
@@ -270,13 +270,13 @@ For a tenant with 60k users, 80k groups, 120k service principals, and 260k app r
 - **Member count filtering**: Excludes empty groups from risk table
 - **Privilege-based filtering**: Only shows truly dangerous role assignments
 
-## 📚 Documentation
+## Documentation
 
 - **[QUICKSTART.md](docs/QUICKSTART.md)** - Step-by-step guide to get started
 - **[MAINTENANCE.md](docs/MAINTENANCE.md)** - Architecture, data flow, and extension guide
 - **[SERVICE-PRINCIPAL-SETUP.md](docs/SERVICE-PRINCIPAL-SETUP.md)** - Detailed service principal creation and security best practices
 
-## 🔐 Security Considerations
+## Security Considerations
 
 ScEntra requires **read-only** permissions and does not modify any Entra ID configuration. However:
 
@@ -285,7 +285,7 @@ ScEntra requires **read-only** permissions and does not modify any Entra ID conf
 - Store reports in **secure locations** with appropriate access controls
 - Review **Graph API permissions** granted to the analyzing account
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please:
 
@@ -294,13 +294,13 @@ Contributions are welcome! Please:
 3. Test the changes thoroughly
 4. Submit a pull request with clear description
 
-## 📝 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 MIT License allows commercial use, modification, distribution, and private use while requiring only attribution.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 Built with:
 - [vis-network](https://visjs.github.io/vis-network/docs/network/) for graph visualization
