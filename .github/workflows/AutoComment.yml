@@ -15,8 +15,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           issuesOpenedReactions: 'eyes'
           issuesOpenedComment: |
-            # [![Mr Robot fonts](https://see.fontimg.com/api/renderfont4/g123/eyJyIjoiZnMiLCJoIjoxMjUsInciOjE1MDAsImZzIjo4MywiZmdjIjoiI0VGMDkwOSIsImJnYyI6IiMxMTAwMDAiLCJ0IjoxfQ/QiA3IDQgYyBLIEMgQCBU/mrrobot.png)](https://www.fontspace.com/category/mr-robot)  
-            
             👋 @{{ author }}
             Thank you for raising an issue on **Project ScEntra**.
             We appreciate your contribution and will review it as soon as possible.
