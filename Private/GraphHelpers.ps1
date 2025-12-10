@@ -281,7 +281,7 @@ function Invoke-GraphRequest {
     }
 
     # Add ConsistencyLevel header for advanced queries like $count
-    if ($Uri -like '*`$count*') {
+    if ($Uri -like '*$count') {
         $headers['ConsistencyLevel'] = 'eventual'
     }
 

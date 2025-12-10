@@ -3,7 +3,7 @@
     RootModule = 'ScEntra.psm1'
 
     # Version number of this module.
-    ModuleVersion = '1.0.1'
+    ModuleVersion = '1.0.2'
 
     # ID used to uniquely identify this module
     GUID = '8c3d4e5f-6a7b-8c9d-0e1f-2a3b4c5d6e7f'
