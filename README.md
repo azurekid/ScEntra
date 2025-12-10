@@ -106,9 +106,7 @@ $sp | Format-List
 # Click: "Grant admin consent for [Your Tenant]"
 
 # Use the service principal
-$clientSecret = ConvertTo-SecureString -String '<client_secret>' -AsPlainText -Force
-$credential = New-Object PSCredential('<application_id>', $clientSecret)
-Connect-ScEntraGraph -TenantId '<tenant_id>' -Credential $credential
+Connect-ScEntraGraph -TenantId '<tenant_id>' -ClientId '<application_id>' -ClientSecret '<client_secret>'
 ```
 
 📖 **For detailed setup instructions, certificate authentication, and security best practices**, see:  
