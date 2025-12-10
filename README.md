@@ -112,7 +112,7 @@ Connect-ScEntraGraph -TenantId '<tenant_id>' -Credential $credential
 ```
 
 📖 **For detailed setup instructions, certificate authentication, and security best practices**, see:  
-[SERVICE-PRINCIPAL-SETUP.md](SERVICE-PRINCIPAL-SETUP.md)
+[SERVICE-PRINCIPAL-SETUP.md](docs/SERVICE-PRINCIPAL-SETUP.md)
 
 ### 4. Run Analysis
 
@@ -272,8 +272,9 @@ For a tenant with 60k users, 80k groups, 120k service principals, and 260k app r
 
 ## 📚 Documentation
 
-- **[MAINTENANCE.md](./docs/MAINTENANCE.md)** - Architecture, data flow, and extension guide
-- **[Directory-ReadWrite-All-Privilege-Escalation.md](./Directory-ReadWrite-All-Privilege-Escalation.md)** - Deep dive into federated domain attacks
+- **[QUICKSTART.md](docs/QUICKSTART.md)** - Step-by-step guide to get started
+- **[MAINTENANCE.md](docs/MAINTENANCE.md)** - Architecture, data flow, and extension guide
+- **[SERVICE-PRINCIPAL-SETUP.md](docs/SERVICE-PRINCIPAL-SETUP.md)** - Detailed service principal creation and security best practices
 
 ## 🔐 Security Considerations
 
