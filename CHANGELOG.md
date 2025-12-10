@@ -12,8 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.2] - 2025-12-10
 
 ### Fixed
-- Missing `ConsistencyLevel: eventual` header for Microsoft Graph API count queries
-- Updated module version to 1.0.2
+- Missing `ConsistencyLevel: eventual` header in batch processing functions (`Invoke-GraphBatchRequest`)
+- Graph API `/$count` queries now work correctly for both sequential and parallel batch processing paths
+- Environment size determination (Step 1/5 of analysis) no longer fails with "Request_UnsupportedQuery" error
+- Users installing from repository on December 10th or later will have this fix included
 
 ## [1.0.1] - 2025-12-15
 
