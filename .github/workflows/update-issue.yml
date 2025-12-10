@@ -1,10 +1,14 @@
 name: Notify Author on Status Change
 on:
   issues:
-    types: [labeled, unlabeled, edited, opened, reopened, closed]
+    types: [labeled, unlabeled, edited, opened, reopened, closed, assigned, unassigned]
   issue_comment:
     types: [created]
+  pull_request:
+    types: [opened, closed, reopened, edited]
   workflow_dispatch:
+  schedule:
+    - cron: '*/15 * * * *'  # Check every 15 minutes for status changes
 jobs:
   check-and-notify:
     runs-on: ubuntu-latest
@@ -24,39 +28,111 @@ jobs:
               return;
             }
 
-            const issue = context.payload.issue;
-            if (!issue) {
-              console.log('No issue found in payload');
+            // For scheduled runs, check all open issues in project #4
+            if (context.eventName === 'schedule') {
+              console.log('Running scheduled check for project status changes...');
+              await checkAllProjectIssues();
               return;
             }
 
-            const author = issue.user.login;
-            const issueNumber = issue.number;
-            const repo = context.repo;
+            // For event-based runs, check specific issue
+            const issue = context.payload.issue || context.payload.pull_request;
+            if (!issue) {
+              console.log('No issue or PR found in payload');
+              return;
+            }
 
-            console.log(`Processing issue #${issueNumber} by @${author}`);
-            console.log(`Repository: ${repo.owner}/${repo.repo}`);
-            console.log(`Event type: ${context.eventName}`);
+            await checkIssueStatus(issue, context.repo);
 
-            // Query project status for this issue
-            const projectQuery = `
-              query($owner: String!, $name: String!, $issueNumber: Int!) {
-                repository(owner: $owner, name: $name) {
-                  issue(number: $issueNumber) {
-                    projectItems(first: 20) {
-                      nodes {
-                        id
-                        project {
-                          title
+            // Function to check all issues in project #4
+            async function checkAllProjectIssues() {
+              try {
+                const projectQuery = `
+                  query($owner: String!, $name: String!) {
+                    repository(owner: $owner, name: $name) {
+                      issues(states: OPEN, first: 50) {
+                        nodes {
                           number
+                          author: user {
+                            login
+                          }
+                          projectItems(first: 10) {
+                            nodes {
+                              project {
+                                number
+                              }
+                              fieldValues(first: 20) {
+                                nodes {
+                                  ... on ProjectV2ItemFieldSingleSelectValue {
+                                    name
+                                    field {
+                                      ... on ProjectV2FieldCommon {
+                                        name
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
                         }
-                        fieldValues(first: 20) {
-                          nodes {
-                            ... on ProjectV2ItemFieldSingleSelectValue {
-                              name
-                              field {
-                                ... on ProjectV2FieldCommon {
-                                  name
+                      }
+                    }
+                  }
+                `;
+
+                const result = await github.graphql(projectQuery, {
+                  owner: context.repo.owner,
+                  name: context.repo.repo,
+                });
+
+                for (const issue of result.repository.issues.nodes) {
+                  // Check if issue is in project #4
+                  const projectItem = issue.projectItems.nodes.find(item => item.project.number === 4);
+                  if (projectItem) {
+                    console.log(`Checking issue #${issue.number} in scheduled run`);
+                    await checkIssueStatus(issue, context.repo);
+                    // Add delay to avoid rate limiting
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                  }
+                }
+              } catch (error) {
+                console.error('Error in scheduled check:', error);
+              }
+            }
+
+            // Function to check status for a specific issue
+            async function checkIssueStatus(issue, repo) {
+
+            // Function to check status for a specific issue
+            async function checkIssueStatus(issue, repo) {
+              const author = issue.author?.login || issue.user?.login;
+              const issueNumber = issue.number;
+
+              console.log(`Processing issue #${issueNumber} by @${author}`);
+              console.log(`Repository: ${repo.owner}/${repo.repo}`);
+              console.log(`Event type: ${context.eventName}`);
+
+              // Query project status for this issue
+              const projectQuery = `
+                query($owner: String!, $name: String!, $issueNumber: Int!) {
+                  repository(owner: $owner, name: $name) {
+                    issue(number: $issueNumber) {
+                      projectItems(first: 20) {
+                        nodes {
+                          id
+                          project {
+                            title
+                            number
+                          }
+                          fieldValues(first: 20) {
+                            nodes {
+                              ... on ProjectV2ItemFieldSingleSelectValue {
+                                name
+                                field {
+                                  ... on ProjectV2FieldCommon {
+                                    name
+                                  }
                                 }
                               }
                             }
@@ -66,107 +142,128 @@ jobs:
                     }
                   }
                 }
-              }
-            `;
+              `;
 
-            const variables = {
-              owner: repo.owner,
-              name: repo.repo,
-              issueNumber,
-            };
-
-            try {
-              const result = await github.graphql(projectQuery, variables);
-              console.log('Project query result:', JSON.stringify(result, null, 2));
-
-              const projectItems = result.repository.issue.projectItems.nodes;
-              console.log(`Found ${projectItems.length} project items`);
-
-              if (projectItems.length === 0) {
-                console.log('⚠️ No project items found for this issue.');
-                return;
-              }
-
-              // Look for project #4 specifically
-              let targetProjectItem = null;
-              for (const item of projectItems) {
-                console.log(`Checking project: ${item.project.title} (Number: ${item.project.number})`);
-                if (item.project.number === 4) {
-                  targetProjectItem = item;
-                  break;
-                }
-              }
-
-              if (!targetProjectItem) {
-                console.log('Issue not found in target project #4');
-                return;
-              }
-
-              console.log('✅ Found issue in target project (#4)');
-
-              // Find the status field in the target project
-              let currentStatus = null;
-              for (const fieldValue of targetProjectItem.fieldValues.nodes) {
-                if (fieldValue.field && fieldValue.field.name === 'Status') {
-                  currentStatus = fieldValue.name;
-                  console.log(`📊 Current status: "${currentStatus}"`);
-                  break;
-                }
-              }
-
-              if (!currentStatus) {
-                console.log('No status field found for this issue');
-                return;
-              }
-
-              // Check existing comments to avoid duplicates
-              const comments = await github.rest.issues.listComments({
+              const variables = {
                 owner: repo.owner,
-                repo: repo.repo,
-                issue_number: issueNumber,
-              });
+                name: repo.repo,
+                issueNumber,
+              };
 
-              const statusNotificationPattern = new RegExp(`status.*updated to.*\\*\\*${currentStatus}\\*\\*`, 'i');
-              const alreadyNotified = comments.data.some(comment => {
-                const isBot = comment.user.type === 'Bot';
-                const matchesPattern = statusNotificationPattern.test(comment.body || '');
-                return isBot && matchesPattern;
-              });
+              try {
+                const result = await github.graphql(projectQuery, variables);
+                console.log('Project query result:', JSON.stringify(result, null, 2));
 
-              if (alreadyNotified) {
-                console.log(`ℹ️ Already notified about "${currentStatus}" status - skipping duplicate comment`);
-                return;
+                const projectItems = result.repository.issue.projectItems.nodes;
+                console.log(`Found ${projectItems.length} project items`);
+
+                if (projectItems.length === 0) {
+                  console.log('⚠️ No project items found for this issue.');
+                  return;
+                }
+
+                // Look for project #4 specifically
+                let targetProjectItem = null;
+                for (const item of projectItems) {
+                  console.log(`Checking project: ${item.project.title} (Number: ${item.project.number})`);
+                  if (item.project.number === 4) {
+                    targetProjectItem = item;
+                    break;
+                  }
+                }
+
+                if (!targetProjectItem) {
+                  console.log('Issue not found in target project #4');
+                  return;
+                }
+
+                console.log('✅ Found issue in target project (#4)');
+
+                // Find the status field in the target project
+                let currentStatus = null;
+                for (const fieldValue of targetProjectItem.fieldValues.nodes) {
+                  if (fieldValue.field && fieldValue.field.name === 'Status') {
+                    currentStatus = fieldValue.name;
+                    console.log(`📊 Current status: "${currentStatus}"`);
+                    break;
+                  }
+                }
+
+                if (!currentStatus) {
+                  console.log('No status field found for this issue');
+                  return;
+                }
+
+                // Get existing comments to check for previous notifications
+                const comments = await github.rest.issues.listComments({
+                  owner: repo.owner,
+                  repo: repo.repo,
+                  issue_number: issueNumber,
+                });
+
+                // Check if we already notified about this exact status
+                const statusNotificationPattern = new RegExp(`status.*updated to.*\\*\\*${currentStatus}\\*\\*`, 'i');
+                const alreadyNotified = comments.data.some(comment => {
+                  const isBot = comment.user.type === 'Bot';
+                  const matchesPattern = statusNotificationPattern.test(comment.body || '');
+                  return isBot && matchesPattern;
+                });
+
+                // For scheduled runs, also check if status changed recently (within last 24 hours)
+                let shouldNotify = !alreadyNotified;
+                if (context.eventName === 'schedule') {
+                  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+                  const recentComments = comments.data.filter(comment => 
+                    new Date(comment.created_at) > oneDayAgo && 
+                    comment.user.type === 'Bot' &&
+                    statusNotificationPattern.test(comment.body || '')
+                  );
+                  
+                  if (recentComments.length > 0) {
+                    console.log('Already notified about this status in the last 24 hours via scheduled run');
+                    shouldNotify = false;
+                  }
+                }
+
+                if (!shouldNotify) {
+                  console.log(`ℹ️ Already notified about "${currentStatus}" status - skipping duplicate comment`);
+                  return;
+                }
+
+                // Post notification comment
+                let notificationBody = `👋 @${author}, the status of this issue has been updated to **${currentStatus}**.`;
+
+                // Add specific actions based on status
+                if (currentStatus.toLowerCase() === 'in review') {
+                  notificationBody += '\n\n### 📋 Action Required\n\n**Task:** Please review the implemented fix and provide your feedback.\n\n- [ ] Review the changes\n- [ ] Test the implementation\n- [ ] Confirm whether the issue is resolved';
+                } else if (currentStatus.toLowerCase() === 'in progress' || currentStatus.toLowerCase() === 'in-progress') {
+                  notificationBody += '\n\n### 🚀 Work Started\n\nYour issue is now being worked on. You\'ll be notified when it\'s ready for review.';
+                } else if (currentStatus.toLowerCase() === 'done' || currentStatus.toLowerCase() === 'completed') {
+                  notificationBody += '\n\n### 🎉 Issue Completed\n\nThank you for reporting this issue! The fix has been implemented and is now complete.';
+                } else if (currentStatus.toLowerCase() === 'blocked') {
+                  notificationBody += '\n\n### ⚠️ Issue Blocked\n\nThis issue is currently blocked and may require additional information or dependencies to be resolved.';
+                } else if (currentStatus.toLowerCase() === 'ready') {
+                  notificationBody += '\n\n### ✅ Ready for Work\n\nThis issue has been triaged and is ready to be picked up for development.';
+                } else if (currentStatus.toLowerCase() === 'backlog') {
+                  notificationBody += '\n\n### 📝 Added to Backlog\n\nThis issue has been added to the backlog and will be prioritized for future work.';
+                }
+
+                await github.rest.issues.createComment({
+                  owner: repo.owner,
+                  repo: repo.repo,
+                  issue_number: issueNumber,
+                  body: notificationBody,
+                });
+
+                console.log('✅ Notification comment posted successfully');
+                console.log('=== Issue status check completed ===');
+              } catch (error) {
+                console.error('❌ Error querying project data:');
+                console.error('Error name:', error.name);
+                console.error('Error message:', error.message);
+                if (error.errors) {
+                  console.error('GraphQL errors:', JSON.stringify(error.errors, null, 2));
+                }
+                throw error;
               }
-
-              // Post notification comment
-              let notificationBody = `👋 @${author}, the status of this issue has been updated to **${currentStatus}**.`;
-
-              // Add specific actions based on status
-              if (currentStatus.toLowerCase() === 'in review') {
-                notificationBody += '\n\n### 📋 Action Required\n\n**Task:** Please review the implemented fix and provide your feedback.\n\n- [ ] Review the changes\n- [ ] Test the implementation\n- [ ] Confirm whether the issue is resolved';
-              } else if (currentStatus.toLowerCase() === 'in progress' || currentStatus.toLowerCase() === 'in-progress') {
-                notificationBody += '\n\n### 🚀 Work Started\n\nYour issue is now being worked on. You\'ll be notified when it\'s ready for review.';
-              } else if (currentStatus.toLowerCase() === 'done' || currentStatus.toLowerCase() === 'completed') {
-                notificationBody += '\n\n### 🎉 Issue Completed\n\nThank you for reporting this issue! The fix has been implemented and is now complete.';
-              } else if (currentStatus.toLowerCase() === 'blocked') {
-                notificationBody += '\n\n### ⚠️ Issue Blocked\n\nThis issue is currently blocked and may require additional information or dependencies to be resolved.';
-              }
-
-              await github.rest.issues.createComment({
-                owner: repo.owner,
-                repo: repo.repo,
-                issue_number: issueNumber,
-                body: notificationBody,
-              });
-
-              console.log('✅ Notification comment posted successfully');
-              console.log('=== Workflow completed successfully ===');
-            } catch (error) {
-              console.error('❌ Error querying project data:');
-              console.error('Error name:', error.name);
-              console.error('Error message:', error.message);
-              if (error.errors) {
-                console.error('GraphQL errors:', JSON.stringify(error.errors, null, 2));
-              }
-              throw error;
             }
