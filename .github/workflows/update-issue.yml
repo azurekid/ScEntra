@@ -1,10 +1,9 @@
 name: Notify Author on Status Change
-description: Automatically notify author on issues changes
 on:
   issues:
-    types: [labeled, unlabeled, edited, opened, reopened]
-  projects_v2_item:
-    types: [edited]
+    types: [labeled, unlabeled, edited, opened, reopened, closed]
+  issue_comment:
+    types: [created]
   workflow_dispatch:
 jobs:
   check-and-notify:
@@ -12,104 +11,35 @@ jobs:
     permissions:
       issues: write
       contents: read
-      # If needed for Projects v2, replace with a PAT:
-      # id-token: write
-      # pull-requests: read
+      repository-projects: read
     steps:
       - name: Check project status and notify
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }} # or PROJECT_ACCESS_TOKEN if needed
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            // Handle both issue events and project_v2_item events
-            let issue, issueNumber, repo;
-            
-            if (context.payload.issue) {
-              // Direct issue event
-              issue = context.payload.issue;
-              issueNumber = issue.number;
-              repo = context.repo;
-            } else if (context.payload.projects_v2_item && context.payload.projects_v2_item.content_type === 'Issue') {
-              // Project item event - need to get issue details
-              const contentNodeId = context.payload.projects_v2_item.content_node_id;
-              
-              // Get issue details from node ID
-              const issueQuery = `
-                query($nodeId: ID!) {
-                  node(id: $nodeId) {
-                    ... on Issue {
-                      number
-                      author: user {
-                        login
-                      }
-                      repository {
-                        owner {
-                          login
-                        }
-                        name
-                      }
-                    }
-                  }
-                }
-              `;
-              
-              const issueResult = await github.graphql(issueQuery, { nodeId: contentNodeId });
-              
-              if (!issueResult.node) {
-                console.log('Could not find issue from project item');
-                return;
-              }
-              
-              issueNumber = issueResult.node.number;
-              repo = {
-                owner: issueResult.node.repository.owner.login,
-                repo: issueResult.node.repository.name
-              };
-              
-              // Get full issue details
-              const fullIssue = await github.rest.issues.get({
-                owner: repo.owner,
-                repo: repo.repo,
-                issue_number: issueNumber,
-              });
-              issue = fullIssue.data;
-            } else {
-              console.log('No valid issue found in payload');
+            // Skip comments that are from bots to avoid loops
+            if (context.eventName === 'issue_comment' && context.payload.comment.user.type === 'Bot') {
+              console.log('Skipping bot comment event');
               return;
             }
 
+            const issue = context.payload.issue;
             if (!issue) {
               console.log('No issue found in payload');
               return;
             }
 
             const author = issue.user.login;
+            const issueNumber = issue.number;
+            const repo = context.repo;
 
             console.log(`Processing issue #${issueNumber} by @${author}`);
             console.log(`Repository: ${repo.owner}/${repo.repo}`);
             console.log(`Event type: ${context.eventName}`);
 
-            // For project_v2_item events, check if status field was changed
-            let statusChanged = false;
-            let previousStatus = null;
-            let currentStatus = null;
-            
-            if (context.eventName === 'projects_v2_item' && context.payload.changes) {
-              console.log('Project item changed:', JSON.stringify(context.payload.changes, null, 2));
-              
-              // Check if any field changes involve status
-              for (const [fieldId, change] of Object.entries(context.payload.changes)) {
-                if (change.field_type === 'single_select' && change.field_name === 'Status') {
-                  statusChanged = true;
-                  previousStatus = change.from ? change.from.name : null;
-                  currentStatus = change.to ? change.to.name : null;
-                  console.log(`Status changed from "${previousStatus}" to "${currentStatus}"`);
-                  break;
-                }
-              }
-            }
-
-            const query = `
+            // Query project status for this issue
+            const projectQuery = `
               query($owner: String!, $name: String!, $issueNumber: Int!) {
                 repository(owner: $owner, name: $name) {
                   issue(number: $issueNumber) {
@@ -146,10 +76,8 @@ jobs:
             };
 
             try {
-              const result = await github.graphql(query, variables);
-              console.log('=== FULL GRAPHQL RESPONSE ===');
-              console.log(JSON.stringify(result, null, 2));
-              console.log('=== END RESPONSE ===');
+              const result = await github.graphql(projectQuery, variables);
+              console.log('Project query result:', JSON.stringify(result, null, 2));
 
               const projectItems = result.repository.issue.projectItems.nodes;
               console.log(`Found ${projectItems.length} project items`);
@@ -159,118 +87,79 @@ jobs:
                 return;
               }
 
+              // Look for project #4 specifically
+              let targetProjectItem = null;
               for (const item of projectItems) {
-                console.log('');
-                console.log(`--- Checking project: ${item.project.title} (Number: ${item.project.number}) ---`);
-
-                if (item.project.number !== 4) {
-                  console.log(`⏭️ Skipping project ${item.project.number} (not target project #4)`);
-                  continue;
-                }
-
-                console.log('✅ This is the target project (#4)');
-
-                for (const fieldValue of item.fieldValues.nodes) {
-                  if (fieldValue.field && fieldValue.field.name === 'Status') {
-                    const status = fieldValue.name;
-                    console.log(`📊 Current status: "${status}"`);
-
-                    // If we detected a status change from project_v2_item event, use that info
-                    if (statusChanged && currentStatus) {
-                      console.log(`🔄 Confirmed status change: "${previousStatus}" → "${currentStatus}"`);
-                    }
-
-                    // Determine if we should post a notification
-                    let shouldNotify = false;
-                    let notificationReason = '';
-
-                    if (statusChanged) {
-                      // Always notify on actual status changes
-                      shouldNotify = true;
-                      notificationReason = 'status changed';
-                    } else {
-                      // For other events, check if we haven't notified about this status yet
-                      const comments = await github.rest.issues.listComments({
-                        owner: repo.owner,
-                        repo: repo.repo,
-                        issue_number: issueNumber,
-                      });
-
-                      const statusNotificationPattern = new RegExp(`status.*updated to.*\\*\\*${status}\\*\\*`, 'i');
-                      const alreadyNotified = comments.data.some(comment => {
-                        const isBot = comment.user.type === 'Bot';
-                        const matchesPattern = statusNotificationPattern.test(comment.body || '');
-                        return isBot && matchesPattern;
-                      });
-
-                      if (!alreadyNotified) {
-                        shouldNotify = true;
-                        notificationReason = 'first time notification for this status';
-                      } else {
-                        notificationReason = 'already notified about this status';
-                      }
-                    }
-
-                    console.log(`📝 Should notify: ${shouldNotify} (${notificationReason})`);
-
-                    if (shouldNotify) {
-                      let notificationBody = '';
-
-                      if (statusChanged && previousStatus) {
-                        notificationBody = `👋 @${author}, the status of this issue has been changed from **${previousStatus}** to **${status}**.`;
-                      } else {
-                        notificationBody = `👋 @${author}, the status of this issue has been updated to **${status}**.`;
-                      }
-
-                      // Add specific actions based on status
-                      if (status.toLowerCase() === 'in review') {
-                        notificationBody += `
-
-### 📋 Action Required
-
-**Task:** Please review the implemented fix and provide your feedback.
-
-- [ ] Review the changes
-- [ ] Test the implementation
-- [ ] Confirm whether the issue is resolved`;
-                      } else if (status.toLowerCase() === 'in progress' || status.toLowerCase() === 'in-progress') {
-                        notificationBody += `
-
-### 🚀 Work Started
-
-Your issue is now being worked on. You'll be notified when it's ready for review.`;
-                      } else if (status.toLowerCase() === 'done' || status.toLowerCase() === 'completed') {
-                        notificationBody += `
-
-### 🎉 Issue Completed
-
-Thank you for reporting this issue! The fix has been implemented and is now complete.`;
-                      } else if (status.toLowerCase() === 'blocked') {
-                        notificationBody += `
-
-### ⚠️ Issue Blocked
-
-This issue is currently blocked and may require additional information or dependencies to be resolved.`;
-                      }
-
-                      await github.rest.issues.createComment({
-                        owner: repo.owner,
-                        repo: repo.repo,
-                        issue_number: issueNumber,
-                        body: notificationBody,
-                      });
-
-                      console.log('✅ Notification comment posted successfully');
-                    } else {
-                      console.log(`ℹ️ Skipping notification - ${notificationReason}`);
-                    }
-
-                    break;
-                  }
+                console.log(`Checking project: ${item.project.title} (Number: ${item.project.number})`);
+                if (item.project.number === 4) {
+                  targetProjectItem = item;
+                  break;
                 }
               }
 
-              console.log('');
+              if (!targetProjectItem) {
+                console.log('Issue not found in target project #4');
+                return;
+              }
+
+              console.log('✅ Found issue in target project (#4)');
+
+              // Find the status field in the target project
+              let currentStatus = null;
+              for (const fieldValue of targetProjectItem.fieldValues.nodes) {
+                if (fieldValue.field && fieldValue.field.name === 'Status') {
+                  currentStatus = fieldValue.name;
+                  console.log(`📊 Current status: "${currentStatus}"`);
+                  break;
+                }
+              }
+
+              if (!currentStatus) {
+                console.log('No status field found for this issue');
+                return;
+              }
+
+              // Check existing comments to avoid duplicates
+              const comments = await github.rest.issues.listComments({
+                owner: repo.owner,
+                repo: repo.repo,
+                issue_number: issueNumber,
+              });
+
+              const statusNotificationPattern = new RegExp(`status.*updated to.*\\*\\*${currentStatus}\\*\\*`, 'i');
+              const alreadyNotified = comments.data.some(comment => {
+                const isBot = comment.user.type === 'Bot';
+                const matchesPattern = statusNotificationPattern.test(comment.body || '');
+                return isBot && matchesPattern;
+              });
+
+              if (alreadyNotified) {
+                console.log(`ℹ️ Already notified about "${currentStatus}" status - skipping duplicate comment`);
+                return;
+              }
+
+              // Post notification comment
+              let notificationBody = `👋 @${author}, the status of this issue has been updated to **${currentStatus}**.`;
+
+              // Add specific actions based on status
+              if (currentStatus.toLowerCase() === 'in review') {
+                notificationBody += '\n\n### 📋 Action Required\n\n**Task:** Please review the implemented fix and provide your feedback.\n\n- [ ] Review the changes\n- [ ] Test the implementation\n- [ ] Confirm whether the issue is resolved';
+              } else if (currentStatus.toLowerCase() === 'in progress' || currentStatus.toLowerCase() === 'in-progress') {
+                notificationBody += '\n\n### 🚀 Work Started\n\nYour issue is now being worked on. You\'ll be notified when it\'s ready for review.';
+              } else if (currentStatus.toLowerCase() === 'done' || currentStatus.toLowerCase() === 'completed') {
+                notificationBody += '\n\n### 🎉 Issue Completed\n\nThank you for reporting this issue! The fix has been implemented and is now complete.';
+              } else if (currentStatus.toLowerCase() === 'blocked') {
+                notificationBody += '\n\n### ⚠️ Issue Blocked\n\nThis issue is currently blocked and may require additional information or dependencies to be resolved.';
+              }
+
+              await github.rest.issues.createComment({
+                owner: repo.owner,
+                repo: repo.repo,
+                issue_number: issueNumber,
+                body: notificationBody,
+              });
+
+              console.log('✅ Notification comment posted successfully');
               console.log('=== Workflow completed successfully ===');
             } catch (error) {
               console.error('❌ Error querying project data:');
