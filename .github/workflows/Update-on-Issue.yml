@@ -4,7 +4,7 @@ on:
   issues:
     types:  [labeled, unlabeled, edited]
   project_card: 
-    types: [moved, created]
+    types: [moved, created, workflow_dispatch]
 
 jobs:
   check-and-notify:
