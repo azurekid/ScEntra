@@ -2,7 +2,7 @@ git clone https://github.com/azurekid/ScEntra.git
 # ScEntra Operations & Quick Start Guide
 
 <p align="center">
-  <img src="images/ScEntra-background.png" alt="ScEntra" width="500" style="max-width: 100%; height: auto;">
+  <img src="../images/ScEntra-background.png" alt="ScEntra" width="500" style="max-width: 100%; height: auto;">
 </p>
 
 ScEntra inventories Entra ID objects, models escalation paths, and generates interactive reports that default to dark mode, highlight user metadata (UPN, creation time, password history), and emphasize selected entities. This guide rebuilds the documentation around the current experience and links to the deeper maintenance notes for contributors.

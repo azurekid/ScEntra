@@ -1,7 +1,7 @@
 # ScEntra Maintenance & Troubleshooting Guide
 
 <p align="center">
-  <img src="images/ScEntra-background.png" alt="ScEntra" width="400" style="max-width: 100%; height: auto;">
+  <img src="../images/ScEntra-background.png" alt="ScEntra" width="400" style="max-width: 100%; height: auto;">
 </p>
 
 This document explains how the module is structured, how data flows from Microsoft Graph into the visualization, and how to extend or debug the solution. Use it alongside `QUICKSTART.md` when maintaining the project as a community effort.

@@ -1,7 +1,7 @@
 # Service Principal Setup for ScEntra
 
 <p align="center">
-  <img src="images/ScEntra-background.png" alt="ScEntra" width="400" style="max-width: 100%; height: auto;">
+  <img src="../images/ScEntra-background.png" alt="ScEntra" width="400" style="max-width: 100%; height: auto;">
 </p>
 
 This guide explains how to create and configure a service principal for running ScEntra in automated environments, CI/CD pipelines, or production scenarios where interactive authentication isn't suitable.
