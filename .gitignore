@@ -24,6 +24,7 @@ Thumbs.db
 # Test outputs
 TestResults/
 *.trx
+reports/
 
 # Exception: Don't ignore module files
 !ScEntra.psd1
