@@ -264,7 +264,7 @@ function Invoke-GraphRequest {
     }
 
     # Get module version for User-Agent
-    $moduleVersion = '1.0.0'
+    $moduleVersion = '1.0.2'
     try {
         $module = Get-Module -Name ScEntra -ErrorAction SilentlyContinue
         if ($module) {
@@ -573,8 +573,9 @@ function Invoke-GraphBatchRequest {
 
             try {
                 $headers = @{
-                    'Authorization' = "Bearer $graphAccessToken"
-                    'Content-Type'  = 'application/json'
+                    'Authorization'    = "Bearer $graphAccessToken"
+                    'Content-Type'     = 'application/json'
+                    'ConsistencyLevel' = 'eventual'
                 }
 
                 $batchUri = "$graphBaseUrl/`$batch"
@@ -619,8 +620,9 @@ function Invoke-GraphBatchRequest {
 
             try {
                 $headers = @{
-                    'Authorization' = "Bearer $using:graphAccessToken"
-                    'Content-Type'  = 'application/json'
+                    'Authorization'    = "Bearer $using:graphAccessToken"
+                    'Content-Type'     = 'application/json'
+                    'ConsistencyLevel' = 'eventual'
                 }
 
                 $batchUri = "$using:graphBaseUrl/`$batch"
