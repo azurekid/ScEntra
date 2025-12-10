@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Inconsistent function references in service principal documentation
 - Redaction of group names in escalation risk descriptions
 - Documentation examples that referenced non-existent function parameters
+- Corrected README.md to use `-ClientSecret` parameter instead of non-existent `-Credential` parameter
 
 ### Security
 - Added comprehensive security best practices documentation
