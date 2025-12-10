@@ -264,7 +264,7 @@ function Invoke-GraphRequest {
     }
 
     # Get module version for User-Agent
-    $moduleVersion = '1.0.0'
+    $moduleVersion = '1.0.2'
     try {
         $module = Get-Module -Name ScEntra -ErrorAction SilentlyContinue
         if ($module) {
