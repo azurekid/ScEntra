@@ -103,9 +103,6 @@ jobs:
 
             // Function to check status for a specific issue
             async function checkIssueStatus(issue, repo) {
-
-            // Function to check status for a specific issue
-            async function checkIssueStatus(issue, repo) {
               const author = issue.author?.login || issue.user?.login;
               const issueNumber = issue.number;
 
