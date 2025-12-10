@@ -1,4 +1,3 @@
-git clone https://github.com/azurekid/ScEntra.git
 # ScEntra Operations & Quick Start Guide
 
 <p align="center">
