@@ -264,7 +264,7 @@ function Invoke-GraphRequest {
     }
 
     # Get module version for User-Agent
-    $moduleVersion = '1.0.0'
+    $moduleVersion = '1.0.2'
     try {
         $module = Get-Module -Name ScEntra -ErrorAction SilentlyContinue
         if ($module) {
@@ -277,8 +277,12 @@ function Invoke-GraphRequest {
     $headers = @{
         'Authorization'    = "Bearer $script:GraphAccessToken"
         'Content-Type'     = 'application/json'
-        'ConsistencyLevel' = 'eventual'
         'User-Agent'       = "ScEntra/$moduleVersion (PowerShell/$($PSVersionTable.PSVersion))"
+    }
+
+    # Add ConsistencyLevel header for advanced queries like $count
+    if ($Uri -like '*`$count*') {
+        $headers['ConsistencyLevel'] = 'eventual'
     }
 
     $params = @{
