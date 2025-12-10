@@ -1,9 +1,9 @@
-name: Notify Author on Status Change
+name:  Notify Author on Status Change
 
-on:
+on: 
   issues:
-    types: [labeled, unlabeled, edited]
-  project_card:
+    types:  [labeled, unlabeled, edited]
+  project_card: 
     types: [moved, created]
 
 jobs:
@@ -12,14 +12,19 @@ jobs:
     permissions:
       issues: write
       contents: read
+      # Note:  GITHUB_TOKEN may have limited access to Projects v2
+      # If this workflow doesn't find project items, you may need to: 
+      # 1. Create a Personal Access Token (PAT) with 'project' scope
+      # 2. Add it as a repository secret (e.g., PROJECT_ACCESS_TOKEN)
+      # 3. Replace secrets.GITHUB_TOKEN below with secrets.PROJECT_ACCESS_TOKEN
       
     steps:
       - name: Check project status and notify
         uses: actions/github-script@v7
-        with: 
+        with:  
           github-token: ${{ secrets. GITHUB_TOKEN }}
-          script:  |
-            const issue = context. payload.issue;
+          script: |
+            const issue = context.payload.issue;
             if (! issue) {
               console.log('No issue found in payload');
               return;
@@ -30,11 +35,12 @@ jobs:
             const repo = context.repo;
             
             console.log(`Processing issue #${issueNumber} by @${author}`);
+            console.log(`Repository: ${repo.owner}/${repo.repo}`);
             
             // Query GraphQL API to get project status
             const query = `
               query($owner: String!, $name: String!, $issueNumber: Int!) {
-                repository(owner: $owner, name:  $name) {
+                repository(owner: $owner, name: $name) {
                   issue(number: $issueNumber) {
                     projectItems(first: 20) {
                       nodes {
@@ -63,70 +69,135 @@ jobs:
             `;
             
             const variables = {
-              owner: repo.owner,
-              name: repo.repo,
-              issueNumber: issueNumber
+              owner: repo. owner,
+              name: repo. repo,
+              issueNumber:  issueNumber
             };
+            
+            console.log(`GraphQL variables: ${JSON.stringify(variables, null, 2)}`);
             
             try {
               const result = await github.graphql(query, variables);
+              
+              // Enhanced debugging - log full response
+              console.log('=== FULL GRAPHQL RESPONSE ===');
+              console.log(JSON.stringify(result, null, 2));
+              console.log('=== END RESPONSE ===');
+              
               const projectItems = result.repository.issue.projectItems. nodes;
               
-              console. log(`Found ${projectItems.length} project items`);
+              console.log(`Found ${projectItems.length} project items`);
+              
+              if (projectItems.length === 0) {
+                console.log('⚠️ No project items found for this issue.');
+                console.log('Possible reasons:');
+                console. log('1. Issue is not added to any GitHub Project');
+                console.log('2.  GITHUB_TOKEN lacks permissions to read Projects v2');
+                console.log('3. Projects are organization-level (not repository-level)');
+                console. log('');
+                console.log('If this issue should be in a project: ');
+                console.log('- Verify the issue is added to Project #4');
+                console.log('- Consider using a PAT with project scope instead of GITHUB_TOKEN');
+                return;
+              }
               
               // Check each project item for status
               for (const item of projectItems) {
-                console.log(`Checking project: ${item.project.title} (${item.project.number})`);
+                console.log('');
+                console.log(`--- Checking project:  ${item.project.title} (Number: ${item.project.number}) ---`);
+                console.log(`Project item ID: ${item.id}`);
+                console.log(`Field values count: ${item.fieldValues.nodes.length}`);
                 
-                // Only check project #4
-                if (item.project.number !== 4) {
-                  console.log(`Skipping project ${item.project.number}`);
+                // Log all field values for debugging
+                console.log('All field values:');
+                item. fieldValues.nodes.forEach((fv, idx) => {
+                  if (fv. field && fv.name) {
+                    console.log(`  ${idx + 1}. Field: "${fv.field.name}" = "${fv.name}"`);
+                  }
+                });
+                
+                // Only check project #4 (make this configurable if needed)
+                if (item. project.number !== 4) {
+                  console.log(`⏭️ Skipping project ${item.project.number} (not target project #4)`);
                   continue;
                 }
+                
+                console.log('✅ This is the target project (#4)');
                 
                 for (const fieldValue of item.fieldValues.nodes) {
                   if (fieldValue.field && fieldValue.field.name === 'Status') {
                     const status = fieldValue.name;
-                    console.log(`Current status: ${status}`);
+                    console.log(`📊 Current status: "${status}"`);
                     
                     // Check if we've already notified about this status
+                    console.log('Checking for existing notifications...');
                     const comments = await github.rest.issues. listComments({
                       owner: repo.owner,
                       repo: repo.repo,
                       issue_number: issueNumber,
                     });
                     
-                    const statusNotificationPattern = new RegExp(`status.*updated to.*\\*\\*${status}\\*\\*`, 'i');
-                    const alreadyNotified = comments. data.some(comment => 
-                      comment.user.type === 'Bot' && 
-                      statusNotificationPattern.test(comment. body)
-                    );
+                    console.log(`Found ${comments.data.length} existing comments`);
                     
-                    if (!alreadyNotified) {
+                    const statusNotificationPattern = new RegExp(`status.*updated to.*\\*\\*${status}\\*\\*`, 'i');
+                    const alreadyNotified = comments.data.some(comment => {
+                      const isBot = comment.user.type === 'Bot';
+                      const matchesPattern = statusNotificationPattern. test(comment.body);
+                      if (isBot && matchesPattern) {
+                        console.log(`Found existing notification in comment #${comment.id}`);
+                      }
+                      return isBot && matchesPattern;
+                    });
+                    
+                    if (! alreadyNotified) {
+                      console.log('📝 Creating new notification comment.. .');
                       let notificationBody = `👋 @${author}, the status of this issue has been updated to **${status}**. `;
                       
                       // Special handling for "In Review" status
                       if (status. toLowerCase() === 'in review') {
-                        console.log('Status is "In Review" - creating task for author');
+                        console.log('Status is "In Review" - adding action items for author');
                         
-                        notificationBody += `\n\n### 📋 Action Required\n\n**Task:** Please review the implemented fix and provide your feedback.\n\n- [ ] Review the changes\n- [ ] Test the implementation\n- [ ] Provide feedback or approve`;
+                        notificationBody += `\n\n### 📋 Action Required\n\n**Task:** Please review the implemented fix and provide your feedback.\n\n- [ ] Review the changes\n- [ ] Test the implementation\n- [ ] Provide feedback or approve\n\nThank you!  🙏`;
                       }
                       
                       await github.rest.issues.createComment({
-                        owner:  repo.owner,
+                        owner: repo. owner,
                         repo: repo.repo,
                         issue_number: issueNumber,
                         body: notificationBody
                       });
                       
-                      console.log('Notification comment posted');
+                      console.log('✅ Notification comment posted successfully');
                     } else {
-                      console.log(`Already notified about "${status}" status - skipping duplicate comment`);
+                      console.log(`ℹ️ Already notified about "${status}" status - skipping duplicate comment`);
                     }
+                    
+                    // Break after processing Status field
+                    break;
                   }
                 }
               }
+              
+              console.log('');
+              console.log('=== Workflow completed successfully ===');
+              
             } catch (error) {
-              console.error('Error querying project data:', error);
+              console.error('❌ Error querying project data: ');
+              console.error('Error name:', error.name);
+              console.error('Error message:', error. message);
+              
+              if (error.errors) {
+                console.error('GraphQL errors:', JSON.stringify(error.errors, null, 2));
+              }
+              
+              if (error.message && error.message.includes('Resource not accessible')) {
+                console.error('');
+                console.error('🔐 This error suggests a permissions issue.');
+                console.error('Solutions:');
+                console.error('1. Create a Personal Access Token with "project" scope');
+                console. error('2. Add it as a repository secret (e.g., PROJECT_ACCESS_TOKEN)');
+                console.error('3. Update the workflow to use:  secrets.PROJECT_ACCESS_TOKEN');
+              }
+              
               throw error;
             }
