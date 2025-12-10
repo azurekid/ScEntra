@@ -24,18 +24,26 @@ function Connect-ScEntraGraph {
     .EXAMPLE
         Connect-ScEntraGraph -Scopes "User.Read.All", "Group.Read.All"
     #>
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName = 'AccessToken')]
     param(
-        [Parameter(Mandatory = $false)]
+        [Parameter(Mandatory = $false, ParameterSetName = 'AccessToken')]
         [string]$AccessToken,
 
-        [Parameter(Mandatory = $false)]
+        [Parameter(Mandatory = $false, ParameterSetName = 'DeviceCode')]
         [switch]$UseDeviceCode,
 
-        [Parameter(Mandatory = $false)]
+        [Parameter(Mandatory = $false, ParameterSetName = 'DeviceCode')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'ClientSecret')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'Certificate')]
         [string]$ClientId,
 
-        [Parameter(Mandatory = $false)]
+        [Parameter(Mandatory = $true, ParameterSetName = 'ClientSecret')]
+        [string]$ClientSecret,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'Certificate')]
+        [string]$CertificateThumbprint,
+
+        [Parameter(Mandatory = $false, ParameterSetName = 'DeviceCode')]
         [string[]]$Scopes = @(
             "Directory.Read.All",
             "RoleManagement.Read.Directory",
@@ -44,12 +52,120 @@ function Connect-ScEntraGraph {
             "DelegatedPermissionGrant.Read.All"
         ),
 
-        [Parameter(Mandatory = $false)]
+        [Parameter(Mandatory = $false, ParameterSetName = 'DeviceCode')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'ClientSecret')]
+        [Parameter(Mandatory = $true, ParameterSetName = 'Certificate')]
         [string]$TenantId = "common"
     )
 
-    # Use Device Code Flow if requested
-    if ($UseDeviceCode) {
+    # Handle different authentication methods based on parameter sets
+    switch ($PSCmdlet.ParameterSetName) {
+        'ClientSecret' {
+            Write-Host "Authenticating with client secret..." -ForegroundColor Cyan
+            
+            $tokenRequest = @{
+                Uri = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
+                Method = 'POST'
+                Body = @{
+                    client_id = $ClientId
+                    client_secret = $ClientSecret
+                    scope = "https://graph.microsoft.com/.default"
+                    grant_type = "client_credentials"
+                }
+            }
+            
+            try {
+                $tokenResponse = Invoke-RestMethod @tokenRequest
+                $global:ScEntraAccessToken = $tokenResponse.access_token
+                $global:ScEntraTokenExpires = (Get-Date).AddSeconds($tokenResponse.expires_in - 300)  # 5 min buffer
+                Write-Host "✅ Successfully authenticated with client secret" -ForegroundColor Green
+                return $global:ScEntraAccessToken
+            }
+            catch {
+                Write-Error "Failed to authenticate with client secret: $($_.Exception.Message)"
+                throw
+            }
+        }
+        
+        'Certificate' {
+            Write-Host "Authenticating with certificate..." -ForegroundColor Cyan
+            
+            # Get certificate from store
+            $cert = Get-ChildItem -Path "Cert:\CurrentUser\My\$CertificateThumbprint" -ErrorAction SilentlyContinue
+            if (-not $cert) {
+                $cert = Get-ChildItem -Path "Cert:\LocalMachine\My\$CertificateThumbprint" -ErrorAction SilentlyContinue
+            }
+            
+            if (-not $cert) {
+                throw "Certificate with thumbprint '$CertificateThumbprint' not found in certificate store"
+            }
+            
+            # Create JWT assertion for certificate authentication
+            $header = @{
+                alg = "RS256"
+                typ = "JWT"
+                x5t = [Convert]::ToBase64String($cert.GetCertHash())
+            } | ConvertTo-Json -Compress
+            
+            $payload = @{
+                aud = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
+                exp = [Math]::Round((Get-Date).AddMinutes(5).Subtract((Get-Date "1970-01-01")).TotalSeconds)
+                iss = $ClientId
+                jti = [Guid]::NewGuid().ToString()
+                nbf = [Math]::Round((Get-Date).Subtract((Get-Date "1970-01-01")).TotalSeconds)
+                sub = $ClientId
+            } | ConvertTo-Json -Compress
+            
+            $headerBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($header)).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+            $payloadBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($payload)).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+            
+            $dataToSign = "$headerBase64.$payloadBase64"
+            $signature = $cert.PrivateKey.SignData([System.Text.Encoding]::UTF8.GetBytes($dataToSign), [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+            $signatureBase64 = [Convert]::ToBase64String($signature).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+            
+            $jwt = "$dataToSign.$signatureBase64"
+            
+            $tokenRequest = @{
+                Uri = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
+                Method = 'POST'
+                Body = @{
+                    client_id = $ClientId
+                    client_assertion_type = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+                    client_assertion = $jwt
+                    scope = "https://graph.microsoft.com/.default"
+                    grant_type = "client_credentials"
+                }
+            }
+            
+            try {
+                $tokenResponse = Invoke-RestMethod @tokenRequest
+                $global:ScEntraAccessToken = $tokenResponse.access_token
+                $global:ScEntraTokenExpires = (Get-Date).AddSeconds($tokenResponse.expires_in - 300)  # 5 min buffer
+                Write-Host "✅ Successfully authenticated with certificate" -ForegroundColor Green
+                return $global:ScEntraAccessToken
+            }
+            catch {
+                Write-Error "Failed to authenticate with certificate: $($_.Exception.Message)"
+                throw
+            }
+        }
+        
+        'DeviceCode' {
+            Write-Host "Using device code authentication..." -ForegroundColor Cyan
+        }
+        
+        'AccessToken' {
+            if ($AccessToken) {
+                $global:ScEntraAccessToken = $AccessToken
+                $global:ScEntraTokenExpires = (Get-Date).AddHours(1)  # Assume 1 hour validity
+                Write-Host "✅ Using provided access token" -ForegroundColor Green
+                return $global:ScEntraAccessToken
+            }
+        }
+    }
+    
+    # Use Device Code Flow if requested or if no other method specified
+    if ($UseDeviceCode -or $PSCmdlet.ParameterSetName -eq 'DeviceCode') {
         Write-Host "`nInitiating OAuth2 Device Code Flow..." -ForegroundColor Cyan
         
         # Use custom client ID if provided, otherwise use Microsoft Graph PowerShell client ID

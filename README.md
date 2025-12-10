@@ -1,4 +1,6 @@
-<img width="1024" height="1024" alt="image" src="https://github.com/user-attachments/assets/fb04f6b4-b495-437c-bfb4-08869748f778" />
+<p align="center">
+  <img src="images/ScEntra-background.png" alt="ScEntra - Scan Entra for Risk & Escalation Paths" width="600" style="max-width: 100%; height: auto;">
+</p>
 
 # ScEntra
 
@@ -87,7 +89,7 @@ Connect-ScEntraGraph
 # See "Automated/Production Setup" section below
 ```
 
-![alt text](image.png)
+![alt text](images/consent.png)
 ### 3a. Automated/Production Setup (Service Principal)
 
 For automated scans or production environments, create a dedicated service principal:
@@ -288,12 +290,14 @@ Contributions are welcome! Please:
 
 1. Fork the repository
 2. Create a feature branch
-3. Test with `./Generate-SampleReport.ps1`
+3. Test the changes thoroughly
 4. Submit a pull request with clear description
 
 ## 📝 License
 
-Copyright (c) 2025 ScEntra Contributors. All rights reserved.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+MIT License allows commercial use, modification, distribution, and private use while requiring only attribution.
 
 ## 🙏 Acknowledgments
 

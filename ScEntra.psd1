@@ -9,13 +9,11 @@
     GUID = '8c3d4e5f-6a7b-8c9d-0e1f-2a3b4c5d6e7f'
 
     # Author of this module
-    Author = 'ScEntra Contributors'
+    Author = 'AzureKid (Rogier Dijkman)'
 
-    # Company or vendor of this module
-    CompanyName = 'ScEntra'
 
     # Copyright statement for this module
-    Copyright = '(c) 2025 ScEntra. All rights reserved.'
+    Copyright = '(c) 2025 ScEntra. Licensed under MIT License.'
 
     # Description of the functionality provided by this module
     Description = 'Scan Entra for risk in role assignments and escalation paths. Provides inventory of users, groups, service principals, app registrations, and analyzes privilege escalation risks.'
