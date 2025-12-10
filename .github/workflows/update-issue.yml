@@ -1,10 +1,33 @@
-name: Notify Author on Status Change
+name: Auto Comment
+description: Automatically comment on issues when they are opened
+run-name: Auto Comment on Issues
+# comment: | https://github.com/marketplace/actions/auto-comment
+on: [issues]
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+        issues: write
+    steps:
+      - uses: wow-actions/auto-comment@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          issuesOpenedReactions: 'eyes'
+          issuesOpenedComment: |
+            👋 @{{ author }}
+            Thank you for raising an issue on **Project ScEntra**.
+            We appreciate your contribution and will review it as soon as possible.
+            
+            If you have any additional information or context to provide, please feel free to add it in the comments.
+            
+            We are here to help!
 
+name: Notify Author on Status Change
+description: Automatically notify author on issues changes
 on:
   issues:
     types: [labeled, unlabeled, edited, opened, reopened]
   workflow_dispatch:
-
 jobs:
   check-and-notify:
     runs-on: ubuntu-latest
@@ -14,7 +37,6 @@ jobs:
       # If needed for Projects v2, replace with a PAT:
       # id-token: write
       # pull-requests: read
-
     steps:
       - name: Check project status and notify
         uses: actions/github-script@v7
