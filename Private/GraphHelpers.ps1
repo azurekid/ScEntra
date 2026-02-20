@@ -22,6 +22,10 @@ function Get-GraphTokenScopeInfo {
     [CmdletBinding()]
     param()
 
+    if ([string]::IsNullOrEmpty($script:GraphAccessToken) -and -not [string]::IsNullOrEmpty($global:ScEntraAccessToken)) {
+        Write-Verbose "Token fallback: loading token from global scope into script scope"
+        $script:GraphAccessToken = $global:ScEntraAccessToken
+    }
     if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
         return $null
     }
@@ -162,6 +166,10 @@ function Test-GraphPermissions {
         [string]$ResourceName = "resource"
     )
 
+    if ([string]::IsNullOrEmpty($script:GraphAccessToken) -and -not [string]::IsNullOrEmpty($global:ScEntraAccessToken)) {
+        Write-Verbose "Token fallback: loading token from global scope into script scope"
+        $script:GraphAccessToken = $global:ScEntraAccessToken
+    }
     if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
         Write-Warning "Not connected to Microsoft Graph. Please run Connect-ScEntraGraph first."
         return $false
@@ -220,6 +228,10 @@ function Test-GraphConnection {
     .SYNOPSIS
         Tests if connected to Microsoft Graph
     #>
+    if ([string]::IsNullOrEmpty($script:GraphAccessToken) -and -not [string]::IsNullOrEmpty($global:ScEntraAccessToken)) {
+        Write-Verbose "Token fallback: loading token from global scope into script scope"
+        $script:GraphAccessToken = $global:ScEntraAccessToken
+    }
     if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
         Write-Warning "Not connected to Microsoft Graph. Please run Connect-ScEntraGraph first."
         return $false
@@ -259,6 +271,10 @@ function Invoke-GraphRequest {
         [int]$TimeoutSec
     )
 
+    if ([string]::IsNullOrEmpty($script:GraphAccessToken) -and -not [string]::IsNullOrEmpty($global:ScEntraAccessToken)) {
+        Write-Verbose "Token fallback: loading token from global scope into script scope"
+        $script:GraphAccessToken = $global:ScEntraAccessToken
+    }
     if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
         throw "Not authenticated. Please run Connect-ScEntraGraph first."
     }
@@ -382,6 +398,10 @@ function Get-ScEntraEnvironmentSize {
     [CmdletBinding()]
     param()
 
+    if ([string]::IsNullOrEmpty($script:GraphAccessToken) -and -not [string]::IsNullOrEmpty($global:ScEntraAccessToken)) {
+        Write-Verbose "Token fallback: loading token from global scope into script scope"
+        $script:GraphAccessToken = $global:ScEntraAccessToken
+    }
     if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
         throw "Not authenticated. Please run Connect-ScEntraGraph first."
     }
@@ -399,7 +419,7 @@ function Get-ScEntraEnvironmentSize {
     $endpoints = @{
         Users = "$script:GraphBaseUrl/users/`$count"
         Groups = "$script:GraphBaseUrl/groups/`$count"
-        ServicePrincipals = "$script:GraphBaseUrl/servicePrincipals/`$count"
+        ServicePrincipals = "$script:GraphBaseUrl/servicePrincipals/`$count" # Failed
         Applications = "$script:GraphBaseUrl/applications/`$count"
     }
 
@@ -546,6 +566,10 @@ function Invoke-GraphBatchRequest {
         [int]$DelayBetweenBatches = 0
     )
 
+    if ([string]::IsNullOrEmpty($script:GraphAccessToken) -and -not [string]::IsNullOrEmpty($global:ScEntraAccessToken)) {
+        Write-Verbose "Token fallback: loading token from global scope into script scope"
+        $script:GraphAccessToken = $global:ScEntraAccessToken
+    }
     if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
         throw "Not authenticated. Please run Connect-ScEntraGraph first."
     }
