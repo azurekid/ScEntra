@@ -260,7 +260,7 @@ function Get-ScEntraEscalationPaths {
         if ($membersResponseKey) {
             $membersResponse = $batchResponses[$membersResponseKey]
             if ($membersResponse -and $membersResponse.status -eq 200 -and $membersResponse.body.value) {
-                $groupMemberships[$groupId] = $membersResponse.body.value
+                $groupMemberships[$groupId] = @($membersResponse.body.value)
             }
         }
         else {
@@ -268,7 +268,7 @@ function Get-ScEntraEscalationPaths {
                 $membersUri = "$script:GraphBaseUrl/groups/$groupId/members?`$select=id,displayName,userPrincipalName"
                 $membersResult = Invoke-GraphRequest -Uri $membersUri -Method GET -ErrorAction SilentlyContinue
                 if ($membersResult.value) {
-                    $groupMemberships[$groupId] = $membersResult.value
+                    $groupMemberships[$groupId] = @($membersResult.value)
                 }
             }
             catch {
@@ -679,8 +679,8 @@ function Get-ScEntraEscalationPaths {
         'Global Administrator'
     )
 
-    $appAdminAssignments = $RoleAssignments | Where-Object { $appManagementRoles -contains $_.RoleName }
-    $appAdminPIMAssignments = $PIMAssignments | Where-Object { $appManagementRoles -contains $_.RoleName }
+    $appAdminAssignments = @($RoleAssignments | Where-Object { $appManagementRoles -contains $_.RoleName })
+    $appAdminPIMAssignments = @($PIMAssignments | Where-Object { $appManagementRoles -contains $_.RoleName })
 
     foreach ($assignment in ($appAdminAssignments + $appAdminPIMAssignments)) {
         $privilegedSPs = $ServicePrincipals | Where-Object {
@@ -704,8 +704,8 @@ function Get-ScEntraEscalationPaths {
         }
     }
 
-    $roleAdminAssignments = $RoleAssignments | Where-Object { $roleManagementRoles -contains $_.RoleName }
-    $roleAdminPIMAssignments = $PIMAssignments | Where-Object { $roleManagementRoles -contains $_.RoleName }
+    $roleAdminAssignments = @($RoleAssignments | Where-Object { $roleManagementRoles -contains $_.RoleName })
+    $roleAdminPIMAssignments = @($PIMAssignments | Where-Object { $roleManagementRoles -contains $_.RoleName })
 
     foreach ($assignment in ($roleAdminAssignments + $roleAdminPIMAssignments)) {
         $isPIM = $assignment -in $roleAdminPIMAssignments
@@ -752,7 +752,7 @@ function Get-ScEntraEscalationPaths {
     Write-Verbose "Building graph data structure for visualization..."
     Write-Progress -Activity "Analyzing escalation paths" -Status "Building graph visualization data" -PercentComplete 95 -Id 5
 
-    $allRoleAssignments = @($RoleAssignments + $PIMAssignments)
+    $allRoleAssignments = @(@($RoleAssignments) + @($PIMAssignments))
 
     $graphData = New-ScEntraGraphData `
         -Users $Users `
