@@ -614,6 +614,8 @@ function Invoke-ScEntraAnalysis {
             $accountType = if ($context.AppName) { "Service Principal" } else { "User" }
             $account = if ($context.AppName) { $context.AppName } else { $context.Account }
             Write-Host "✓ Connected to Microsoft Graph as $accountType`: $account" -ForegroundColor Green
+        } elseif (-not [string]::IsNullOrEmpty($script:GraphAccessToken)) {
+            Write-Host "✓ Connected to Microsoft Graph with AccessToken" -ForegroundColor Green
         } else {
             Write-Host "✗ Not connected to Microsoft Graph" -ForegroundColor Red
         }

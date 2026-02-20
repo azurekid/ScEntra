@@ -77,9 +77,12 @@ function Connect-ScEntraGraph {
             try {
                 $tokenResponse = Invoke-RestMethod @tokenRequest
                 $global:ScEntraAccessToken = $tokenResponse.access_token
+                $script:GraphAccessToken = $tokenResponse.access_token  # Workaround
                 $global:ScEntraTokenExpires = (Get-Date).AddSeconds($tokenResponse.expires_in - 300)  # 5 min buffer
                 Write-Host "✅ Successfully authenticated with client secret" -ForegroundColor Green
-                return $global:ScEntraAccessToken
+                #return $global:ScEntraAccessToken
+                return $script:GraphAccessToken # Output to Variable
+                #return $true
             }
             catch {
                 Write-Error "Failed to authenticate with client secret: $($_.Exception.Message)"
@@ -140,9 +143,12 @@ function Connect-ScEntraGraph {
             try {
                 $tokenResponse = Invoke-RestMethod @tokenRequest
                 $global:ScEntraAccessToken = $tokenResponse.access_token
+                $script:GraphAccessToken = $tokenResponse.access_token # Workaround
                 $global:ScEntraTokenExpires = (Get-Date).AddSeconds($tokenResponse.expires_in - 300)  # 5 min buffer
                 Write-Host "✅ Successfully authenticated with certificate" -ForegroundColor Green
-                return $global:ScEntraAccessToken
+                #return $global:ScEntraAccessToken
+                return $script:GraphAccessToken  # Output to Variable
+                #return $true
             }
             catch {
                 Write-Error "Failed to authenticate with certificate: $($_.Exception.Message)"
@@ -157,9 +163,12 @@ function Connect-ScEntraGraph {
         'AccessToken' {
             if ($AccessToken) {
                 $global:ScEntraAccessToken = $AccessToken
+                $script:GraphAccessToken   = $AccessToken # Workaround
                 $global:ScEntraTokenExpires = (Get-Date).AddHours(1)  # Assume 1 hour validity
                 Write-Host "✅ Using provided access token" -ForegroundColor Green
-                return $global:ScEntraAccessToken
+                #return $global:ScEntraAccessToken
+                return $script:GraphAccessToken # Output to Variable
+                return $true
             }
         }
     }
