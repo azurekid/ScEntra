@@ -163,6 +163,7 @@ function New-ScEntraServicePrincipal {
         'GroupMember.Read.All'                       # Read group memberships (/groups/{id}/members, /groups/{id}/transitiveMembers)
         'Application.Read.All'                       # Read applications and service principals (/applications, /servicePrincipals, /servicePrincipals/{id}/appRoleAssignments)
         'DelegatedPermissionGrant.Read.All'          # Read OAuth2 permission grants (/servicePrincipals/{id}/oauth2PermissionGrants)
+        #'Organization.Read.All'                      # Read tenant organization info (/organization)
         'RoleManagement.Read.Directory'              # Read directory role assignments (/directoryRoles, /directoryRoles/{id}/members, /roleManagement/directory/roleDefinitions)
         'RoleEligibilitySchedule.Read.Directory'     # Read PIM eligible assignments (/roleManagement/directory/roleEligibilitySchedules, /roleManagement/directory/roleEligibilityScheduleInstances)
         'RoleAssignmentSchedule.Read.Directory'      # Read PIM active assignments (/roleManagement/directory/roleAssignmentSchedules)
@@ -196,13 +197,13 @@ function New-ScEntraServicePrincipal {
 
         # Get tenant information
         Write-Host "Getting tenant information..." -ForegroundColor Cyan
-        $tenantInfo = Invoke-GraphRequest -Uri "https://graph.microsoft.com/beta/organization" -Headers $headers
+        $tenantInfo = Invoke-GraphRequest -Uri "$script:GraphBaseUrl/organization" -Headers $headers
         $tenantId = $tenantInfo.value[0].id
         Write-Host "   ✓ Tenant ID: $tenantId" -ForegroundColor Green
 
         # Get Microsoft Graph Service Principal to get permission IDs
         Write-Host "Getting Microsoft Graph permissions..." -ForegroundColor Cyan
-        $graphSP = Invoke-GraphRequest -Uri "https://graph.microsoft.com/beta/servicePrincipals?`$filter=appId eq '00000003-0000-0000-c000-000000000000'" -Headers $headers
+        $graphSP = Invoke-GraphRequest -Uri "$script:GraphBaseUrl/servicePrincipals?`$filter=appId eq '00000003-0000-0000-c000-000000000000'" -Headers $headers
 
         if (-not $graphSP.value -or $graphSP.value.Count -eq 0) {
             throw "Could not find Microsoft Graph service principal"
@@ -241,7 +242,7 @@ function New-ScEntraServicePrincipal {
                 )
             }
 
-            $app = Invoke-GraphRequest -Uri "https://graph.microsoft.com/beta/applications" -Method "POST" -Headers $headers -Body $appBody
+            $app = Invoke-GraphRequest -Uri "$script:GraphBaseUrl/applications" -Method "POST" -Headers $headers -Body $appBody
             Write-Host "   ✓ Created app: $($app.displayName)" -ForegroundColor Green
             Write-Host "   ✓ Application (client) ID: $($app.appId)" -ForegroundColor Green
 
@@ -250,7 +251,7 @@ function New-ScEntraServicePrincipal {
                 appId = $app.appId
             }
 
-            $sp = Invoke-GraphRequest -Uri "https://graph.microsoft.com/beta/servicePrincipals" -Method "POST" -Headers $headers -Body $spBody
+            $sp = Invoke-GraphRequest -Uri "$script:GraphBaseUrl/servicePrincipals" -Method "POST" -Headers $headers -Body $spBody
             Write-Host "   ✓ Created service principal: $($sp.id)" -ForegroundColor Green
 
             # Add credential
@@ -272,7 +273,7 @@ function New-ScEntraServicePrincipal {
                     endDateTime   = $cert.NotAfter.ToString("yyyy-MM-ddTHH:mm:ssZ")
                 }
 
-                $credential = Invoke-GraphRequest -Uri "https://graph.microsoft.com/beta/applications/$($app.id)/addKey" -Method "POST" -Headers $headers -Body $credentialBody
+                $credential = Invoke-GraphRequest -Uri "$script:GraphBaseUrl/applications/$($app.id)/addKey" -Method "POST" -Headers $headers -Body $credentialBody
                 Write-Host "   ✓ Added certificate credential" -ForegroundColor Green
             }
             else {
@@ -285,7 +286,7 @@ function New-ScEntraServicePrincipal {
                     }
                 }
 
-                $credential = Invoke-GraphRequest -Uri "https://graph.microsoft.com/beta/applications/$($app.id)/addPassword" -Method "POST" -Headers $headers -Body $credentialBody
+                $credential = Invoke-GraphRequest -Uri "$script:GraphBaseUrl/applications/$($app.id)/addPassword" -Method "POST" -Headers $headers -Body $credentialBody
                 $clientSecret = $credential.secretText
                 Write-Host "   ✓ Added client secret (expires: $($endDate.ToString('yyyy-MM-dd')))" -ForegroundColor Green
             }
