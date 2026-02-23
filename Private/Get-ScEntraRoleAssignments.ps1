@@ -26,12 +26,14 @@ function Get-ScEntraRoleAssignments {
     Write-Verbose "Retrieving directory role assignments..."
 
     try {
-        $rolesUri = "$script:GraphBaseUrl/directoryRoles?`$select=id,displayName,description,roleTemplateId"
+        #$rolesUri = "$script:GraphBaseUrl/directoryRoles?`$select=id,displayName,description,roleTemplateId"
+        $rolesUri = "$script:GraphBaseUrlV1/directoryRoles?`$select=id,displayName,description,roleTemplateId"
         $roles = Get-AllGraphItems -Uri $rolesUri -ProgressActivity "Retrieving directory roles"
 
         $roleDefinitionLookup = @{}
         try {
-            $definitionsUri = "$script:GraphBaseUrl/roleManagement/directory/roleDefinitions?`$select=id,displayName,description,isBuiltIn,isEnabled,templateId,resourceScopes,rolePermissions"
+            #$definitionsUri = "$script:GraphBaseUrl/roleManagement/directory/roleDefinitions?`$select=id,displayName,description,isBuiltIn,isEnabled,templateId,resourceScopes,rolePermissions"
+            $definitionsUri = "$script:GraphBaseUrlV1/roleManagement/directory/roleDefinitions?`$select=id,displayName,description,isBuiltIn,isEnabled,templateId,resourceScopes,rolePermissions"
             $roleDefinitions = Get-AllGraphItems -Uri $definitionsUri -ProgressActivity "Retrieving role definitions"
             foreach ($definition in $roleDefinitions) {
                 if ($definition.templateId) {
@@ -86,7 +88,8 @@ function Get-ScEntraRoleAssignments {
             }
             $allowedActionsCount = $allowedActions.Count
 
-            $membersUri = "$script:GraphBaseUrl/directoryRoles/$($role.id)/members?`$select=id"
+            #$membersUri = "$script:GraphBaseUrl/directoryRoles/$($role.id)/members?`$select=id"
+            $membersUri = "$script:GraphBaseUrlV1/directoryRoles/$($role.id)/members?`$select=id"
             $members = Get-AllGraphItems -Uri $membersUri
 
             foreach ($member in $members) {
