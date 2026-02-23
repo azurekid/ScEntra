@@ -306,7 +306,7 @@ jobs:
         Connect-ScEntraGraph -TenantId "$(TENANT_ID)" -ClientId "$(CLIENT_ID)" -ClientSecret "$(CLIENT_SECRET)"
         
         # Run analysis
-        $report = Invoke-ScEntraAnalysis -RedactSensitiveInfo
+        $report = Invoke-ScEntraAnalysis #-RedactSensitiveInfo
         
         # Export report
         Export-ScEntraReport -Report $report -OutputPath "$(Build.ArtifactStagingDirectory)/scentra-report.html"
@@ -366,7 +366,7 @@ jobs:
         pwsh -Command "
           Import-Module ./ScEntra.psd1
           Connect-ScEntraGraph -TenantId \$env:SCENTRA_TENANT_ID -ClientId \$env:SCENTRA_CLIENT_ID -ClientSecret \$env:SCENTRA_CLIENT_SECRET
-          \$report = Invoke-ScEntraAnalysis -RedactSensitiveInfo
+          \$report = Invoke-ScEntraAnalysis #-RedactSensitiveInfo
           Export-ScEntraReport -Report \$report -OutputPath './scentra-report.html'
           
           # Create summary
@@ -450,7 +450,7 @@ try {
     Write-Output "Connected to Microsoft Graph successfully"
     
     # Run analysis with redaction for automated scenarios
-    $report = Invoke-ScEntraAnalysis -RedactSensitiveInfo -PerformanceProfile "Medium"
+    $report = Invoke-ScEntraAnalysis -PerformanceProfile "Medium" #-RedactSensitiveInfo
     Write-Output "ScEntra analysis completed. Found $($report.EscalationRisks.Count) escalation risks"
     
     # Export report
@@ -514,7 +514,7 @@ try {
     
     # Connect and run analysis
     Connect-ScEntraGraph -TenantId $tenantId -ClientId $clientId -ClientSecret $clientSecret
-    $report = Invoke-ScEntraAnalysis -RedactSensitiveInfo -PerformanceProfile "Small"
+    $report = Invoke-ScEntraAnalysis -PerformanceProfile "Small" #-RedactSensitiveInfo
     
     # Create response
     $response = @{

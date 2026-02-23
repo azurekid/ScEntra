@@ -4,14 +4,38 @@
 $script:GraphAccessToken = $null
 $script:GraphApiVersion = 'beta'
 $script:GraphBaseUrl = "https://graph.microsoft.com/$script:GraphApiVersion"
+$script:GraphBaseUrlV1 = 'https://graph.microsoft.com/v1.0'
 $script:MissingPermissions = @()
 $script:GraphPermissionHierarchy = @{
-    'Directory.Read.All'            = @('User.Read.All', 'Group.Read.All', 'Application.Read.All', 'ServicePrincipalEndpoint.Read.All', 'DelegatedPermissionGrant.Read.All', 'RoleManagement.Read.Directory', 'RoleManagement.Read.All')
+    #'Directory.Read.All'            = @('User.Read.All', 'Group.Read.All', 'Application.Read.All', 'ServicePrincipalEndpoint.Read.All', 'DelegatedPermissionGrant.Read.All', 'RoleManagement.Read.Directory', 'RoleManagement.Read.All')
+    'Directory.Read.All'            = @('User.Read.All', 'Group.Read.All', 'Application.Read.All', 'ServicePrincipalEndpoint.Read.All', 'DelegatedPermissionGrant.Read.All', 'RoleManagement.Read.Directory', 'RoleManagement.Read.All', 'RoleAssignmentSchedule.Read.Directory', 'RoleEligibilitySchedule.Read.Directory')
     'Directory.ReadWrite.All'       = @('User.ReadWrite.All', 'Group.ReadWrite.All', 'Application.ReadWrite.All', 'DelegatedPermissionGrant.ReadWrite.All', 'Directory.Read.All', 'User.Read.All', 'Group.Read.All', 'Application.Read.All', 'DelegatedPermissionGrant.Read.All', 'RoleManagement.Read.Directory', 'RoleManagement.Read.All')
     'User.ReadWrite.All'            = @('User.Read.All')
     'Group.ReadWrite.All'           = @('Group.Read.All')
     'Application.ReadWrite.All'     = @('Application.Read.All')
     'RoleManagement.ReadWrite.Directory' = @('RoleManagement.Read.Directory', 'RoleManagement.Read.All')
+    'RoleManagement.Read.All'       = @('RoleManagement.Read.Directory', 'RoleAssignmentSchedule.Read.Directory', 'RoleEligibilitySchedule.Read.Directory')
+}
+
+function Sync-GraphToken {
+    # Resolves token from global scope into script scope when script scope is empty
+    if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
+        if (-not [string]::IsNullOrEmpty($global:ScEntraAccessToken)) {
+            Write-Verbose "Token fallback: loading token from global scope into script scope"
+            $script:GraphAccessToken = $global:ScEntraAccessToken
+        } else {
+            Write-Verbose "No token found in script or global scope - module was likely reloaded. Please reconnect with Connect-ScEntraGraph."
+        }
+    }
+}
+
+function Get-GraphUserAgent {
+    $moduleVersion = '1.0.2'
+    try {
+        $module = Get-Module -Name ScEntra -ErrorAction SilentlyContinue
+        if ($module) { $moduleVersion = $module.Version.ToString() }
+    } catch {}
+    return "ScEntra/$moduleVersion (PowerShell/$($PSVersionTable.PSVersion))"
 }
 
 function Get-GraphTokenScopeInfo {
@@ -22,6 +46,7 @@ function Get-GraphTokenScopeInfo {
     [CmdletBinding()]
     param()
 
+    Sync-GraphToken
     if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
         return $null
     }
@@ -162,6 +187,7 @@ function Test-GraphPermissions {
         [string]$ResourceName = "resource"
     )
 
+    Sync-GraphToken
     if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
         Write-Warning "Not connected to Microsoft Graph. Please run Connect-ScEntraGraph first."
         return $false
@@ -220,12 +246,19 @@ function Test-GraphConnection {
     .SYNOPSIS
         Tests if connected to Microsoft Graph
     #>
+    Sync-GraphToken
     if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
         Write-Warning "Not connected to Microsoft Graph. Please run Connect-ScEntraGraph first."
         return $false
     }
+
     try {
-        $null = Invoke-GraphRequest -Uri "$script:GraphBaseUrl/organization" -Method GET -ErrorAction Stop
+        # Use /$count - returns plain integer (text/plain), no JSON parsing, lightweight auth probe
+        # $null = Invoke-GraphRequest -Uri "$script:GraphBaseUrl/organization" -Method GET -ErrorAction Stop
+        $null = Invoke-RestMethod -Uri "$script:GraphBaseUrlV1/users/`$count" -Method GET -Headers @{
+            'Authorization'    = "Bearer $script:GraphAccessToken"
+            'ConsistencyLevel' = 'eventual'
+        } -ErrorAction Stop
         return $true
     }
     catch {
@@ -259,26 +292,16 @@ function Invoke-GraphRequest {
         [int]$TimeoutSec
     )
 
+    Sync-GraphToken
     if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
         throw "Not authenticated. Please run Connect-ScEntraGraph first."
-    }
-
-    # Get module version for User-Agent
-    $moduleVersion = '1.0.2'
-    try {
-        $module = Get-Module -Name ScEntra -ErrorAction SilentlyContinue
-        if ($module) {
-            $moduleVersion = $module.Version.ToString()
-        }
-    } catch {
-        # Fallback to default version
     }
 
     $headers = @{
         'Authorization'    = "Bearer $script:GraphAccessToken"
         'Content-Type'     = 'application/json'
         'ConsistencyLevel' = 'eventual'
-        'User-Agent'       = "ScEntra/$moduleVersion (PowerShell/$($PSVersionTable.PSVersion))"
+        'User-Agent'       = (Get-GraphUserAgent)
     }
 
     $params = @{
@@ -302,9 +325,7 @@ function Invoke-GraphRequest {
         $errorMessage = $_.Exception.Message
         if ($_.ErrorDetails.Message) {
             $errorDetails = $_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction SilentlyContinue
-            if ($errorDetails.error.message) {
-                $errorMessage = $errorDetails.error.message
-            }
+            if ($errorDetails.error.message) { $errorMessage = $errorDetails.error.message }
         }
         Write-Error "Graph API request failed: $errorMessage"
         throw
@@ -357,7 +378,7 @@ function Get-AllGraphItems {
             $nextLink = $result.'@odata.nextLink'
         }
         catch {
-            Write-Error "Error fetching items from $nextLink : $_"
+            Write-Error "Error fetching items from $nextLink : $($_.Exception.Message)"
             break
         }
     } while ($nextLink)
@@ -382,6 +403,7 @@ function Get-ScEntraEnvironmentSize {
     [CmdletBinding()]
     param()
 
+    Sync-GraphToken
     if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
         throw "Not authenticated. Please run Connect-ScEntraGraph first."
     }
@@ -389,34 +411,43 @@ function Get-ScEntraEnvironmentSize {
     Write-Host "Determining environment size by querying Microsoft Graph API..." -ForegroundColor Cyan
 
     $counts = @{
-        Users = 0
-        Groups = 0
+        Users             = 0
+        Groups            = 0
         ServicePrincipals = 0
-        Applications = 0
+        Applications      = 0
     }
 
-    # Query each resource type count
-    $endpoints = @{
-        Users = "$script:GraphBaseUrl/users/`$count"
-        Groups = "$script:GraphBaseUrl/groups/`$count"
-        ServicePrincipals = "$script:GraphBaseUrl/servicePrincipals/`$count"
-        Applications = "$script:GraphBaseUrl/applications/`$count"
+    # Per Microsoft docs (https://learn.microsoft.com/graph/aad-advanced-queries):
+    # GET https://graph.microsoft.com/v1.0/{resource}/$count
+    # Requires: ConsistencyLevel: eventual header
+    # Response: plain integer (text/plain) - must bypass Invoke-GraphRequest's JSON wrapper.
+
+    $countHeaders = @{
+        'Authorization'    = "Bearer $script:GraphAccessToken"
+        'ConsistencyLevel' = 'eventual'
     }
 
-    foreach ($resourceType in $endpoints.Keys) {
+    foreach ($resourceType in @('Users', 'Groups', 'ServicePrincipals', 'Applications')) {
+        $resource = $resourceType.Substring(0, 1).ToLower() + $resourceType.Substring(1)
+
         try {
-            Write-Verbose "Querying $resourceType count..."
-            $count = Invoke-GraphRequest -Uri $endpoints[$resourceType] -Method GET
-            $counts[$resourceType] = [int]$count
+            # v1.0 /$count returns a plain integer (text/plain)
+            $counts[$resourceType] = [int](Invoke-RestMethod -Uri "$script:GraphBaseUrlV1/$resource/`$count" -Method GET -Headers $countHeaders -ErrorAction Stop)
+            Write-Verbose "  ${resourceType}: $($counts[$resourceType])"
         }
         catch {
-            Write-Warning "Could not query $resourceType count: $_"
-            Write-Warning "Falling back to conservative Enterprise configuration"
-            # Return conservative defaults if we can't determine size
-            return Get-ScEntraEnvironmentConfig -UserCount 100000 -GroupCount 50000 -ServicePrincipalCount 50000 -AppRegistrationCount 100000
+            Write-Warning "Could not query ${resourceType} count: $($_.Exception.Message)"
+            $counts[$resourceType] = 0
         }
     }
 
+    if (($counts.Values | Measure-Object -Sum).Sum -eq 0) {
+        Write-Warning "Could not determine environment size from any endpoint. Using Medium configuration as safe default."
+        
+        return Get-ScEntraEnvironmentConfig -UserCount 100000 -GroupCount 50000 -ServicePrincipalCount 50000 -AppRegistrationCount 100000
+    }
+
+    Write-Verbose "Environment counts - Users: $($counts.Users) | Groups: $($counts.Groups) | SPs: $($counts.ServicePrincipals) | Apps: $($counts.Applications)"
     return Get-ScEntraEnvironmentConfig -UserCount $counts.Users -GroupCount $counts.Groups -ServicePrincipalCount $counts.ServicePrincipals -AppRegistrationCount $counts.Applications
 }
 
@@ -546,6 +577,7 @@ function Invoke-GraphBatchRequest {
         [int]$DelayBetweenBatches = 0
     )
 
+    Sync-GraphToken
     if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
         throw "Not authenticated. Please run Connect-ScEntraGraph first."
     }
@@ -560,8 +592,9 @@ function Invoke-GraphBatchRequest {
 
     Write-Verbose "Processing $($Requests.Count) requests in $($batches.Count) batches (ThrottleLimit: $ThrottleLimit, Delay: ${DelayBetweenBatches}ms)"
 
-    $graphBaseUrl = $script:GraphBaseUrl
+    $graphBaseUrl     = $script:GraphBaseUrlV1
     $graphAccessToken = $script:GraphAccessToken
+    $graphUserAgent   = Get-GraphUserAgent
 
     # Choose processing strategy based on throttle limit and delay requirements
     if ($ThrottleLimit -eq 1 -or $DelayBetweenBatches -gt 0) {
@@ -579,19 +612,9 @@ function Invoke-GraphBatchRequest {
                 }
 
                 $batchUri = "$graphBaseUrl/`$batch"
-                # Add User-Agent to batch request headers
                 $batchHeaders = $headers.Clone()
-                if (-not $batchHeaders.ContainsKey('User-Agent')) {
-                    $moduleVersion = '1.0.0'
-                    try {
-                        $module = Get-Module -Name ScEntra -ErrorAction SilentlyContinue
-                        if ($module) {
-                            $moduleVersion = $module.Version.ToString()
-                        }
-                    } catch { }
-                    $batchHeaders['User-Agent'] = "ScEntra/$moduleVersion (PowerShell/$($PSVersionTable.PSVersion))"
-                }
-                
+                $batchHeaders['User-Agent'] = $graphUserAgent
+
                 $response = Invoke-RestMethod -Uri $batchUri -Method POST -Headers $batchHeaders -Body ($batchBody | ConvertTo-Json -Depth 10) -ErrorAction Stop
 
                 # Process responses
@@ -626,19 +649,9 @@ function Invoke-GraphBatchRequest {
                 }
 
                 $batchUri = "$using:graphBaseUrl/`$batch"
-                # Add User-Agent to batch request headers
                 $batchHeaders = $headers.Clone()
-                if (-not $batchHeaders.ContainsKey('User-Agent')) {
-                    $moduleVersion = '1.0.0'
-                    try {
-                        $module = Get-Module -Name ScEntra -ErrorAction SilentlyContinue
-                        if ($module) {
-                            $moduleVersion = $module.Version.ToString()
-                        }
-                    } catch { }
-                    $batchHeaders['User-Agent'] = "ScEntra/$moduleVersion (PowerShell/$($PSVersionTable.PSVersion))"
-                }
-                
+                $batchHeaders['User-Agent'] = $using:graphUserAgent
+
                 $response = Invoke-RestMethod -Uri $batchUri -Method POST -Headers $batchHeaders -Body ($batchBody | ConvertTo-Json -Depth 10) -ErrorAction Stop
 
                 # Return the responses
@@ -713,7 +726,7 @@ function Get-ScEntraOrganizationInfo {
     param()
 
     try {
-        $orgUri = "$script:GraphBaseUrl/organization"
+        $orgUri = "$script:GraphBaseUrlV1/organization"
         $response = Invoke-GraphRequest -Uri $orgUri -Method GET
         
         if ($response.value -and $response.value.Count -gt 0) {

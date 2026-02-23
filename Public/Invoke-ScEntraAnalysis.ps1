@@ -28,30 +28,45 @@ function Invoke-ScEntraAnalysis {
     .PARAMETER DeletePlaintextAfterEncryption
         Legacy switch retained for compatibility. Encrypted reports are written directly so the
         switch has no effect.
+
+    .PARAMETER NonInteractive
+        Skips the interactive menu and runs the full analysis immediately. Combine with
+        -OutputPath, -SkipConnection, -EncryptReport and related parameters to fully automate
+        the run. Requires a valid Graph token to already be loaded (use Connect-ScEntraGraph or
+        Connect-AzAccount before calling this function).
     #>
 
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $false)]
+        [Parameter(Mandatory = $false, ParameterSetName = 'Interactive')]
+        [Parameter(Mandatory = $false, ParameterSetName = 'Non-Interactive')]
         [string]$OutputPath,
 
-        [Parameter(Mandatory = $false)]
+        [Parameter(Mandatory = $false, ParameterSetName = 'Interactive')]
+        [Parameter(Mandatory = $false, ParameterSetName = 'Non-Interactive')]
         [switch]$SkipConnection,
 
-        [Parameter(Mandatory = $false)]
+        [Parameter(Mandatory = $false, ParameterSetName = 'Interactive')]
         [switch]$IncludeAllGroupNesting,
 
-        [Parameter(Mandatory = $false)]
+        [Parameter(Mandatory = $false, ParameterSetName = 'Interactive')]
+        [Parameter(Mandatory = $false, ParameterSetName = 'Non-Interactive')]
         [switch]$EncryptReport,
 
-        [Parameter(Mandatory = $false)]
+        [Parameter(Mandatory = $false, ParameterSetName = 'Interactive')]
+        [Parameter(Mandatory = $false, ParameterSetName = 'Non-Interactive')]
         [System.Security.SecureString]$EncryptionPassword,
 
-        [Parameter(Mandatory = $false)]
+        [Parameter(Mandatory = $false, ParameterSetName = 'Interactive')]
+        [Parameter(Mandatory = $false, ParameterSetName = 'Non-Interactive')]
         [string]$EncryptedOutputPath,
 
-        [Parameter(Mandatory = $false)]
-        [switch]$DeletePlaintextAfterEncryption
+        [Parameter(Mandatory = $false, ParameterSetName = 'Interactive')]
+        [Parameter(Mandatory = $false, ParameterSetName = 'Non-Interactive')]
+        [switch]$DeletePlaintextAfterEncryption,
+
+        [Parameter(Mandatory = $false, ParameterSetName = 'Non-Interactive')]
+        [switch]$NonInteractive
     )
 
     if (-not $EncryptReport -and (
@@ -270,8 +285,12 @@ function Invoke-ScEntraAnalysis {
             [switch]$EncryptReport,
             [System.Security.SecureString]$EncryptionPassword,
             [string]$EncryptedOutputPath,
-            [switch]$DeletePlaintextAfterEncryption
+            [switch]$DeletePlaintextAfterEncryption,
+            [switch]$NonInteractiveMode
         )
+
+        # Reset missing permissions tracker so each run starts clean
+        $script:MissingPermissions = @()
 
         $analysisOutputPath = $OutputPath
         if ($OutputSuffix) {
@@ -340,7 +359,7 @@ function Invoke-ScEntraAnalysis {
         try {
             $envConfig = Get-ScEntraEnvironmentSize
             Write-Host "  Environment Profile: $($envConfig.Profile)" -ForegroundColor Green
-            Write-Host "    Batch Throttle: $($envConfig.BatchThrottleLimit) | Delay: $($envConfig.DelayBetweenBatches)ms | Max Batch Size: $($envConfig.MaxBatchSize)" -ForegroundColor Gray
+            Write-Verbose "    Batch Throttle: $($envConfig.BatchThrottleLimit) | Delay: $($envConfig.DelayBetweenBatches)ms | Max Batch Size: $($envConfig.MaxBatchSize)" #-ForegroundColor Gray
         }
         catch {
             Write-Warning "Could not determine environment size automatically: $_"
@@ -586,10 +605,12 @@ function Invoke-ScEntraAnalysis {
         Write-Host "Report Location: $reportPath" -ForegroundColor Cyan
         Write-Host "Duration: $($duration.ToString('mm\:ss'))" -ForegroundColor Gray
 
-        Write-Host "`nPress any key to return to menu..." -ForegroundColor Gray
-        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-        Clear-Host
-        Show-ScEntraLogo
+        if (-not $NonInteractiveMode) {
+            Write-Host "`nPress any key to return to menu..." -ForegroundColor Gray
+            $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+            Clear-Host
+            Show-ScEntraLogo
+        }
     }
 
     $continue = $true
@@ -614,11 +635,39 @@ function Invoke-ScEntraAnalysis {
             $accountType = if ($context.AppName) { "Service Principal" } else { "User" }
             $account = if ($context.AppName) { $context.AppName } else { $context.Account }
             Write-Host "✓ Connected to Microsoft Graph as $accountType`: $account" -ForegroundColor Green
+        } elseif (-not [string]::IsNullOrEmpty($script:GraphAccessToken)) {
+            Write-Host "✓ Connected to Microsoft Graph with AccessToken" -ForegroundColor Green
         } else {
             Write-Host "✗ Not connected to Microsoft Graph" -ForegroundColor Red
         }
     } catch {
         Write-Host "✗ Not connected to Microsoft Graph" -ForegroundColor Red
+    }
+
+    if ($NonInteractive) {
+        Write-Host "`n▶ Running in Non-Interactive mode (skipping menu)..." -ForegroundColor Cyan
+        Invoke-ScEntraFullAnalysis `
+            -SkipConnectionOverride:$SkipConnection `
+            -EncryptReport:$EncryptReport `
+            -EncryptionPassword $EncryptionPassword `
+            -EncryptedOutputPath $EncryptedOutputPath `
+            -DeletePlaintextAfterEncryption:$DeletePlaintextAfterEncryption `
+            -NonInteractiveMode
+
+        if ($reportPath) {
+            return @{
+                Users             = $users
+                Groups            = $groups
+                ServicePrincipals = $servicePrincipals
+                AppRegistrations  = $appRegistrations
+                RoleAssignments   = $roleAssignments
+                PIMAssignments    = $pimAssignments
+                EscalationRisks   = $escalationRisks
+                GraphData         = $graphData
+                ReportPath        = $reportPath
+            }
+        }
+        return
     }
 
     do {
