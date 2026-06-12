@@ -83,7 +83,7 @@ function New-ScEntraServicePrincipal {
     )
 
     # Helper function to make Graph API calls
-    function Invoke-GraphRequest {
+    function Invoke-ScEntraGraphRequest {
         param(
             [string]$Uri,
             [string]$Method = "GET",
@@ -103,16 +103,28 @@ function New-ScEntraServicePrincipal {
                 $params.ContentType = "application/json"
             }
 
-            $response = Invoke-RestMethod @params
+            $response = Microsoft.PowerShell.Utility\Invoke-RestMethod @params
             return $response
         }
         catch {
             $errorDetails = ""
             if ($_.Exception.Response) {
-                $stream = $_.Exception.Response.GetResponseStream()
-                $reader = New-Object System.IO.StreamReader($stream)
-                $errorDetails = $reader.ReadToEnd()
-                $reader.Close()
+                try {
+                    # PowerShell 7+ often exposes HttpResponseMessage with content on .Content
+                    if ($_.Exception.Response -is [System.Net.Http.HttpResponseMessage]) {
+                        $errorDetails = $_.Exception.Response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                    }
+                    # Windows PowerShell may still expose a response stream
+                    elseif ($_.Exception.Response.PSObject.Methods.Name -contains 'GetResponseStream') {
+                        $stream = $_.Exception.Response.GetResponseStream()
+                        $reader = New-Object System.IO.StreamReader($stream)
+                        $errorDetails = $reader.ReadToEnd()
+                        $reader.Close()
+                    }
+                }
+                catch {
+                    # Keep original exception message even if response parsing fails
+                }
             }
             Write-Error "Graph API call failed: $($_.Exception.Message). Details: $errorDetails"
             throw
@@ -121,10 +133,92 @@ function New-ScEntraServicePrincipal {
 
     # Helper function to get access token
     function Get-GraphAccessToken {
-        param([string]$ProvidedToken)
+        param(
+            [string]$ProvidedToken,
+            [switch]$SkipCachedTokens
+        )
+
+        $script:ScEntraAuthTokenSource = $null
+
+        function Test-GraphTokenLifetime {
+            param([string]$Token)
+
+            if ([string]::IsNullOrWhiteSpace($Token)) {
+                return $false
+            }
+
+            try {
+                $tokenParts = $Token.Split('.')
+                if ($tokenParts.Count -lt 2) {
+                    return $false
+                }
+
+                $payload = $tokenParts[1].Replace('-', '+').Replace('_', '/')
+                switch ($payload.Length % 4) {
+                    2 { $payload += '==' }
+                    3 { $payload += '=' }
+                }
+
+                $payloadJson = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload))
+                $payloadObj = $payloadJson | ConvertFrom-Json -ErrorAction Stop
+
+                if (-not $payloadObj.exp) {
+                    return $false
+                }
+
+                $expiryUtc = [DateTimeOffset]::FromUnixTimeSeconds([int64]$payloadObj.exp).UtcDateTime
+                # Require at least 2 minutes remaining to avoid mid-run expiration.
+                return ($expiryUtc -gt (Get-Date).ToUniversalTime().AddMinutes(2))
+            }
+            catch {
+                return $false
+            }
+        }
+
+        function Convert-ToPlainTextToken {
+            param([object]$TokenValue)
+
+            if ($null -eq $TokenValue) {
+                return $null
+            }
+
+            if ($TokenValue -is [string]) {
+                return $TokenValue
+            }
+
+            if ($TokenValue -is [SecureString]) {
+                return ($TokenValue | ConvertFrom-SecureString -AsPlainText)
+            }
+
+            return $TokenValue.ToString()
+        }
 
         if ($ProvidedToken) {
+            $script:ScEntraAuthTokenSource = "Provided -AccessToken"
             return $ProvidedToken
+        }
+
+        # Reuse token from existing ScEntra session when available
+        if (-not $SkipCachedTokens) {
+            if (-not [string]::IsNullOrEmpty($script:GraphAccessToken)) {
+                if (Test-GraphTokenLifetime -Token $script:GraphAccessToken) {
+                    $script:ScEntraAuthTokenSource = "Existing ScEntra script token"
+                    return $script:GraphAccessToken
+                }
+                else {
+                    Write-Verbose "Cached ScEntra script token is expired/invalid. Trying fresh token sources."
+                }
+            }
+
+            if (-not [string]::IsNullOrEmpty($global:ScEntraAccessToken)) {
+                if (Test-GraphTokenLifetime -Token $global:ScEntraAccessToken) {
+                    $script:ScEntraAuthTokenSource = "Existing ScEntra global token"
+                    return $global:ScEntraAccessToken
+                }
+                else {
+                    Write-Verbose "Cached ScEntra global token is expired/invalid. Trying fresh token sources."
+                }
+            }
         }
 
         # Try to get token from current session
@@ -134,7 +228,47 @@ function New-ScEntraServicePrincipal {
             if ($context) {
                 # Get token from current session
                 $token = [Microsoft.Graph.Authentication.GraphSession]::Instance.AuthenticationProvider.GetAccessToken()
-                return $token
+                if ($token) {
+                    $script:ScEntraAuthTokenSource = "Microsoft Graph PowerShell context"
+                    return $token
+                }
+            }
+        }
+        catch {
+            # Ignore errors and try next method
+        }
+
+        # Try Azure PowerShell token
+        try {
+            $azContext = Get-AzContext -ErrorAction SilentlyContinue
+            if ($azContext) {
+                $azToken = Get-AzAccessToken -ResourceTypeName MSGraph -ErrorAction SilentlyContinue
+                if (-not $azToken) {
+                    $azToken = Get-AzAccessToken -ResourceUrl "https://graph.microsoft.com" -ErrorAction SilentlyContinue
+                }
+
+                if ($azToken -and $azToken.Token) {
+                    $plainToken = Convert-ToPlainTextToken -TokenValue $azToken.Token
+
+                    if (-not [string]::IsNullOrWhiteSpace($plainToken)) {
+                        $script:ScEntraAuthTokenSource = "Azure PowerShell context"
+                        return $plainToken
+                    }
+                }
+
+                if ($azToken -and $azToken.AccessToken) {
+                    $plainToken = Convert-ToPlainTextToken -TokenValue $azToken.AccessToken
+
+                    if (-not [string]::IsNullOrWhiteSpace($plainToken)) {
+                        $script:ScEntraAuthTokenSource = "Azure PowerShell context"
+                        return $plainToken
+                    }
+                }
+
+                if ($azToken -and $azToken.Token) {
+                    $script:ScEntraAuthTokenSource = "Azure PowerShell context"
+                    return $azToken.Token
+                }
             }
         }
         catch {
@@ -143,16 +277,17 @@ function New-ScEntraServicePrincipal {
 
         # Try Azure CLI token
         try {
-            $cliToken = az account get-access-token --resource "https://graph.microsoft.com" --query "accessToken" -o tsv 2>$null
-            if ($cliToken -and $cliToken -ne "null") {
-                return $cliToken
+            $cliToken = az account get-access-token --resource "https://graph.microsoft.com" 2>$null | ConvertFrom-Json
+            if ($cliToken -and $cliToken.accessToken) {
+                $script:ScEntraAuthTokenSource = "Azure CLI context"
+                return $cliToken.accessToken
             }
         }
         catch {
             # Ignore errors
         }
 
-        throw "No access token available. Please connect to Microsoft Graph using Connect-MgGraph or provide an access token."
+        throw "No access token available. Authenticate first with Connect-ScEntraGraph, Connect-AzAccount, or az login, or provide -AccessToken."
     }
 
     # Required Microsoft Graph Application Permissions for ScEntra
@@ -188,6 +323,9 @@ function New-ScEntraServicePrincipal {
         # Get access token
         Write-Host "Getting access token..." -ForegroundColor Cyan
         $token = Get-GraphAccessToken -ProvidedToken $AccessToken
+        if (-not [string]::IsNullOrEmpty($script:ScEntraAuthTokenSource)) {
+            Write-Host "   ✓ Token source: $script:ScEntraAuthTokenSource" -ForegroundColor Green
+        }
 
         $headers = @{
             "Authorization" = "Bearer $token"
@@ -196,13 +334,34 @@ function New-ScEntraServicePrincipal {
 
         # Get tenant information
         Write-Host "Getting tenant information..." -ForegroundColor Cyan
-        $tenantInfo = Invoke-GraphRequest -Uri "https://graph.microsoft.com/beta/organization" -Headers $headers
+        try {
+            $tenantInfo = Invoke-ScEntraGraphRequest -Uri "https://graph.microsoft.com/beta/organization" -Headers $headers
+        }
+        catch {
+            $authErrorText = $_.Exception.Message
+            $isAuthFailure = $authErrorText -match "Authentication needed|Connect-MgGraph|InvalidAuthenticationToken|Access token has expired|Unauthorized|401"
+
+            if ($isAuthFailure -and -not $AccessToken) {
+                Write-Warning "Cached token failed authentication. Retrying with fresh token sources..."
+                $token = Get-GraphAccessToken -SkipCachedTokens
+
+                if (-not [string]::IsNullOrEmpty($script:ScEntraAuthTokenSource)) {
+                    Write-Host "   ✓ Token source (retry): $script:ScEntraAuthTokenSource" -ForegroundColor Green
+                }
+
+                $headers["Authorization"] = "Bearer $token"
+                $tenantInfo = Invoke-ScEntraGraphRequest -Uri "https://graph.microsoft.com/beta/organization" -Headers $headers
+            }
+            else {
+                throw
+            }
+        }
         $tenantId = $tenantInfo.value[0].id
         Write-Host "   ✓ Tenant ID: $tenantId" -ForegroundColor Green
 
         # Get Microsoft Graph Service Principal to get permission IDs
         Write-Host "Getting Microsoft Graph permissions..." -ForegroundColor Cyan
-        $graphSP = Invoke-GraphRequest -Uri "https://graph.microsoft.com/beta/servicePrincipals?`$filter=appId eq '00000003-0000-0000-c000-000000000000'" -Headers $headers
+        $graphSP = Invoke-ScEntraGraphRequest -Uri "https://graph.microsoft.com/beta/servicePrincipals?`$filter=appId eq '00000003-0000-0000-c000-000000000000'" -Headers $headers
 
         if (-not $graphSP.value -or $graphSP.value.Count -eq 0) {
             throw "Could not find Microsoft Graph service principal"
@@ -241,7 +400,17 @@ function New-ScEntraServicePrincipal {
                 )
             }
 
-            $app = Invoke-GraphRequest -Uri "https://graph.microsoft.com/beta/applications" -Method "POST" -Headers $headers -Body $appBody
+            try {
+                $app = Invoke-ScEntraGraphRequest -Uri "https://graph.microsoft.com/beta/applications" -Method "POST" -Headers $headers -Body $appBody
+            }
+            catch {
+                $createAppError = $_.Exception.Message
+                if ($createAppError -match "403|Forbidden") {
+                    throw "Forbidden creating application registration. The current token source '$script:ScEntraAuthTokenSource' does not have sufficient Microsoft Graph write permissions. Authenticate with Connect-MgGraph -Scopes 'Application.ReadWrite.All','Directory.Read.All' (or provide -AccessToken with equivalent permissions), then retry."
+                }
+
+                throw
+            }
             Write-Host "   ✓ Created app: $($app.displayName)" -ForegroundColor Green
             Write-Host "   ✓ Application (client) ID: $($app.appId)" -ForegroundColor Green
 
@@ -250,7 +419,7 @@ function New-ScEntraServicePrincipal {
                 appId = $app.appId
             }
 
-            $sp = Invoke-GraphRequest -Uri "https://graph.microsoft.com/beta/servicePrincipals" -Method "POST" -Headers $headers -Body $spBody
+            $sp = Invoke-ScEntraGraphRequest -Uri "https://graph.microsoft.com/beta/servicePrincipals" -Method "POST" -Headers $headers -Body $spBody
             Write-Host "   ✓ Created service principal: $($sp.id)" -ForegroundColor Green
 
             # Add credential
@@ -272,7 +441,7 @@ function New-ScEntraServicePrincipal {
                     endDateTime   = $cert.NotAfter.ToString("yyyy-MM-ddTHH:mm:ssZ")
                 }
 
-                $credential = Invoke-GraphRequest -Uri "https://graph.microsoft.com/beta/applications/$($app.id)/addKey" -Method "POST" -Headers $headers -Body $credentialBody
+                $credential = Invoke-ScEntraGraphRequest -Uri "https://graph.microsoft.com/beta/applications/$($app.id)/addKey" -Method "POST" -Headers $headers -Body $credentialBody
                 Write-Host "   ✓ Added certificate credential" -ForegroundColor Green
             }
             else {
@@ -285,7 +454,7 @@ function New-ScEntraServicePrincipal {
                     }
                 }
 
-                $credential = Invoke-GraphRequest -Uri "https://graph.microsoft.com/beta/applications/$($app.id)/addPassword" -Method "POST" -Headers $headers -Body $credentialBody
+                $credential = Invoke-ScEntraGraphRequest -Uri "https://graph.microsoft.com/beta/applications/$($app.id)/addPassword" -Method "POST" -Headers $headers -Body $credentialBody
                 $clientSecret = $credential.secretText
                 Write-Host "   ✓ Added client secret (expires: $($endDate.ToString('yyyy-MM-dd')))" -ForegroundColor Green
             }

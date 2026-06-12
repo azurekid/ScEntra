@@ -76,14 +76,7 @@ Import-Module ./ScEntra.psd1
 # Option 1: Interactive authentication (recommended for manual analysis)
 Connect-AzAccount
 Connect-ScEntraGraph -UseDeviceCode
-
-# Option 2: Using Azure CLI
-az login
-Connect-ScEntraGraph
-
-# Option 3: Using Azure PowerShell
-Connect-AzAccount
-Connect-ScEntraGraph
+```
 
 # Option 4: Service Principal (recommended for automation)
 # See "Automated/Production Setup" section below
