@@ -800,7 +800,7 @@ function Invoke-ScEntraAnalysis {
         switch ($choice) {
             "1" {
                 $options = Get-AnalysisReportOptions -ContextDescription "Full Analysis" -IncludeGraphOptions
-                if ($options -eq $null) { continue }
+                if ($null -eq $options) { continue }
                 Write-Host "`n▶ Starting Full Analysis..." -ForegroundColor Cyan
                 Invoke-ScEntraFullAnalysis @options
                 continue
@@ -841,7 +841,7 @@ function Invoke-ScEntraAnalysis {
             }
             "4" {
                 $options = Get-AnalysisReportOptions -ContextDescription "Report Generation"
-                if ($options -eq $null) { continue }
+                if ($null -eq $options) { continue }
                 Write-Host "`n▶ Generating Report from JSON..." -ForegroundColor Cyan
                 $jsonPath = Read-Host "Enter path to JSON file"
                 if (Test-Path $jsonPath) {
