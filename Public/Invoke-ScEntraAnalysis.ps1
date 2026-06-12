@@ -42,6 +42,9 @@ function Invoke-ScEntraAnalysis {
         [switch]$IncludeAllGroupNesting,
 
         [Parameter(Mandatory = $false)]
+        [switch]$IncludeAllUsersInGraph,
+
+        [Parameter(Mandatory = $false)]
         [switch]$EncryptReport,
 
         [Parameter(Mandatory = $false)]
@@ -51,7 +54,10 @@ function Invoke-ScEntraAnalysis {
         [string]$EncryptedOutputPath,
 
         [Parameter(Mandatory = $false)]
-        [switch]$DeletePlaintextAfterEncryption
+        [switch]$DeletePlaintextAfterEncryption,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$DefenderSafeMode
     )
 
     if (-not $EncryptReport -and (
@@ -82,13 +88,17 @@ function Invoke-ScEntraAnalysis {
 
     function Get-AnalysisReportOptions {
         param(
-            [string]$ContextDescription = "analysis"
+            [string]$ContextDescription = "analysis",
+            [switch]$IncludeGraphOptions
         )
 
         Clear-Host
         Show-ScEntraLogo
 
         $options = @{}
+        if ($DefenderSafeMode) {
+            $options['DefenderSafeMode'] = $true
+        }
 
         Write-Host "`n🔧 $ContextDescription Options:" -ForegroundColor Yellow
         Write-Host "  [1] Standard Analysis/Report" -ForegroundColor White
@@ -103,10 +113,22 @@ function Invoke-ScEntraAnalysis {
         switch ($choice) {
             "1" {
                 # Standard - no options
+                if ($IncludeGraphOptions) {
+                    $allUsersChoice = Read-Host "Include all Entra users in graph (can increase report size)? (y/N)"
+                    if ($allUsersChoice -match '^[Yy]') {
+                        $options['IncludeAllUsersInGraph'] = $true
+                    }
+                }
                 return $options
             }
             "2" {
                 $options['RedactPII'] = $true
+                if ($IncludeGraphOptions) {
+                    $allUsersChoice = Read-Host "Include all Entra users in graph (can increase report size)? (y/N)"
+                    if ($allUsersChoice -match '^[Yy]') {
+                        $options['IncludeAllUsersInGraph'] = $true
+                    }
+                }
                 return $options
             }
             "3" {
@@ -117,6 +139,12 @@ function Invoke-ScEntraAnalysis {
                 }
                 foreach ($key in $encryptOptions.Keys) {
                     $options[$key] = $encryptOptions[$key]
+                }
+                if ($IncludeGraphOptions) {
+                    $allUsersChoice = Read-Host "Include all Entra users in graph (can increase report size)? (y/N)"
+                    if ($allUsersChoice -match '^[Yy]') {
+                        $options['IncludeAllUsersInGraph'] = $true
+                    }
                 }
                 return $options
             }
@@ -129,6 +157,12 @@ function Invoke-ScEntraAnalysis {
                 }
                 foreach ($key in $encryptOptions.Keys) {
                     $options[$key] = $encryptOptions[$key]
+                }
+                if ($IncludeGraphOptions) {
+                    $allUsersChoice = Read-Host "Include all Entra users in graph (can increase report size)? (y/N)"
+                    if ($allUsersChoice -match '^[Yy]') {
+                        $options['IncludeAllUsersInGraph'] = $true
+                    }
                 }
                 return $options
             }
@@ -213,6 +247,7 @@ function Invoke-ScEntraAnalysis {
                         OutputSuffix = '-redacted'
                     }
                     Invoke-ScEntraFullAnalysis @analysisOptions `
+                        -DefenderSafeMode:$DefenderSafeMode `
                         -EncryptReport:$EncryptReport `
                         -EncryptionPassword $EncryptionPassword `
                         -EncryptedOutputPath $EncryptedOutputPath `
@@ -267,6 +302,8 @@ function Invoke-ScEntraAnalysis {
             [switch]$RedactPII,
             [string]$OutputSuffix = '',
             [switch]$SkipConnectionOverride,
+            [switch]$IncludeAllUsersInGraph,
+            [switch]$DefenderSafeMode,
             [switch]$EncryptReport,
             [System.Security.SecureString]$EncryptionPassword,
             [string]$EncryptedOutputPath,
@@ -336,7 +373,7 @@ function Invoke-ScEntraAnalysis {
 
         $startTime = Get-Date
 
-        Write-Host "[1/5] 🔍 Determining Environment Size..." -ForegroundColor Cyan
+        Write-Host "[1/6] 🔍 Determining Environment Size..." -ForegroundColor Cyan
         try {
             $envConfig = Get-ScEntraEnvironmentSize
             Write-Host "  Environment Profile: $($envConfig.Profile)" -ForegroundColor Green
@@ -348,9 +385,15 @@ function Invoke-ScEntraAnalysis {
             $envConfig = Get-ScEntraEnvironmentConfig -UserCount 100000 -GroupCount 50000 -ServicePrincipalCount 50000 -AppRegistrationCount 100000
         }
 
-        Write-Host "[2/5] Collecting Inventory..." -ForegroundColor Cyan
+        Write-Host "[2/6] Collecting Inventory..." -ForegroundColor Cyan
 
-        $organizationInfo = Get-ScEntraOrganizationInfo
+        $organizationInfo = $null
+        if (-not $DefenderSafeMode) {
+            $organizationInfo = Get-ScEntraOrganizationInfo
+        }
+        else {
+            Write-Host "  Defender-safe mode enabled: skipping tenant organization profile call." -ForegroundColor Yellow
+        }
         if ($organizationInfo) {
             Write-Host "  ✓ Organization: $($organizationInfo.DisplayName)" -ForegroundColor Green
             if ($organizationInfo.VerifiedDomains) {
@@ -422,21 +465,44 @@ function Invoke-ScEntraAnalysis {
             Write-Warning "Failed to retrieve app registrations: $($appResult.Error)"
         }
 
-        Write-Host "[3/5] Enumerating Role Assignments..." -ForegroundColor Cyan
+        Write-Host "[3/6] Collecting Azure RBAC Blast Radius..." -ForegroundColor Cyan
+        $azureRoleAssignments = @()
+        $azureEligibleRoleAssignments = @()
+        $subscriptionNames = @{}
+        $managementGroupHierarchy = @()
+        try {
+            $azureRbacResult = Get-ScEntraAzureRoleAssignments -Users $users -Groups $groups -ServicePrincipals $servicePrincipals
+            if ($azureRbacResult) {
+                $azureRoleAssignments = if ($azureRbacResult.RoleAssignments) { $azureRbacResult.RoleAssignments } else { @() }
+                $azureEligibleRoleAssignments = if ($azureRbacResult.EligibleRoleAssignments) { $azureRbacResult.EligibleRoleAssignments } else { @() }
+                $subscriptionNames = if ($azureRbacResult.SubscriptionNames) { $azureRbacResult.SubscriptionNames } else { @{} }
+                $managementGroupHierarchy = if ($azureRbacResult.ManagementGroupHierarchy) { $azureRbacResult.ManagementGroupHierarchy } else { @() }
+
+                if ($azureRbacResult.Error) {
+                    Write-Warning $azureRbacResult.Error
+                }
+                else {
+                    Write-Host "  ✓ Collected Azure RBAC: $($azureRoleAssignments.Count) active assignments, $($azureEligibleRoleAssignments.Count) eligible assignments ($($subscriptionNames.Count) subscription(s))" -ForegroundColor Green
+                }
+            }
+        }
+        catch {
+            Write-Warning "Failed to retrieve Azure role assignments: $($_.Exception.Message)"
+        }
+
+        Write-Host "[4/6] Enumerating Role Assignments..." -ForegroundColor Cyan
         $roleAssignments = @()
         try {
             $result = Get-ScEntraRoleAssignments
             if ($result) {
                 $roleAssignments = $result
-            } else {
-                # Write-Host "DEBUG: Result was null/empty, keeping empty array" -ForegroundColor Yellow
             }
         }
         catch {
             Write-Warning "Failed to retrieve role assignments: $($_.Exception.Message)"
         }
 
-        Write-Host "[3/5] Checking PIM Assignments..." -ForegroundColor Cyan
+        Write-Host "[4/6] Checking PIM Assignments..." -ForegroundColor Cyan
         $pimAssignments = @()
         try {
             $result = Get-ScEntraPIMAssignments
@@ -452,15 +518,16 @@ function Invoke-ScEntraAnalysis {
         if (-not $roleAssignments -or $roleAssignments.Count -eq 0) {
             if ($missingPermissions -and ($missingPermissions -contains 'RoleManagement.Read.Directory')) {
                 Write-Warning "Role assignments could not be collected because RoleManagement.Read.Directory is missing. Escalation path analysis will be limited."
-            } else {
+            }
+            else {
                 Write-Warning "No role assignments were returned. Escalation map may be empty."
             }
         }
 
-        Write-Host "[4/5] Analyzing Escalation Paths..." -ForegroundColor Cyan
+        Write-Host "[5/6] Analyzing Escalation Paths..." -ForegroundColor Cyan
         $escalationRisks = @()
         $graphData = $null
-        
+
         try {
             $escalationResult = Get-ScEntraEscalationPaths `
                 -Users $users `
@@ -469,17 +536,51 @@ function Invoke-ScEntraAnalysis {
                 -PIMAssignments $pimAssignments `
                 -ServicePrincipals $servicePrincipals `
                 -AppRegistrations $appRegistrations `
+                -AzureRoleAssignments $azureRoleAssignments `
+                -AzureEligibleRoleAssignments $azureEligibleRoleAssignments `
+                -IncludeAllUsersInGraph:$IncludeAllUsersInGraph `
+                -DefenderSafeMode:$DefenderSafeMode `
+                -SubscriptionNames $subscriptionNames `
+                -ManagementGroupHierarchy $managementGroupHierarchy `
                 -BatchThrottleLimit $envConfig.BatchThrottleLimit `
                 -DelayBetweenBatches $envConfig.DelayBetweenBatches `
                 -MaxBatchSize $envConfig.MaxBatchSize `
                 -UseParallelEscalation $envConfig.UseParallelEscalation `
                 -EscalationThrottleLimit $envConfig.EscalationThrottleLimit `
                 -CircuitBreakerThreshold $envConfig.CircuitBreakerThreshold
-                
+
             if ($escalationResult) {
                 $escalationRisks = $escalationResult.Risks
                 $graphData = $escalationResult.GraphData
-            } else {
+                $groupMemberships = if ($escalationResult.GroupMemberships) { $escalationResult.GroupMemberships } else { @{} }
+
+                if (-not $graphData -and ($users.Count -gt 0 -or $groups.Count -gt 0 -or $roleAssignments.Count -gt 0 -or $pimAssignments.Count -gt 0 -or $azureRoleAssignments.Count -gt 0 -or $azureEligibleRoleAssignments.Count -gt 0)) {
+                    Write-Host "Escalation analysis returned no graph data; rebuilding graph for report rendering..." -ForegroundColor Yellow
+                    try {
+                        $rebuiltGraph = New-ScEntraGraphData `
+                            -Users $users `
+                            -Groups $groups `
+                            -ServicePrincipals $servicePrincipals `
+                            -AppRegistrations $appRegistrations `
+                            -RoleAssignments $roleAssignments `
+                            -PIMAssignments $pimAssignments `
+                            -AzureRoleAssignments $azureRoleAssignments `
+                            -AzureEligibleRoleAssignments $azureEligibleRoleAssignments `
+                            -GroupMemberships $groupMemberships `
+                            -SubscriptionNames $subscriptionNames `
+                            -ManagementGroupHierarchy $managementGroupHierarchy
+
+                        if ($rebuiltGraph -and $rebuiltGraph.nodes -and $rebuiltGraph.nodes.Count -gt 0) {
+                            $graphData = $rebuiltGraph
+                            Write-Host "Rebuilt graph: $($rebuiltGraph.nodes.Count) nodes, $($rebuiltGraph.edges.Count) edges" -ForegroundColor Green
+                        }
+                    }
+                    catch {
+                        Write-Warning "Graph rebuild failed: $($_.Exception.Message)"
+                    }
+                }
+            }
+            else {
                 Write-Warning "Escalation analysis returned no data. Report will be generated with inventory data only."
             }
         }
@@ -487,7 +588,47 @@ function Invoke-ScEntraAnalysis {
             Write-Warning "Failed to analyze escalation paths: $($_.Exception.Message). Continuing with inventory data only."
         }
 
-        Write-Host "`n[5/5] Generating Report..." -ForegroundColor Cyan
+        $azureHighImpactRoles = @(
+            'Owner'
+            'User Access Administrator'
+            'Contributor'
+            'Key Vault Administrator'
+            'Managed Identity Contributor'
+            'Role Based Access Control Administrator'
+        )
+
+        foreach ($assignment in $azureRoleAssignments) {
+            if (-not $assignment.RoleName -or -not ($azureHighImpactRoles -contains $assignment.RoleName)) {
+                continue
+            }
+
+            $severity = if ($assignment.RoleName -in @('Owner', 'User Access Administrator')) { 'High' } else { 'Medium' }
+            $principalLabel = if ($assignment.PrincipalName) { $assignment.PrincipalName } elseif ($assignment.PrincipalId) { $assignment.PrincipalId } else { 'Unknown principal' }
+            $escalationRisks += [PSCustomObject]@{
+                RiskType       = 'AzureRoleAssignment'
+                Severity       = $severity
+                Description    = "Azure RBAC: $principalLabel ($($assignment.PrincipalType)) has role '$($assignment.RoleName)' on scope '$($assignment.Scope)'."
+                PrincipalId    = $assignment.PrincipalId
+                AffectedEntity = $assignment.Scope
+            }
+        }
+
+        foreach ($eligible in $azureEligibleRoleAssignments) {
+            if (-not $eligible.RoleName -or -not ($azureHighImpactRoles -contains $eligible.RoleName)) {
+                continue
+            }
+
+            $principalLabel = if ($eligible.PrincipalName) { $eligible.PrincipalName } elseif ($eligible.PrincipalId) { $eligible.PrincipalId } else { 'Unknown principal' }
+            $escalationRisks += [PSCustomObject]@{
+                RiskType       = 'AzureEligibleRole'
+                Severity       = 'Medium'
+                Description    = "Azure PIM Eligible: $principalLabel ($($eligible.PrincipalType)) is eligible for role '$($eligible.RoleName)' on scope '$($eligible.Scope)'."
+                PrincipalId    = $eligible.PrincipalId
+                AffectedEntity = $eligible.Scope
+            }
+        }
+
+        Write-Host "`n[6/6] Generating Report..." -ForegroundColor Cyan
 
         if ($RedactPII) {
             Write-Host "Redacting PII data..." -ForegroundColor Yellow
@@ -518,7 +659,12 @@ function Invoke-ScEntraAnalysis {
         if (-not $appRegistrations) { $appRegistrations = @() }
         if (-not $roleAssignments) { $roleAssignments = @() }
         if (-not $pimAssignments) { $pimAssignments = @() }
+            if (-not $azureRoleAssignments) { $azureRoleAssignments = @() }
+            if (-not $azureEligibleRoleAssignments) { $azureEligibleRoleAssignments = @() }
+            if (-not $subscriptionNames) { $subscriptionNames = @{} }
+            if (-not $managementGroupHierarchy) { $managementGroupHierarchy = @() }
         if (-not $escalationRisks) { $escalationRisks = @() }
+        if (-not $groupMemberships) { $groupMemberships = @{} }
         
         try {
             $reportPath = Export-ScEntraReport `
@@ -528,8 +674,11 @@ function Invoke-ScEntraAnalysis {
                 -AppRegistrations $appRegistrations `
                 -RoleAssignments $roleAssignments `
                 -PIMAssignments $pimAssignments `
+                -AzureRoleAssignments $azureRoleAssignments `
+                -AzureEligibleRoleAssignments $azureEligibleRoleAssignments `
                 -EscalationRisks $escalationRisks `
                 -GraphData $graphData `
+                -GroupMemberships $groupMemberships `
                 -OrganizationInfo $organizationInfo `
                 -OutputPath $analysisOutputPath `
                 -EncryptReport:$EncryptReport `
@@ -552,6 +701,8 @@ function Invoke-ScEntraAnalysis {
             'appRegistrations' = $appRegistrations
             'roleAssignments' = $roleAssignments
             'pimAssignments' = $pimAssignments
+            'azureRoleAssignments' = $azureRoleAssignments
+            'azureEligibleRoleAssignments' = $azureEligibleRoleAssignments
             'escalationRisks' = $escalationRisks
             'graphData' = $graphData
             'reportPath' = $reportPath
@@ -569,7 +720,12 @@ function Invoke-ScEntraAnalysis {
         Write-Host "  • App Registrations: $($appRegistrations.Count)" -ForegroundColor White
         Write-Host "  • Role Assignments: $($roleAssignments.Count)" -ForegroundColor White
         Write-Host "  • PIM Assignments: $($pimAssignments.Count)" -ForegroundColor White
+        Write-Host "  • Azure Role Assignments: $($azureRoleAssignments.Count)" -ForegroundColor White
+        Write-Host "  • Azure Eligible Roles: $($azureEligibleRoleAssignments.Count)" -ForegroundColor White
         Write-Host "  • Escalation Risks: $($escalationRisks.Count)" -ForegroundColor Yellow
+        if ($DefenderSafeMode) {
+            Write-Host "  • Defender-safe Mode: Enabled" -ForegroundColor Yellow
+        }
 
         $missingPermissions = Get-MissingPermissionsSummary
         if ($missingPermissions.Count -gt 0) {
@@ -609,15 +765,22 @@ function Invoke-ScEntraAnalysis {
 
     # Show connection status
     try {
-        $context = Get-MgContext
-        if ($context) {
-            $accountType = if ($context.AppName) { "Service Principal" } else { "User" }
-            $account = if ($context.AppName) { $context.AppName } else { $context.Account }
-            Write-Host "✓ Connected to Microsoft Graph as $accountType`: $account" -ForegroundColor Green
-        } else {
+        if ([string]::IsNullOrEmpty($script:GraphAccessToken)) {
             Write-Host "✗ Not connected to Microsoft Graph" -ForegroundColor Red
         }
-    } catch {
+        else {
+            $tokenInfo = Get-GraphTokenScopeInfo
+            if ($tokenInfo) {
+                $accountType = if ($tokenInfo.IsServicePrincipal) { 'Service Principal' } else { 'User' }
+                $account = $tokenInfo.Account
+                Write-Host "✓ Connected to Microsoft Graph as $accountType`: $account" -ForegroundColor Green
+            }
+            else {
+                Write-Host "✓ Connected to Microsoft Graph" -ForegroundColor Green
+            }
+        }
+    }
+    catch {
         Write-Host "✗ Not connected to Microsoft Graph" -ForegroundColor Red
     }
 
@@ -636,7 +799,7 @@ function Invoke-ScEntraAnalysis {
 
         switch ($choice) {
             "1" {
-                $options = Get-AnalysisReportOptions -ContextDescription "Full Analysis"
+                $options = Get-AnalysisReportOptions -ContextDescription "Full Analysis" -IncludeGraphOptions
                 if ($options -eq $null) { continue }
                 Write-Host "`n▶ Starting Full Analysis..." -ForegroundColor Cyan
                 Invoke-ScEntraFullAnalysis @options
@@ -768,6 +931,8 @@ function Invoke-ScEntraAnalysis {
             AppRegistrations  = $appRegistrations
             RoleAssignments   = $roleAssignments
             PIMAssignments    = $pimAssignments
+            AzureRoleAssignments = $azureRoleAssignments
+            AzureEligibleRoleAssignments = $azureEligibleRoleAssignments
             EscalationRisks   = $escalationRisks
             GraphData         = $graphData
             ReportPath        = $reportPath

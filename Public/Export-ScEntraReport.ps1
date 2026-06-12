@@ -61,6 +61,8 @@ function Export-ScEntraReport {
         [Parameter(Mandatory = $false)][array]$AppRegistrations = @(),
         [Parameter(Mandatory = $false)][array]$RoleAssignments = @(),
         [Parameter(Mandatory = $false)][array]$PIMAssignments = @(),
+        [Parameter(Mandatory = $false)][array]$AzureRoleAssignments = @(),
+        [Parameter(Mandatory = $false)][array]$AzureEligibleRoleAssignments = @(),
         [Parameter(Mandatory = $false)][array]$EscalationRisks = @(),
         [Parameter(Mandatory = $false)][hashtable]$GraphData = $null,
         [Parameter(Mandatory = $false)][hashtable]$GroupMemberships = @{},
@@ -108,14 +110,16 @@ function Export-ScEntraReport {
     if (-not $AppRegistrations) { $AppRegistrations = @() }
     if (-not $RoleAssignments) { $RoleAssignments = @() }
     if (-not $PIMAssignments) { $PIMAssignments = @() }
+    if (-not $AzureRoleAssignments) { $AzureRoleAssignments = @() }
+    if (-not $AzureEligibleRoleAssignments) { $AzureEligibleRoleAssignments = @() }
     if (-not $EscalationRisks) { $EscalationRisks = @() }
 
-    $stats = Get-ScEntraReportStatistics -Users $Users -Groups $Groups -ServicePrincipals $ServicePrincipals -AppRegistrations $AppRegistrations -RoleAssignments $RoleAssignments -PIMAssignments $PIMAssignments -EscalationRisks $EscalationRisks
+    $stats = Get-ScEntraReportStatistics -Users $Users -Groups $Groups -ServicePrincipals $ServicePrincipals -AppRegistrations $AppRegistrations -RoleAssignments $RoleAssignments -PIMAssignments $PIMAssignments -AzureRoleAssignments $AzureRoleAssignments -AzureEligibleRoleAssignments $AzureEligibleRoleAssignments -EscalationRisks $EscalationRisks
     $roleDistribution = Get-ScEntraRoleDistribution -RoleAssignments $RoleAssignments
     $riskDistribution = Get-ScEntraRiskDistribution -EscalationRisks $EscalationRisks
     $generatedOn = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
 
-    $html = New-ScEntraReportDocument -Stats $stats -RoleDistribution $roleDistribution -RiskDistribution $riskDistribution -EscalationRisks $EscalationRisks -GraphData $GraphData -OrganizationInfo $OrganizationInfo -GeneratedOn $generatedOn
+    $html = New-ScEntraReportDocument -Stats $stats -RoleDistribution $roleDistribution -RiskDistribution $riskDistribution -EscalationRisks $EscalationRisks -AzureRoleAssignments $AzureRoleAssignments -AzureEligibleRoleAssignments $AzureEligibleRoleAssignments -GraphData $GraphData -OrganizationInfo $OrganizationInfo -GeneratedOn $generatedOn
 
     try {
         if ($EncryptReport) {
@@ -154,6 +158,8 @@ function Export-ScEntraReport {
             AppRegistrations = $AppRegistrations | Select-Object id, displayName, appId
             RoleAssignments = $RoleAssignments
             PIMAssignments = $PIMAssignments
+            AzureRoleAssignments = $AzureRoleAssignments
+            AzureEligibleRoleAssignments = $AzureEligibleRoleAssignments
             GroupMemberships = $GroupMemberships
             EscalationRisks = $EscalationRisks
             GraphData = $GraphData

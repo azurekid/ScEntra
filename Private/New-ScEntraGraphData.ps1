@@ -24,6 +24,12 @@ function New-ScEntraGraphData {
     
     .PARAMETER PIMAssignments
         Array of PIM assignments
+
+    .PARAMETER AzureRoleAssignments
+        Array of active Azure RBAC assignments
+
+    .PARAMETER AzureEligibleRoleAssignments
+        Array of Azure RBAC eligible assignments
     
     .PARAMETER GroupMemberships
         Hashtable of group memberships (groupId -> array of member objects)
@@ -62,6 +68,21 @@ function New-ScEntraGraphData {
         
         [Parameter(Mandatory = $false)]
         [array]$PIMAssignments = @(),
+
+        [Parameter(Mandatory = $false)]
+        [array]$AzureRoleAssignments = @(),
+
+        [Parameter(Mandatory = $false)]
+        [array]$AzureEligibleRoleAssignments = @(),
+
+        [Parameter(Mandatory = $false)]
+        [switch]$IncludeAllUsersInGraph,
+
+        [Parameter(Mandatory = $false)]
+        [hashtable]$SubscriptionNames = @{},
+
+        [Parameter(Mandatory = $false)]
+        [array]$ManagementGroupHierarchy = @(),
         
         [Parameter(Mandatory = $false)]
         [hashtable]$GroupMemberships = @{},
@@ -83,6 +104,21 @@ function New-ScEntraGraphData {
 
     $servicePrincipalsById = @{}
     $servicePrincipalsByAppId = @{}
+    $usersById = @{}
+    $groupsById = @{}
+
+    foreach ($user in $Users) {
+        if ($user.id -and -not $usersById.ContainsKey($user.id)) {
+            $usersById[$user.id] = $user
+        }
+    }
+
+    foreach ($group in $Groups) {
+        if ($group.id -and -not $groupsById.ContainsKey($group.id)) {
+            $groupsById[$group.id] = $group
+        }
+    }
+
     foreach ($sp in $ServicePrincipals) {
         if ($sp.id -and -not $servicePrincipalsById.ContainsKey($sp.id)) {
             $servicePrincipalsById[$sp.id] = $sp
@@ -491,6 +527,24 @@ function New-ScEntraGraphData {
         }
     }
 
+    # Helper function to clean display names (strip vendor prefixes, etc.)
+    $cleanDisplayName = {
+        param($name)
+        if ([string]::IsNullOrWhiteSpace($name)) { return $name }
+        # Strip common vendor prefixes
+        $name = $name -replace '^Microsoft\s+', ''
+        $name = $name -replace '^Azure\s+', ''
+        $name = $name -replace '^Windows\s+', ''
+        $name = $name -replace '^Office\s+', ''
+        $name = $name -replace '\s*\(.*?\)$', ''  # Strip trailing parentheses
+        $name = $name -replace '\s+CLI$', ''       # Strip "CLI" suffix
+        $name = $name -replace '\s+Service$', ''  # Strip "Service" suffix
+        $name = $name -replace '\s+App$', ''      # Strip "App" suffix
+        $name = $name.Trim()
+        if ([string]::IsNullOrWhiteSpace($name)) { return $name }
+        return $name
+    }
+
     $ensureServicePrincipalNode = {
         param($servicePrincipal)
 
@@ -504,6 +558,9 @@ function New-ScEntraGraphData {
         else {
             $servicePrincipal.displayName
         }
+        
+        # Clean the display name for the short label
+        $cleanLabel = & $cleanDisplayName $displayLabel
 
         $servicePrincipalType = $null
         $isManagedIdentity = $false
@@ -516,12 +573,13 @@ function New-ScEntraGraphData {
 
         $baseNodeData = [ordered]@{
             id = $servicePrincipal.id
-            label = $displayLabel
+            label = $cleanLabel  # Short label
             type = 'servicePrincipal'
             appId = $servicePrincipal.appId
             accountEnabled = $servicePrincipal.accountEnabled
             servicePrincipalType = $servicePrincipalType
             isManagedIdentity = $isManagedIdentity
+            fullLabel = $displayLabel  # Full label for details panel
         }
 
         if (-not $nodeIndex.ContainsKey($servicePrincipal.id)) {
@@ -533,6 +591,13 @@ function New-ScEntraGraphData {
             foreach ($key in $baseNodeData.Keys) {
                 $existingNode[$key] = $baseNodeData[$key]
             }
+        }
+    }
+
+    if ($IncludeAllUsersInGraph) {
+        Write-Verbose "Including all Entra users in graph output."
+        foreach ($user in $Users) {
+            & $ensureUserNode $user
         }
     }
     
@@ -841,6 +906,474 @@ function New-ScEntraGraphData {
                 }
             }
         }
+    }
+
+    $getNodeSafeId = {
+        param([string]$Value)
+
+        if (-not $Value) {
+            return [Guid]::NewGuid().ToString('N')
+        }
+
+        $hashBytes = [System.Security.Cryptography.SHA1]::HashData([System.Text.Encoding]::UTF8.GetBytes($Value))
+        return ([System.BitConverter]::ToString($hashBytes)).Replace('-', '').ToLowerInvariant()
+    }
+
+    # Maps well-known ARM resource types to a short friendly label
+    $getResourceTypeFriendlyName = {
+        param([string]$ResourceType)
+        switch ($ResourceType.ToLower()) {
+            'microsoft.compute/virtualmachines'             { return 'Virtual Machine' }
+            'microsoft.compute/virtualmachinescalesets'     { return 'VM Scale Set' }
+            'microsoft.storage/storageaccounts'             { return 'Storage Account' }
+            'microsoft.keyvault/vaults'                     { return 'Key Vault' }
+            'microsoft.web/sites'                           { return 'Web App' }
+            'microsoft.web/serverfarms'                     { return 'App Service Plan' }
+            'microsoft.sql/servers'                         { return 'SQL Server' }
+            'microsoft.sql/servers/databases'               { return 'SQL Database' }
+            'microsoft.network/virtualnetworks'             { return 'Virtual Network' }
+            'microsoft.network/networksecuritygroups'       { return 'Network Security Group' }
+            'microsoft.network/loadbalancers'               { return 'Load Balancer' }
+            'microsoft.network/publicipaddresses'           { return 'Public IP Address' }
+            'microsoft.containerservice/managedclusters'    { return 'AKS Cluster' }
+            'microsoft.containerregistry/registries'        { return 'Container Registry' }
+            'microsoft.servicebus/namespaces'               { return 'Service Bus Namespace' }
+            'microsoft.eventhub/namespaces'                 { return 'Event Hub Namespace' }
+            'microsoft.automation/automationaccounts'       { return 'Automation Account' }
+            'microsoft.logic/workflows'                     { return 'Logic App' }
+            'microsoft.apimanagement/service'               { return 'API Management' }
+            'microsoft.cognitiveservices/accounts'          { return 'Cognitive Services' }
+            'microsoft.machinelearningservices/workspaces'  { return 'ML Workspace' }
+            'microsoft.databricks/workspaces'               { return 'Databricks Workspace' }
+            'microsoft.search/searchservices'               { return 'Search Service' }
+            'microsoft.documentdb/databaseaccounts'         { return 'Cosmos DB Account' }
+            'microsoft.cache/redis'                         { return 'Redis Cache' }
+            default                                         { return $ResourceType }
+        }
+    }
+
+    $getAzureScopeDisplayLabel = {
+        param([string]$Scope)
+
+        if (-not $Scope) {
+            return $null
+        }
+
+        if ($Scope -eq '/') {
+            return 'Tenant Root'
+        }
+
+        if ($Scope -match '^/providers/Microsoft\.Management/managementGroups/([^/]+)$') {
+            # Full ARM path is the key stored by Expand-MgNode during collection
+            $mgName = if ($SubscriptionNames.ContainsKey($Scope)) { $SubscriptionNames[$Scope] } else { $Matches[1] }
+            return "Management Group $mgName"
+        }
+
+        if ($Scope -match '^/subscriptions/([^/]+)$') {
+            $subId   = $Matches[1]
+            $subName = if ($SubscriptionNames.ContainsKey($subId)) { $SubscriptionNames[$subId] } else { $subId }
+            return "Subscription $subName"
+        }
+
+        if ($Scope -match '^/subscriptions/[^/]+/resourceGroups/([^/]+)$') {
+            $subId   = $Matches[1]
+            $rgName  = $Matches[2]
+            $subName = if ($SubscriptionNames.ContainsKey($subId)) { $SubscriptionNames[$subId] } else { $subId }
+            return "Resource Group $rgName ($subName)"
+        }
+
+        if ($Scope -match '^/subscriptions/([^/]+)/resourceGroups/([^/]+)/providers/([^/]+/[^/]+)/([^/]+)') {
+            $subId        = $Matches[1]
+            $resourceType = $Matches[3]
+            $resourceName = $Matches[4]
+            $subName      = if ($SubscriptionNames.ContainsKey($subId)) { $SubscriptionNames[$subId] } else { $subId }
+            $friendlyType = & $getResourceTypeFriendlyName $resourceType
+            return "$friendlyType $resourceName ($subName)"
+        }
+
+        $segments = @($Scope.Trim('/') -split '/')
+        if ($segments.Count -gt 0) {
+            return $segments[-1]
+        }
+
+        return $Scope
+    }
+
+    # Dedup set for scope hierarchy Contains edges (used inside $ensureAzureScopeNode)
+    $scopeContainsEdgeSeen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    $ensureAzureScopeNode = {
+        param([string]$Scope)
+
+        if (-not $Scope) {
+            return $null
+        }
+
+        $scopeNodeId = "azscope-$(& $getNodeSafeId $Scope)"
+        if (-not $nodeIndex.ContainsKey($scopeNodeId)) {
+            $scopeDisplayLabel = & $getAzureScopeDisplayLabel $Scope
+            # Short label: just the friendly name (last segment of the scope path)
+            $shortLabel = if ($scopeDisplayLabel) {
+                # Extract the last segment after the last slash
+                if ($scopeDisplayLabel -match '[^/]+$') { $Matches[0] } else { $scopeDisplayLabel }
+            } else {
+                # Extract the last segment of the scope path
+                if ($Scope -match '[^/]+$') { $Matches[0] } else { $Scope }
+            }
+            $scopeLabel = $shortLabel
+
+            # Extract structured metadata from the scope ARM path
+            $scopeMgId             = $null
+            $scopeMgDisplayName    = $null
+            $scopeSubId            = $null
+            $scopeSubName          = $null
+            $scopeRgName           = $null
+            $scopeResType          = $null
+            $scopeResTypeFriendly  = $null
+            $scopeResName          = $null
+
+            if ($Scope -match '^/providers/Microsoft\.Management/managementGroups/([^/]+)$') {
+                $scopeMgId          = $Matches[1]
+                $scopeMgDisplayName = if ($SubscriptionNames.ContainsKey($Scope)) { $SubscriptionNames[$Scope] } else { $scopeMgId }
+            }
+
+            if ($Scope -match '^/subscriptions/([^/]+)') {
+                $scopeSubId   = $Matches[1]
+                $scopeSubName = if ($SubscriptionNames.ContainsKey($scopeSubId)) { $SubscriptionNames[$scopeSubId] } else { $scopeSubId }
+            }
+            if ($Scope -match '^/subscriptions/[^/]+/resourceGroups/([^/]+)') {
+                $scopeRgName = $Matches[1]
+            }
+            if ($Scope -match '^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/([^/]+/[^/]+)/([^/]+)') {
+                $scopeResType         = $Matches[1]
+                $scopeResName         = $Matches[2]
+                $scopeResTypeFriendly = & $getResourceTypeFriendlyName $scopeResType
+            }
+
+            $nodeData = [ordered]@{
+                id               = $scopeNodeId
+                label            = $scopeLabel
+                type             = 'scope'
+                scope            = $Scope
+                scopeDisplayName = $scopeDisplayName
+                fullScopeLabel   = if ($scopeDisplayLabel) { "Azure Scope: $scopeDisplayLabel" } else { "Azure Scope: $Scope" }
+                provider         = 'AzureRBAC'
+            }
+            if ($scopeMgId) {
+                $nodeData.managementGroupId          = $scopeMgId
+                $nodeData.managementGroupDisplayName = $scopeMgDisplayName
+            }
+            if ($scopeSubId)   { $nodeData.subscriptionId   = $scopeSubId }
+            if ($scopeSubName -and $scopeSubName -ne $scopeSubId) { $nodeData.subscriptionName = $scopeSubName }
+            if ($scopeRgName)  { $nodeData.resourceGroupName = $scopeRgName }
+            if ($scopeResType) {
+                $nodeData.resourceType         = $scopeResType
+                $nodeData.resourceTypeFriendly = $scopeResTypeFriendly
+                $nodeData.resourceName         = $scopeResName
+            }
+
+            $null = $nodes.Add($nodeData)
+            $nodeIndex[$scopeNodeId] = $nodes.Count - 1
+
+            # Automatically wire this new node to its parent scope (resource → RG, RG → subscription).
+            # Subscriptions → management groups are handled by the MG hierarchy block.
+            $parentScopePath = $null
+            if ($Scope -match '^(/subscriptions/[^/]+/resourceGroups/[^/]+)/providers/') {
+                $parentScopePath = $Matches[1]   # resource → resource group
+            } elseif ($Scope -match '^(/subscriptions/[^/]+)/resourceGroups/') {
+                $parentScopePath = $Matches[1]   # resource group → subscription
+            }
+
+            if ($parentScopePath) {
+                $parentScopeId = & $ensureAzureScopeNode -Scope $parentScopePath
+                if ($parentScopeId) {
+                    $edgeKey = "$parentScopePath|$Scope".ToLowerInvariant()
+                    if ($scopeContainsEdgeSeen.Add($edgeKey)) {
+                        $null = $edges.Add(@{
+                            id       = "scopecontains-$(& $getNodeSafeId $edgeKey)"
+                            from     = $parentScopeId
+                            to       = $scopeNodeId
+                            type     = 'mg_contains'
+                            label    = 'Contains'
+                            provider = 'AzureRBAC'
+                            dashes   = $true
+                        })
+                    }
+                }
+            }
+        }
+
+        return $scopeNodeId
+    }
+
+    $ensureAzureRoleNode = {
+        param(
+            [string]$RoleName,
+            [string]$Scope,
+            [string]$RoleDefinitionId,
+            [string]$BlastRadiusSummary
+        )
+
+        if (-not $RoleName) {
+            return $null
+        }
+
+        $scopeDisplayLabel = & $getAzureScopeDisplayLabel $Scope
+        $roleNodeKey = "$RoleName|$Scope"
+        $roleNodeId = "azrole-$(& $getNodeSafeId $roleNodeKey)"
+        if (-not $nodeIndex.ContainsKey($roleNodeId)) {
+            # Clean role name: strip 'Microsoft' prefix and other vendor prefixes
+            $cleanRoleName = $RoleName -replace '^Microsoft\s+', '' -replace '^Azure\s+', '' -replace '^Windows\s+', '' -replace '^Office\s+', ''
+            $null = $nodes.Add(@{
+                id = $roleNodeId
+                label = $cleanRoleName  # Short label: just the core role name
+                type = 'role'
+                isPrivileged = $true
+                azureScope = $Scope
+                azureScopeDisplayName = $scopeDisplayLabel
+                roleDefinitionId = $RoleDefinitionId
+                blastRadiusSummary = $BlastRadiusSummary
+                provider = 'AzureRBAC'
+                fullLabel = if ($scopeDisplayLabel) { "Azure: $RoleName @ $scopeDisplayLabel" } else { "Azure: $RoleName" }
+            })
+            $nodeIndex[$roleNodeId] = $nodes.Count - 1
+        }
+        else {
+            $existingNode = $nodes[$nodeIndex[$roleNodeId]]
+            if (-not $existingNode.roleDefinitionId -and $RoleDefinitionId) {
+                $existingNode.roleDefinitionId = $RoleDefinitionId
+            }
+            if (-not $existingNode.blastRadiusSummary -and $BlastRadiusSummary) {
+                $existingNode.blastRadiusSummary = $BlastRadiusSummary
+            }
+            if (-not $existingNode.azureScope -and $Scope) {
+                $existingNode.azureScope = $Scope
+            }
+            if (-not $existingNode.azureScopeDisplayName -and $scopeDisplayLabel) {
+                $existingNode.azureScopeDisplayName = $scopeDisplayLabel
+            }
+        }
+
+        return $roleNodeId
+    }
+
+    $ensurePrincipalNodeForAzureAssignment = {
+        param(
+            [string]$PrincipalId,
+            [string]$PrincipalType,
+            [string]$PrincipalName
+        )
+
+        if (-not $PrincipalId) {
+            return $null
+        }
+
+        $normalizedPrincipalType = if ($PrincipalType) { $PrincipalType.ToLowerInvariant() } else { '' }
+
+        switch ($normalizedPrincipalType) {
+            'user' {
+                if ($usersById.ContainsKey($PrincipalId)) {
+                    & $ensureUserNode $usersById[$PrincipalId]
+                }
+                elseif (-not $nodeIndex.ContainsKey($PrincipalId)) {
+                    $null = $nodes.Add(@{
+                        id = $PrincipalId
+                        label = if ($PrincipalName) { $PrincipalName } else { $PrincipalId }
+                        type = 'user'
+                    })
+                    $nodeIndex[$PrincipalId] = $nodes.Count - 1
+                }
+            }
+            'group' {
+                if ($groupsById.ContainsKey($PrincipalId)) {
+                    $group = $groupsById[$PrincipalId]
+                    if (-not $nodeIndex.ContainsKey($group.id)) {
+                        $groupShape = & $resolveGroupShape $group
+                        $null = $nodes.Add(@{
+                            id = $group.id
+                            label = $group.displayName
+                            type = 'group'
+                            shape = $groupShape
+                            isPIMEnabled = [bool]$group.isPIMEnabled
+                            isAssignableToRole = $group.isAssignableToRole
+                            securityEnabled = $group.securityEnabled
+                        })
+                        $nodeIndex[$group.id] = $nodes.Count - 1
+                    }
+                }
+                elseif (-not $nodeIndex.ContainsKey($PrincipalId)) {
+                    $null = $nodes.Add(@{
+                        id = $PrincipalId
+                        label = if ($PrincipalName) { $PrincipalName } else { $PrincipalId }
+                        type = 'group'
+                        shape = 'box'
+                    })
+                    $nodeIndex[$PrincipalId] = $nodes.Count - 1
+                }
+            }
+            'serviceprincipal' {
+                if ($servicePrincipalsById.ContainsKey($PrincipalId)) {
+                    & $ensureServicePrincipalNode $servicePrincipalsById[$PrincipalId]
+                }
+                elseif (-not $nodeIndex.ContainsKey($PrincipalId)) {
+                    $null = $nodes.Add(@{
+                        id = $PrincipalId
+                        label = if ($PrincipalName) { $PrincipalName } else { $PrincipalId }
+                        type = 'servicePrincipal'
+                    })
+                    $nodeIndex[$PrincipalId] = $nodes.Count - 1
+                }
+            }
+            default {
+                if (-not $nodeIndex.ContainsKey($PrincipalId)) {
+                    $null = $nodes.Add(@{
+                        id = $PrincipalId
+                        label = if ($PrincipalName) { $PrincipalName } else { $PrincipalId }
+                        type = 'entity'
+                    })
+                    $nodeIndex[$PrincipalId] = $nodes.Count - 1
+                }
+            }
+        }
+
+        return $PrincipalId
+    }
+
+    foreach ($assignment in $AzureRoleAssignments) {
+        if (-not $assignment.PrincipalId -or -not $assignment.RoleName) {
+            continue
+        }
+
+        $principalNodeId = & $ensurePrincipalNodeForAzureAssignment -PrincipalId $assignment.PrincipalId -PrincipalType $assignment.PrincipalType -PrincipalName $assignment.PrincipalName
+        if (-not $principalNodeId) {
+            continue
+        }
+
+        $azureRoleNodeId = & $ensureAzureRoleNode -RoleName $assignment.RoleName -Scope $assignment.Scope -RoleDefinitionId $assignment.RoleDefinitionId -BlastRadiusSummary $assignment.BlastRadiusSummary
+        if (-not $azureRoleNodeId) {
+            continue
+        }
+
+        $null = $edges.Add(@{
+            from = $principalNodeId
+            to = $azureRoleNodeId
+            type = 'has_role'
+            label = 'Azure Active'
+            scope = $assignment.Scope
+            roleName = $assignment.RoleName
+            roleDefinitionId = $assignment.RoleDefinitionId
+            provider = 'AzureRBAC'
+        })
+
+        $scopeNodeId = & $ensureAzureScopeNode -Scope $assignment.Scope
+        if ($scopeNodeId) {
+            $null = $edges.Add(@{
+                from = $azureRoleNodeId
+                to = $scopeNodeId
+                type = 'assigned_to'
+                label = 'Scope'
+                provider = 'AzureRBAC'
+            })
+        }
+
+        if ($assignment.PSObject.Properties.Name -contains 'DescendantScopes' -and $assignment.DescendantScopes) {
+            foreach ($descendantScope in @($assignment.DescendantScopes | Select-Object -Unique)) {
+                $descendantScopeNodeId = & $ensureAzureScopeNode -Scope $descendantScope
+                if ($descendantScopeNodeId) {
+                    $null = $edges.Add(@{
+                        from = $azureRoleNodeId
+                        to = $descendantScopeNodeId
+                        type = 'assigned_to'
+                        label = 'Applies To'
+                        provider = 'AzureRBAC'
+                    })
+                }
+            }
+        }
+    }
+
+    foreach ($assignment in $AzureEligibleRoleAssignments) {
+        if (-not $assignment.PrincipalId -or -not $assignment.RoleName) {
+            continue
+        }
+
+        $principalNodeId = & $ensurePrincipalNodeForAzureAssignment -PrincipalId $assignment.PrincipalId -PrincipalType $assignment.PrincipalType -PrincipalName $assignment.PrincipalName
+        if (-not $principalNodeId) {
+            continue
+        }
+
+        $azureRoleNodeId = & $ensureAzureRoleNode -RoleName $assignment.RoleName -Scope $assignment.Scope -RoleDefinitionId $assignment.RoleDefinitionId -BlastRadiusSummary $assignment.BlastRadiusSummary
+        if (-not $azureRoleNodeId) {
+            continue
+        }
+
+        $null = $edges.Add(@{
+            from = $principalNodeId
+            to = $azureRoleNodeId
+            type = 'has_role'
+            label = 'Azure Eligible'
+            isPIM = $true
+            scope = $assignment.Scope
+            roleName = $assignment.RoleName
+            roleDefinitionId = $assignment.RoleDefinitionId
+            provider = 'AzureRBAC'
+        })
+
+        $scopeNodeId = & $ensureAzureScopeNode -Scope $assignment.Scope
+        if ($scopeNodeId) {
+            $null = $edges.Add(@{
+                from = $azureRoleNodeId
+                to = $scopeNodeId
+                type = 'assigned_to'
+                label = 'Scope'
+                isPIM = $true
+                provider = 'AzureRBAC'
+            })
+        }
+
+        if ($assignment.PSObject.Properties.Name -contains 'DescendantScopes' -and $assignment.DescendantScopes) {
+            foreach ($descendantScope in @($assignment.DescendantScopes | Select-Object -Unique)) {
+                $descendantScopeNodeId = & $ensureAzureScopeNode -Scope $descendantScope
+                if ($descendantScopeNodeId) {
+                    $null = $edges.Add(@{
+                        from = $azureRoleNodeId
+                        to = $descendantScopeNodeId
+                        type = 'assigned_to'
+                        label = 'Applies To'
+                        isPIM = $true
+                        provider = 'AzureRBAC'
+                    })
+                }
+            }
+        }
+    }
+
+    # Build management group scope hierarchy (scope nodes + directed Contains edges)
+    if ($ManagementGroupHierarchy -and $ManagementGroupHierarchy.Count -gt 0) {
+        $mgEdgeSeen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($mgItem in $ManagementGroupHierarchy) {
+            if (-not $mgItem.Id) { continue }
+            $null = & $ensureAzureScopeNode -Scope $mgItem.Id
+            if ($mgItem.ParentId) {
+                $parentScopeNodeId = & $ensureAzureScopeNode -Scope $mgItem.ParentId
+                $childScopeNodeId  = & $ensureAzureScopeNode -Scope $mgItem.Id
+                if ($parentScopeNodeId -and $childScopeNodeId) {
+                    $edgeKey = "$($mgItem.ParentId)|$($mgItem.Id)".ToLowerInvariant()
+                    if ($mgEdgeSeen.Add($edgeKey)) {
+                        $null = $edges.Add(@{
+                            id       = "mgcontains-$(& $getNodeSafeId $edgeKey)"
+                            from     = $parentScopeNodeId
+                            to       = $childScopeNodeId
+                            type     = 'mg_contains'
+                            label    = 'Contains'
+                            provider = 'AzureRBAC'
+                            dashes   = $true
+                        })
+                    }
+                }
+            }
+        }
+        Write-Verbose "Built management group hierarchy: $($ManagementGroupHierarchy.Count) item(s) → scope nodes and Contains edges"
     }
     
     # Add group membership edges
@@ -1195,12 +1728,14 @@ function New-ScEntraGraphData {
     foreach ($app in $AppRegistrations) {
         $sp = $ServicePrincipals | Where-Object { $_.appId -eq $app.appId } | Select-Object -First 1
         if ($sp) {
+            $cleanAppLabel = & $cleanDisplayName $app.displayName
             if (-not $nodeIndex.ContainsKey($app.id)) {
                 $null = $nodes.Add(@{
                     id = $app.id
-                    label = $app.displayName
+                    label = $cleanAppLabel  # Short label
                     type = 'application'
                     appId = $app.appId
+                    fullLabel = $app.displayName  # Full label for details panel
                 })
                 $nodeIndex[$app.id] = $nodes.Count - 1
             }
@@ -1335,7 +1870,7 @@ function New-ScEntraGraphData {
                 $permissionLabel = "$($resourceName): $labelValue"
 
                 $identifier = if ($permissionDefinition -and $permissionDefinition.id) { $permissionDefinition.id } elseif ($permission.id) { $permission.id } else { $permissionValue }
-                $permissionNodeId = & $buildPermissionNodeId $resource.ResourceAppId $identifier $permissionValue
+                $permissionNodeId = & $buildPermissionNodeId $resourceKey $identifier $permissionValue
 
                 & $ensurePermissionNode $permissionNodeId $permissionLabel $resourceName $permissionValue $permissionType $displayText $permissionDescription ($permissionMetadata.Audience) ($permissionMetadata.AdminConsentRequired)
 
@@ -1763,10 +2298,29 @@ function New-ScEntraGraphData {
                     }
                 }
                 
-                # Add all members of this group to protected users list
+                # Add all members of this group to protected users list.
+                # Members may be stored as IDs or as objects (directory object payloads).
                 if ($groupHasProtectedRole) {
-                    foreach ($memberId in $group.members) {
-                        [void]$usersWithProtectedRoles.Add($memberId)
+                    foreach ($member in $group.members) {
+                        $memberId = $null
+                        if ($member -is [string]) {
+                            $memberId = $member
+                        }
+                        elseif ($member -and $member.PSObject) {
+                            if ($member.PSObject.Properties.Name -contains 'id' -and $member.id) {
+                                $memberId = [string]$member.id
+                            }
+                            elseif ($member.PSObject.Properties.Name -contains 'Id' -and $member.Id) {
+                                $memberId = [string]$member.Id
+                            }
+                            elseif ($member.PSObject.Properties.Name -contains 'value' -and $member.value) {
+                                $memberId = [string]$member.value
+                            }
+                        }
+
+                        if (-not [string]::IsNullOrWhiteSpace($memberId)) {
+                            [void]$usersWithProtectedRoles.Add($memberId)
+                        }
                     }
                 }
             }
@@ -1880,6 +2434,29 @@ function New-ScEntraGraphData {
                     description = 'Groups Administrator can manage group membership for non-role-assignable groups'
                 })
             }
+        }
+    }
+
+    # Always add critical roles to the graph, even if they have no assignments
+    $criticalRoles = @(
+        'Global Administrator',
+        'Privileged Role Administrator',
+        'Application Administrator',
+        'Cloud Application Administrator'
+    )
+    
+    foreach ($criticalRole in $criticalRoles) {
+        $roleNodeId = "entra-role-$(& $getNodeSafeId $criticalRole)"
+        if (-not $nodeIndex.ContainsKey($roleNodeId)) {
+            $null = $nodes.Add(@{
+                id = $roleNodeId
+                label = $criticalRole
+                type = 'role'
+                isPrivileged = $true
+                provider = 'EntraID'
+                fullLabel = "Entra ID: $criticalRole"
+            })
+            $nodeIndex[$roleNodeId] = $nodes.Count - 1
         }
     }
 

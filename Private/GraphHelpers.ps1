@@ -224,8 +224,24 @@ function Test-GraphConnection {
         Write-Warning "Not connected to Microsoft Graph. Please run Connect-ScEntraGraph first."
         return $false
     }
+
+    $tokenInfo = Get-GraphTokenScopeInfo
+    $probeUri = "$script:GraphBaseUrl/users?`$top=1&`$select=id"
+
+    if ($tokenInfo -and $tokenInfo.Scopes) {
+        if ($tokenInfo.Scopes -contains 'Application.Read.All') {
+            $probeUri = "$script:GraphBaseUrl/applications?`$top=1&`$select=id"
+        }
+        elseif ($tokenInfo.Scopes -contains 'Group.Read.All') {
+            $probeUri = "$script:GraphBaseUrl/groups?`$top=1&`$select=id"
+        }
+        elseif ($tokenInfo.Scopes -contains 'User.Read.All') {
+            $probeUri = "$script:GraphBaseUrl/users?`$top=1&`$select=id"
+        }
+    }
+
     try {
-        $null = Invoke-GraphRequest -Uri "$script:GraphBaseUrl/organization" -Method GET -ErrorAction Stop
+        $null = Invoke-ScEntraGraphRequest -Uri $probeUri -Method GET -ErrorAction Stop
         return $true
     }
     catch {
@@ -234,7 +250,7 @@ function Test-GraphConnection {
     }
 }
 
-function Invoke-GraphRequest {
+function Invoke-ScEntraGraphRequest {
     <#
     .SYNOPSIS
         Makes a REST API request to Microsoft Graph
@@ -245,7 +261,7 @@ function Invoke-GraphRequest {
     .PARAMETER Body
         Request body for POST/PATCH requests
     .EXAMPLE
-        Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/users" -Method GET
+        Invoke-ScEntraGraphRequest -Uri "https://graph.microsoft.com/v1.0/users" -Method GET
     #>
     [CmdletBinding()]
     param(
@@ -311,6 +327,110 @@ function Invoke-GraphRequest {
     }
 }
 
+function Invoke-GraphRequest {
+    <#
+    .SYNOPSIS
+        Backward-compatible wrapper around Invoke-ScEntraGraphRequest
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Uri,
+        [Parameter(Mandatory = $false)]
+        [string]$Method = 'GET',
+        [Parameter(Mandatory = $false)]
+        [object]$Body,
+        [Parameter(Mandatory = $false)]
+        [int]$TimeoutSec
+    )
+
+    Invoke-ScEntraGraphRequest @PSBoundParameters
+}
+
+function Get-ScEntraGraphEndpointTopLimit {
+    <#
+    .SYNOPSIS
+        Returns recommended max `$top` for known Microsoft Graph collection endpoints
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Uri
+    )
+
+    $path = $null
+    if ($Uri -match '^https://graph\.microsoft\.com/[^/]+(/[^?]+)') {
+        $path = $Matches[1]
+    }
+
+    if (-not $path) {
+        return $null
+    }
+
+    switch -Wildcard ($path) {
+        '/users' { return 999 }
+        '/groups' { return 999 }
+        '/servicePrincipals' { return 999 }
+        '/applications' { return 999 }
+        '/directoryRoles' { return 999 }
+        '/roleManagement/directory/roleEligibilityScheduleInstances' { return 999 }
+        '/roleManagement/directory/roleAssignmentScheduleInstances' { return 999 }
+        '/identityGovernance/privilegedAccess/group/*ScheduleInstances' { return 999 }
+        default { return $null }
+    }
+}
+
+function Remove-ScEntraGraphTopParameter {
+    <#
+    .SYNOPSIS
+        Removes `$top from a Graph URL when an endpoint rejects custom page sizes
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Uri
+    )
+
+    $updatedUri = $Uri -replace '([?&])\$top=\d+(&)?', '$1'
+    $updatedUri = $updatedUri -replace '[?&]$', ''
+    $updatedUri = $updatedUri -replace '\?&', '?'
+    return $updatedUri
+}
+
+function Set-ScEntraGraphTopParameter {
+    <#
+    .SYNOPSIS
+        Ensures a Graph collection URL uses the desired `$top` value
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Uri,
+        [Parameter(Mandatory = $false)]
+        [Nullable[int]]$Top
+    )
+
+    if ($null -eq $Top -or $Top.Value -le 0) {
+        return $Uri
+    }
+
+    $resolvedTop = $Top.Value
+
+    if ($Uri -match '(^|[?&])\$top=(\d+)') {
+        $currentTop = [int]$Matches[2]
+        if ($currentTop -ge $resolvedTop) {
+            return $Uri
+        }
+        return ($Uri -replace '([?&])\$top=\d+', "`$1`$top=$resolvedTop")
+    }
+
+    if ($Uri.Contains('?')) {
+        return "$Uri&`$top=$resolvedTop"
+    }
+
+    return "$Uri?`$top=$resolvedTop"
+}
+
 function Get-AllGraphItems {
     <#
     .SYNOPSIS
@@ -334,7 +454,11 @@ function Get-AllGraphItems {
     )
 
     $allItems = @()
-    $nextLink = $Uri
+    $originalUri = $Uri
+    $recommendedTop = Get-ScEntraGraphEndpointTopLimit -Uri $Uri
+    $nextLink = Set-ScEntraGraphTopParameter -Uri $Uri -Top $recommendedTop
+    $usingOptimizedTop = ($nextLink -ne $originalUri)
+    $retriedWithoutTop = $false
     $pageCount = 0
 
     do {
@@ -345,7 +469,7 @@ function Get-AllGraphItems {
                 Write-Progress -Activity $ProgressActivity -Status "Fetching page $pageCount (retrieved $($allItems.Count) items so far)" -Id 1
             }
 
-            $result = Invoke-GraphRequest -Uri $nextLink -Method $Method
+            $result = Invoke-ScEntraGraphRequest -Uri $nextLink -Method $Method
 
             if ($result.value) {
                 $allItems += $result.value
@@ -357,6 +481,28 @@ function Get-AllGraphItems {
             $nextLink = $result.'@odata.nextLink'
         }
         catch {
+            $errorMessage = $_.Exception.Message
+            if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
+                $errorMessage = "$errorMessage $($_.ErrorDetails.Message)"
+            }
+
+            if ($errorMessage -match 'does not support custom page sizes' -and $nextLink -match '(^|[?&])\$top=\d+') {
+                $retryUriWithoutTop = Remove-ScEntraGraphTopParameter -Uri $nextLink
+                if ($retryUriWithoutTop -ne $nextLink) {
+                    Write-Verbose "Retrying Graph request without `$top due to endpoint limitation: $retryUriWithoutTop"
+                    $nextLink = $retryUriWithoutTop
+                    continue
+                }
+            }
+
+            if ($pageCount -eq 1 -and $usingOptimizedTop -and -not $retriedWithoutTop) {
+                Write-Verbose "Retrying initial Graph request without optimized `$top for endpoint compatibility: $originalUri"
+                $nextLink = $originalUri
+                $retriedWithoutTop = $true
+                $pageCount = 0
+                continue
+            }
+
             Write-Error "Error fetching items from $nextLink : $_"
             break
         }
@@ -397,17 +543,22 @@ function Get-ScEntraEnvironmentSize {
 
     # Query each resource type count
     $endpoints = @{
-        Users = "$script:GraphBaseUrl/users/`$count"
-        Groups = "$script:GraphBaseUrl/groups/`$count"
-        ServicePrincipals = "$script:GraphBaseUrl/servicePrincipals/`$count"
-        Applications = "$script:GraphBaseUrl/applications/`$count"
+        Users = "$script:GraphBaseUrl/users?`$top=1&`$count=true&`$select=id"
+        Groups = "$script:GraphBaseUrl/groups?`$top=1&`$count=true&`$select=id"
+        ServicePrincipals = "$script:GraphBaseUrl/servicePrincipals?`$top=1&`$count=true&`$select=id"
+        Applications = "$script:GraphBaseUrl/applications?`$top=1&`$count=true&`$select=id"
     }
 
     foreach ($resourceType in $endpoints.Keys) {
         try {
             Write-Verbose "Querying $resourceType count..."
-            $count = Invoke-GraphRequest -Uri $endpoints[$resourceType] -Method GET
-            $counts[$resourceType] = [int]$count
+            $countResult = Invoke-ScEntraGraphRequest -Uri $endpoints[$resourceType] -Method GET
+            if ($countResult.PSObject.Properties.Name -contains '@odata.count') {
+                $counts[$resourceType] = [int]$countResult.'@odata.count'
+            }
+            else {
+                throw "Count value was not returned by Microsoft Graph for $resourceType"
+            }
         }
         catch {
             Write-Warning "Could not query $resourceType count: $_"
@@ -451,7 +602,7 @@ function Get-ScEntraEnvironmentConfig {
     $envScore = ($UserCount * 1) + ($GroupCount * 2) + ($ServicePrincipalCount * 0.5) + ($AppRegistrationCount * 0.5)
 
     # Determine environment profile
-    $profile = if ($envScore -lt 25000) {
+    $envProfile = if ($envScore -lt 25000) {
         "Small"
     }
     elseif ($envScore -lt 75000) {
@@ -465,7 +616,7 @@ function Get-ScEntraEnvironmentConfig {
     }
 
     # Adaptive configuration based on environment size
-    $config = switch ($profile) {
+    $config = switch ($envProfile) {
         "Small" {
             @{
                 Profile = "Small (<25k objects)"
@@ -685,7 +836,7 @@ function Get-PagedBatchItems {
     $nextLink = if ($Response.body) { $Response.body.'@odata.nextLink' } else { $null }
     while ($nextLink) {
         try {
-            $nextResult = Invoke-GraphRequest -Uri $nextLink -Method GET -ErrorAction Stop
+            $nextResult = Invoke-ScEntraGraphRequest -Uri $nextLink -Method GET -ErrorAction Stop
             if ($nextResult.value) {
                 $items += $nextResult.value
             }
@@ -714,7 +865,7 @@ function Get-ScEntraOrganizationInfo {
 
     try {
         $orgUri = "$script:GraphBaseUrl/organization"
-        $response = Invoke-GraphRequest -Uri $orgUri -Method GET
+        $response = Invoke-ScEntraGraphRequest -Uri $orgUri -Method GET
         
         if ($response.value -and $response.value.Count -gt 0) {
             $org = $response.value[0]
@@ -729,7 +880,7 @@ function Get-ScEntraOrganizationInfo {
         return $null
     }
     catch {
-        Write-Warning "Failed to retrieve organization information: $($_.Exception.Message)"
+        Write-Verbose "Could not retrieve organization information with current token: $($_.Exception.Message)"
         return $null
     }
 }

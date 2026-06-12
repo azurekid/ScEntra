@@ -7,6 +7,8 @@ function Get-ScEntraReportStatistics {
         [Parameter(Mandatory = $false)][array]$AppRegistrations = @(),
         [Parameter(Mandatory = $false)][array]$RoleAssignments = @(),
         [Parameter(Mandatory = $false)][array]$PIMAssignments = @(),
+        [Parameter(Mandatory = $false)][array]$AzureRoleAssignments = @(),
+        [Parameter(Mandatory = $false)][array]$AzureEligibleRoleAssignments = @(),
         [Parameter(Mandatory = $false)][array]$EscalationRisks = @()
     )
 
@@ -22,6 +24,8 @@ function Get-ScEntraReportStatistics {
         TotalAppRegistrations    = $AppRegistrations.Count
         TotalRoleAssignments     = $RoleAssignments.Count
         TotalPIMAssignments      = $PIMAssignments.Count
+        TotalAzureRoleAssignments = $AzureRoleAssignments.Count
+        TotalAzureEligibleRoles   = $AzureEligibleRoleAssignments.Count
         TotalEscalationRisks     = $EscalationRisks.Count
         HighSeverityRisks        = ($EscalationRisks | Where-Object { $_.Severity -eq 'High' }).Count
         MediumSeverityRisks      = ($EscalationRisks | Where-Object { $_.Severity -eq 'Medium' }).Count
@@ -130,6 +134,14 @@ function New-ScEntraReportHeaderSection {
             <div class="stat-card">
                 <h3>PIM Assignments</h3>
                 <div class="number">$($Stats.TotalPIMAssignments)</div>
+            </div>
+            <div class="stat-card">
+                <h3>Azure RBAC Assignments</h3>
+                <div class="number">$($Stats.TotalAzureRoleAssignments)</div>
+            </div>
+            <div class="stat-card">
+                <h3>Azure Eligible Roles</h3>
+                <div class="number">$($Stats.TotalAzureEligibleRoles)</div>
             </div>
             <div class="stat-card warning">
                 <h3>Escalation Risks</h3>
@@ -253,7 +265,7 @@ function New-ScEntraGraphSection {
             <div style="margin-bottom: 20px; display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
                 <div style="flex: 1; min-width: 300px;">
                     <label for="nodeFilter" style="font-weight: 600; margin-right: 10px;">Filter by entity:</label>
-                    <input type="text" id="nodeFilter" placeholder="Search by name..." style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; width: 100%; max-width: 400px; font-size: 14px;">
+                    <input type="text" id="nodeFilter" placeholder="Search by name, ID, or scope..." style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; width: 100%; max-width: 400px; font-size: 14px;">
                 </div>
                 <div>
                     <label for="typeFilter" style="font-weight: 600; margin-right: 10px;">Type:</label>
@@ -278,6 +290,23 @@ function New-ScEntraGraphSection {
                     </select>
                 </div>
                 <div>
+                    <label for="providerFilter" style="font-weight: 600; margin-right: 10px;">Provider:</label>
+                    <select id="providerFilter" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                        <option value="">All Providers</option>
+                        <option value="azure">Azure RBAC Only</option>
+                        <option value="entra">Entra Only</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="visualizationMode" style="font-weight: 600; margin-right: 10px;">Visualization:</label>
+                    <select id="visualizationMode" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                        <option value="force">Organic (Force)</option>
+                        <option value="compact" selected>Compact Organic</option>
+                        <option value="horizontal">Horizontal Hierarchy</option>
+                        <option value="vertical">Vertical Hierarchy</option>
+                    </select>
+                </div>
+                <div>
                     <label for="escalationFilter" style="font-weight: 600; margin-right: 10px;">
                         <input type="checkbox" id="escalationFilter" style="margin-right: 5px;">
                         Show Only Critical Escalation Paths
@@ -286,6 +315,36 @@ function New-ScEntraGraphSection {
                 <div class="graph-button-group">
                     <button id="resetGraph" class="button-primary">Reset View</button>
                 </div>
+            </div>
+
+            <div id="pathQueryPanel" style="margin-bottom: 14px; padding: 14px 16px; background: rgba(99,102,241,0.06); border: 1px solid rgba(99,102,241,0.22); border-radius: 8px;">
+                <div style="font-weight: 600; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
+                    <span>&#128269;</span>
+                    <span style="color: var(--accent-color);">Path Query</span>
+                    <span style="font-size: 12px; color: var(--muted-text-color); font-weight: 400;">&#8212; find all hops between any two nodes</span>
+                </div>
+                <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end;">
+                    <div style="flex: 1; min-width: 180px; position: relative;">
+                        <label for="pathStartInput" style="font-size: 12px; color: var(--muted-text-color); display: block; margin-bottom: 4px;">Start node</label>
+                        <input id="pathStartInput" type="text" placeholder="e.g. Max Beuning" autocomplete="off" style="width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; box-sizing: border-box; background: var(--card-background); color: var(--text-color);">
+                        <div id="pathStartSuggestions" style="display:none; position: absolute; top: 100%; left: 0; right: 0; background: var(--card-background); border: 1px solid #ddd; border-top: none; border-radius: 0 0 4px 4px; max-height: 180px; overflow-y: auto; z-index: 200; box-shadow: 0 4px 12px rgba(0,0,0,0.12);"></div>
+                    </div>
+                    <div style="flex: 1; min-width: 180px; position: relative;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                            <label for="pathEndInput" style="font-size: 12px; color: var(--muted-text-color);">Target node</label>
+                            <select id="pathTypeFilter" style="font-size: 11px; padding: 2px 6px; border: 1px solid rgba(99,102,241,0.3); border-radius: 4px; background: var(--card-background); color: var(--text-color); cursor: pointer; max-width: 160px;">
+                                <option value="">All types</option>
+                            </select>
+                        </div>
+                        <input id="pathEndInput" type="text" placeholder="e.g. rg-ehv-security-prd-general" autocomplete="off" style="width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; box-sizing: border-box; background: var(--card-background); color: var(--text-color);">
+                        <div id="pathEndSuggestions" style="display:none; position: absolute; top: 100%; left: 0; right: 0; background: var(--card-background); border: 1px solid #ddd; border-top: none; border-radius: 0 0 4px 4px; max-height: 180px; overflow-y: auto; z-index: 200; box-shadow: 0 4px 12px rgba(0,0,0,0.12);"></div>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <button id="findPathBtn" class="button-primary">Find Path</button>
+                        <button id="clearPathBtn" style="padding: 8px 14px; border: 1px solid #ddd; border-radius: 6px; background: var(--card-background); color: var(--text-color); cursor: pointer; font-size: 13px;">Clear</button>
+                    </div>
+                </div>
+                <div id="pathQueryResult" style="display: none; margin-top: 12px; font-size: 13px;"></div>
             </div>
 
             <div id="selectedNodeInfo">
@@ -301,6 +360,8 @@ function New-ScEntraGraphSection {
                 <div id="modalContent" class="modal-body"></div>
             </div>
             <div id="modalOverlay" class="modal-overlay" style="display: none;"></div>
+
+            <div id="graphPerformanceHint" style="display: none; margin-bottom: 12px; padding: 10px 12px; border-radius: 8px; background: rgba(255, 193, 7, 0.14); border: 1px solid rgba(255, 193, 7, 0.35); color: var(--text-color);"></div>
 
             <div id="escalationGraph"></div>
 
@@ -363,6 +424,12 @@ function New-ScEntraGraphSection {
         <script>
             const graphNodes = $nodesJson;
             const graphEdges = $edgesJson;
+            const graphNodeCount = graphNodes.length;
+            const graphEdgeCount = graphEdges.length;
+            const isLargeGraph = graphNodeCount > 300 || graphEdgeCount > 650;
+            const enableAnimatedGraph = false;
+            const showEdgeLabels = !isLargeGraph;
+            const nodeLookup = new Map(graphNodes.map(node => [node.id, node]));
             
             // Filter out service principals, applications, and roles without connections
             const relevantEdgeTypes = ['requests_permission', 'has_permission', 'owns', 'assigned_to', 'has_service_principal'];
@@ -378,8 +445,8 @@ function New-ScEntraGraphSection {
                 }
                 // Track SPs and Apps with permission/escalation edges
                 if (relevantEdgeTypes.includes(edge.type) || edge.isEscalationPath) {
-                    const fromNode = graphNodes.find(n => n.id === edge.from);
-                    const toNode = graphNodes.find(n => n.id === edge.to);
+                    const fromNode = nodeLookup.get(edge.from);
+                    const toNode = nodeLookup.get(edge.to);
                     
                     if (fromNode && (fromNode.type === 'servicePrincipal' || fromNode.type === 'application')) {
                         connectedSPandAppIds.add(edge.from);
@@ -408,12 +475,21 @@ function New-ScEntraGraphSection {
                 }
                 return true;
             });
+            const filteredNodeIds = new Set(filteredNodes.map(node => node.id));
+            const filteredGraphEdges = graphEdges.filter(edge => filteredNodeIds.has(edge.from) && filteredNodeIds.has(edge.to));
 
             // Create a lookup map for original node data
             const originalNodeData = {};
             filteredNodes.forEach(node => {
                 originalNodeData[node.id] = node;
             });
+            if (isLargeGraph) {
+                const performanceHint = document.getElementById('graphPerformanceHint');
+                if (performanceHint) {
+                    performanceHint.style.display = 'block';
+                    performanceHint.textContent = 'Large graph mode is active. Edge labels and continuous graph animation are reduced to keep report memory use and browser load manageable.';
+                }
+            }
             const svgIcon = function(svg) { return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg); };
             const getCssVar = (name, fallback) => {
                 const value = (getComputedStyle(document.body).getPropertyValue(name) || '').trim();
@@ -470,6 +546,10 @@ function New-ScEntraGraphSection {
 
             const nodeIcons = {
                 user: svgIcon('<svg id="ed8fbe5c-618b-47ce-8d68-3dbd1e10f81a" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="e78519cd-36d2-4ee5-987f-be84be24d95e" x1="7.93" y1="17.95" x2="7.93" y2="5.62" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#5e9624"/><stop offset="1" stop-color="#b4ec36"/></linearGradient><linearGradient id="ac3f95ec-6391-4f34-b431-9534d4cdf013" x1="7.95" y1="9.21" x2="7.95" y2="-2.02" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#5e9624"/><stop offset="1" stop-color="#b4ec36"/></linearGradient></defs><path d="M14,16.85a1.3,1.3,0,0,0,1.32-1.31.81.81,0,0,0,0-.16c-.52-4.15-2.88-7.53-7.4-7.53S1,10.71.51,15.39A1.34,1.34,0,0,0,1.7,16.85H14Z" fill="url(#e78519cd-36d2-4ee5-987f-be84be24d95e)"/><path d="M8,8.83a4.16,4.16,0,0,1-2.26-.66L7.92,14l2.22-5.79A4.2,4.2,0,0,1,8,8.83Z" fill="#fff"/><circle cx="7.95" cy="4.67" r="4.17" fill="url(#ac3f95ec-6391-4f34-b431-9534d4cdf013)"/></svg>'),
+                scope: svgIcon('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><rect x="1.5" y="2" width="15" height="14" rx="2" fill="#0f766e"/><rect x="3" y="4" width="12" height="2" fill="#5eead4"/><rect x="3" y="7.5" width="5.25" height="6" fill="#99f6e4"/><rect x="9.75" y="7.5" width="5.25" height="6" fill="#2dd4bf"/></svg>'),
+                // Custom scope icons
+                'scope:subscription': svgIcon('<svg viewBox="0 0 18 18" class="" role="presentation" focusable="false" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" id="FxSymbol0-019" data-type="34"><g><path fill="url(#e1db0519-3c83-446d-a6ea-c8da2a1e701d)" d="M13.563 7.187a2.074 2.074 0 0 0 0-2.927L10 .688a2.06 2.06 0 0 0-2.919 0L3.522 4.259a2.075 2.075 0 0 0 0 2.928l2.963 2.971a.58.58 0 0 1 .17.411v5.523a.7.7 0 0 0 .206.5l1.35 1.354a.47.47 0 0 0 .662 0l1.309-1.313v-.013l.772-.773a.27.27 0 0 0 0-.382l-.556-.557a.3.3 0 0 1 0-.417l.556-.557a.27.27 0 0 0 0-.382L10.4 13a.3.3 0 0 1 0-.417l.557-.558a.27.27 0 0 0 0-.381l-.773-.776v-.285zM8.542 1.552A1.175 1.175 0 1 1 7.37 2.727a1.174 1.174 0 0 1 1.172-1.175"></path><path fill="#ff9300" d="M7.616 16.21a.252.252 0 0 0 .426-.192v-4.469a.27.27 0 0 0-.116-.222.253.253 0 0 0-.39.222v4.469a.27.27 0 0 0 .08.192M6.006 5.45h5.223a.316.316 0 0 1 .316.316v.059a.317.317 0 0 1-.317.317H6.005a.316.316 0 0 1-.316-.316v-.06a.317.317 0 0 1 .317-.317zm0 1.125h5.223a.316.316 0 0 1 .316.316v.06a.316.316 0 0 1-.316.316H6.006a.317.317 0 0 1-.317-.317v-.058a.317.317 0 0 1 .317-.317" opacity=".75"></path></g><defs><radialGradient id="e1db0519-3c83-446d-a6ea-c8da2a1e701d" cx="-36.631" cy="17.122" r="11.178" gradientTransform="matrix(.942 0 0 .944 41.878 -7.403)" gradientUnits="userSpaceOnUse"><stop offset=".266" stop-color="#ffd70f"></stop><stop offset=".487" stop-color="#ffcb12"></stop><stop offset=".884" stop-color="#feac19"></stop><stop offset="1" stop-color="#fea11b"></stop></radialGradient></defs></svg>'),
+                'scope:resourceGroup': svgIcon('<svg viewBox="0 0 18 18" class="" role="presentation" focusable="false" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" id="FxSymbol0-01a" data-type="179"><g><title></title><path fill="#949494" d="M.5 15.08a.16.16 0 0 0 .08.14l1.16.65L3.7 17a.17.17 0 0 0 .23-.06l.66-1.12a.16.16 0 0 0-.06-.21l-2.3-1.3a.17.17 0 0 1-.08-.14V3.85a.16.16 0 0 1 .08-.14l2.3-1.3a.16.16 0 0 0 .06-.21l-.66-1.12A.17.17 0 0 0 3.7 1L1.78 2.11l-1.2.67a.16.16 0 0 0-.08.14z"></path><path fill="#a3a3a3" d="m2.14 3.77.06-.06 2.3-1.3a.14.14 0 0 0 .06-.21L3.9 1.08A.15.15 0 0 0 3.68 1L1.75 2.11l-1.19.67s-.05 0-.06.06l.9.51zM4.5 15.59l-2.3-1.3a.2.2 0 0 1-.07-.09l-1.62 1h.05l1.15.65 2 1.11a.15.15 0 0 0 .22-.06l.66-1.12a.14.14 0 0 0-.09-.19"></path><path fill="#949494" d="M17.5 15.08a.16.16 0 0 1-.08.14l-1.16.65L14.3 17a.17.17 0 0 1-.23-.06l-.66-1.12a.16.16 0 0 1 .06-.21l2.3-1.3a.17.17 0 0 0 .08-.14V3.85a.16.16 0 0 0-.08-.14l-2.3-1.3a.16.16 0 0 1-.06-.21l.66-1.12A.17.17 0 0 1 14.3 1l1.92 1.09 1.2.67a.16.16 0 0 1 .08.14z"></path><path fill="#a3a3a3" d="m15.86 3.77-.06-.06-2.3-1.3a.14.14 0 0 1-.06-.21l.66-1.12a.15.15 0 0 1 .22-.08l1.93 1.09 1.19.67.06.06-.9.51zM13.5 15.59l2.3-1.3a.2.2 0 0 0 .07-.09l1.62 1-1.15.65-2 1.11a.15.15 0 0 1-.22-.06l-.66-1.12a.14.14 0 0 1 .04-.19"></path><path fill="#32bedd" d="M14.31 5.93v6.14l-5.32 3.09V9.01z"></path><path fill="#9cebff" d="M14.31 5.93 9 9.02 3.68 5.93 9 2.84z"></path><path fill="#50e6ff" d="M8.99 9.02v6.14l-5.31-3.09V5.93z"></path><path fill="#9cebff" d="m3.68 12.07 5.31-3.06v6.15z"></path><path fill="#50e6ff" d="M14.31 12.07 8.99 9.01v6.15z"></path></g></svg>'),
                 pimEnabledGroup: svgIcon('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="b0670cdb-9407-42e5-ae8f-f3558902da1a" x1="7.89" y1="6.9" x2="7.89" y2="19.35" gradientUnits="userSpaceOnUse"><stop offset="0.22" stop-color="#32d4f5"/><stop offset="1" stop-color="#198ab3"/></linearGradient><linearGradient id="fd04ffc0-49c3-4a18-9b27-999b23712bcb" x1="7.53" y1="0.22" x2="8.44" y2="11.53" gradientUnits="userSpaceOnUse"><stop offset="0.22" stop-color="#32d4f5"/><stop offset="1" stop-color="#198ab3"/></linearGradient><radialGradient id="aa3ecbb1-1061-42c8-aaf2-d5c01a3fcfd9" cx="-19.24" cy="6.51" r="6.13" gradientTransform="matrix(0.94, 0.01, -0.01, 0.94, 32.03, 6.26)" gradientUnits="userSpaceOnUse"><stop offset="0.27" stop-color="#ffd70f"/><stop offset="1" stop-color="#fea11b"/></radialGradient></defs><g id="b245b541-7d80-40be-a5d7-51667bcba1b3"><g><g><title>Icon-identity-223</title><path d="M17.22,13.92a.79.79,0,0,0,.8-.79A.28.28,0,0,0,18,13c-.31-2.5-1.74-4.54-4.46-4.54S9.35,10.22,9.07,13a.81.81,0,0,0,.72.88h7.43Z" fill="#0078d4"/><path d="M13.55,9.09a2.44,2.44,0,0,1-1.36-.4l1.35,3.52,1.33-3.49A2.54,2.54,0,0,1,13.55,9.09Z" fill="#fff" opacity="0.8"/><circle cx="13.55" cy="6.58" r="2.51" fill="#1078d4"/><path d="M14.05,17.11a1.34,1.34,0,0,0,1.34-1.33.81.81,0,0,0,0-.16C14.86,11.42,12.47,8,7.9,8S.86,10.9.4,15.63A1.34,1.34,0,0,0,1.59,17.1H14.05Z" fill="url(#b0670cdb-9407-42e5-ae8f-f3558902da1a)"/><path d="M7.9,9a4.09,4.09,0,0,1-2.27-.67l2.25,5.89,2.24-5.85A4.17,4.17,0,0,1,7.9,9Z" fill="#fff" opacity="0.8"/><circle cx="7.9" cy="4.8" r="4.21" fill="url(#fd04ffc0-49c3-4a18-9b27-999b23712bcb)"/></g><g><path id="f2ddd4d7-46fc-4e48-ae24-8fde036c39bb" d="M17.27,11.45a1.13,1.13,0,0,0,0-1.6h0l-1.94-2a1.12,1.12,0,0,0-1.6,0h0l-2,1.94a1.14,1.14,0,0,0,0,1.61l1.61,1.64a.31.31,0,0,1,.09.22l0,3a.36.36,0,0,0,.12.28l.73.75a.27.27,0,0,0,.37,0l.72-.72h0l.42-.43a.14.14,0,0,0,0-.2l-.31-.31a.17.17,0,0,1,0-.23l.31-.31a.13.13,0,0,0,0-.2l-.3-.31a.17.17,0,0,1,0-.23l.31-.31a.14.14,0,0,0,0-.2l-.42-.43V13.3ZM14.54,8.34a.66.66,0,0,1,.64.65.63.63,0,0,1-.65.64.65.65,0,0,1,0-1.29Z" fill="url(#aa3ecbb1-1061-42c8-aaf2-d5c01a3fcfd9)"/><path id="e15034b6-eebb-4253-ac69-86068a1d4276" d="M14,16.38h0a.14.14,0,0,0,.24-.1V13.83a.16.16,0,0,0-.06-.13h0a.14.14,0,0,0-.22.12v2.46A.13.13,0,0,0,14,16.38Z" fill="#ff9300" opacity="0.75"/><rect id="f3d2a589-08f4-4e99-9635-cc67abadc8f4" x="14.38" y="9.07" width="0.38" height="3.21" rx="0.17" transform="translate(3.8 25.17) rotate(-89.65)" fill="#ff9300" opacity="0.75"/><rect id="bc7793e0-f7bc-4cc4-abb0-181c6c62350c" x="14.37" y="9.68" width="0.38" height="3.21" rx="0.17" transform="translate(3.18 25.78) rotate(-89.65)" fill="#ff9300" opacity="0.75"/></g></g></g></svg>'),
                 securityGroup: svgIcon('<svg id="a5c2c34a-a5f9-4043-a084-e51b74497895" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="f97360fa-fd13-420b-9b43-74b8dde83a11" x1="6.7" y1="7.26" x2="6.7" y2="18.36" gradientUnits="userSpaceOnUse"><stop offset="0.22" stop-color="#32d4f5"/><stop offset="1" stop-color="#198ab3"/></linearGradient><linearGradient id="b2ab4071-529d-4450-9443-e6dc0939cc4e" x1="6.42" y1="1.32" x2="7.23" y2="11.39" gradientUnits="userSpaceOnUse"><stop offset="0.22" stop-color="#32d4f5"/><stop offset="1" stop-color="#198ab3"/></linearGradient></defs><title>Icon-identity-223</title><path d="M17.22,13.92a.79.79,0,0,0,.8-.79.28.28,0,0,0,0-.15c-.31-2.5-1.74-4.54-4.46-4.54S9.35,10.22,9.07,13a.81.81,0,0,0,.72.88h7.43Z" fill="#0078d4"/><path d="M13.55,9.09a2.44,2.44,0,0,1-1.36-.4l1.35,3.52,1.33-3.49A2.54,2.54,0,0,1,13.55,9.09Z" fill="#fff" opacity="0.8"/><circle cx="13.55" cy="6.58" r="2.51" fill="#0078d4"/><path d="M12.19,16.36a1.19,1.19,0,0,0,1.19-1.19.66.66,0,0,0,0-.14c-.47-3.74-2.6-6.78-6.66-6.78S.44,10.83,0,15a1.2,1.2,0,0,0,1.07,1.31h11.1Z" fill="url(#f97360fa-fd13-420b-9b43-74b8dde83a11)"/><path d="M6.77,9.14a3.72,3.72,0,0,1-2-.6l2,5.25,2-5.21A3.81,3.81,0,0,1,6.77,9.14Z" fill="#fff" opacity="0.8"/><circle cx="6.74" cy="5.39" r="3.75" fill="url(#b2ab4071-529d-4450-9443-e6dc0939cc4e)"/></svg>'),
                 group: svgIcon('<svg id="a5c2c34a-a5f9-4043-a084-e51b74497895" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="f97360fa-fd13-420b-9b43-74b8dde83a11" x1="6.7" y1="7.26" x2="6.7" y2="18.36" gradientUnits="userSpaceOnUse"><stop offset="0.22" stop-color="#32d4f5"/><stop offset="1" stop-color="#198ab3"/></linearGradient><linearGradient id="b2ab4071-529d-4450-9443-e6dc0939cc4e" x1="6.42" y1="1.32" x2="7.23" y2="11.39" gradientUnits="userSpaceOnUse"><stop offset="0.22" stop-color="#32d4f5"/><stop offset="1" stop-color="#198ab3"/></linearGradient></defs><title>Icon-identity-223</title><path d="M17.22,13.92a.79.79,0,0,0,.8-.79.28.28,0,0,0,0-.15c-.31-2.5-1.74-4.54-4.46-4.54S9.35,10.22,9.07,13a.81.81,0,0,0,.72.88h7.43Z" fill="#0078d4"/><path d="M13.55,9.09a2.44,2.44,0,0,1-1.36-.4l1.35,3.52,1.33-3.49A2.54,2.54,0,0,1,13.55,9.09Z" fill="#fff" opacity="0.8"/><circle cx="13.55" cy="6.58" r="2.51" fill="#0078d4"/><path d="M12.19,16.36a1.19,1.19,0,0,0,1.19-1.19.66.66,0,0,0,0-.14c-.47-3.74-2.6-6.78-6.66-6.78S.44,10.83,0,15a1.2,1.2,0,0,0,1.07,1.31h11.1Z" fill="url(#f97360fa-fd13-420b-9b43-74b8dde83a11)"/><path d="M6.77,9.14a3.72,3.72,0,0,1-2-.6l2,5.25,2-5.21A3.81,3.81,0,0,1,6.77,9.14Z" fill="#fff" opacity="0.8"/><circle cx="6.74" cy="5.39" r="3.75" fill="url(#b2ab4071-529d-4450-9443-e6dc0939cc4e)"/></svg>'),
@@ -482,6 +562,66 @@ function New-ScEntraGraphSection {
                 linkedAssignment: svgIcon(linkedAssignmentIconSvg)
             };
 
+            function buildScopeTileIcon(glyph, fillA, fillB) {
+                const safeGlyph = (glyph || '?').slice(0, 3);
+                return svgIcon('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18"><defs><linearGradient id="grad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="' + fillA + '"/><stop offset="1" stop-color="' + fillB + '"/></linearGradient></defs><rect x="1" y="1" width="16" height="16" rx="3" fill="url(#grad)"/><text x="9" y="11.2" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="5" fill="#fff">' + safeGlyph + '</text></svg>');
+            }
+
+            const scopeCategoryAliases = {
+                'scope:resource:web app': 'scope:resource:webapp',
+                'scope:resource:microsoft.web/sites': 'scope:resource:webapp',
+                'scope:resource:storage account': 'scope:resource:storageaccount',
+                'scope:resource:storageaccounts': 'scope:resource:storageaccount',
+                'scope:resource:microsoft.storage/storageaccounts': 'scope:resource:storageaccount',
+                'scope:resource:microsoft.operationalinsights/workspaces': 'scope:resource:workspaces',
+                'scope:resource:log analytics workspace': 'scope:resource:workspaces',
+                'scope:resource:microsoft.app/containerapps': 'scope:resource:containerapps',
+                'scope:resource:container app': 'scope:resource:containerapps',
+                'scope:resource:logic app': 'scope:resource:logicapp',
+                'scope:resource:logic apps': 'scope:resource:logicapp',
+                'scope:resource:logicapp': 'scope:resource:logicapp',
+                'scope:resource:logicapp standard': 'scope:resource:logicapp',
+                'scope:resource:workflow': 'scope:resource:logicapp',
+                'scope:resource:workflows': 'scope:resource:logicapp',
+                'scope:resource:microsoft.logic/workflows': 'scope:resource:logicapp',
+                'scope:resource:microsoft.containerregistry/registries': 'scope:resource:containerregistry',
+                'scope:resource:container registry': 'scope:resource:containerregistry',
+                'scope:resource:key vault': 'scope:resource:keyvault',
+                'scope:resource:microsoft.keyvault/vaults': 'scope:resource:keyvault',
+                'scope:resource:cognitive services': 'scope:resource:cognitiveservices',
+                'scope:resource:microsoft.cognitiveservices/accounts': 'scope:resource:cognitiveservices',
+                'scope:resource:microsoft.managedidentity/userassignedidentities': 'scope:resource:managedidentity',
+                'scope:resource:user assigned managed identity': 'scope:resource:managedidentity'
+            };
+
+            const scopeCategoryIcons = {
+                'scope:managementgroup': { icon: buildScopeTileIcon('MG', '#0f766e', '#14b8a6'), svgIcon: '' },
+                'scope:subscription': { icon: nodeIcons['scope:subscription'], svgIcon: '' },
+                'scope:resourcegroup': { icon: nodeIcons['scope:resourceGroup'], svgIcon: nodeIcons['scope:resourceGroup'] },
+                'scope:resource:webapp': { icon: buildScopeTileIcon('WEB', '#0ea5e9', '#0284c7'), svgIcon: '' },
+                'scope:resource:storageaccount': { icon: buildScopeTileIcon('STG', '#2563eb', '#1d4ed8'), svgIcon: svgIcon('<svg viewBox="0 0 18 18" class="" role="presentation" focusable="false" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" id="FxSymbol0-015" data-type="63"><g><path fill="url(#309bb367-434d-4772-b7a8-5f38031a8018)" d="M.5 5.79h17v9.48a.57.57 0 0 1-.57.57H1.07a.57.57 0 0 1-.57-.57z"></path><path fill="#37c2b1" d="M1.07 2.17h15.86a.57.57 0 0 1 .57.57v3.05H.5V2.73a.57.57 0 0 1 .57-.56"></path><path d="M2.81 6.89h12.37a.27.27 0 0 1 .26.27v1.4a.27.27 0 0 1-.26.27H2.81a.27.27 0 0 1-.26-.27v-1.4a.27.27 0 0 1 .26-.27" class="msportalfx-svg-c01" fill="rgb(255, 255, 255)"></path><path fill="#37c2b1" d="M2.82 9.68h12.37a.27.27 0 0 1 .26.27v1.41a.27.27 0 0 1-.26.27H2.82a.27.27 0 0 1-.26-.27V10a.27.27 0 0 1 .26-.32"></path><path fill="#258277" d="M2.82 12.5h12.37a.27.27 0 0 1 .26.27v1.41a.27.27 0 0 1-.26.27H2.82a.27.27 0 0 1-.26-.27v-1.41a.27.27 0 0 1 .26-.27"></path></g><defs><linearGradient id="309bb367-434d-4772-b7a8-5f38031a8018" x1="9" x2="9" y1="15.83" y2="5.79" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#b3b3b3"></stop><stop offset=".26" stop-color="#c1c1c1"></stop><stop offset="1" stop-color="#e6e6e6"></stop></linearGradient></defs></svg>') },
+                'scope:resource:workspaces': { icon: buildScopeTileIcon('WS', '#7c3aed', '#6d28d9'), svgIcon: '' },
+                'scope:resource:keyvault': { icon: buildScopeTileIcon('KV', '#0891b2', '#0e7490'), svgIcon: svgIcon('<svg viewBox="0 0 18 18" class="" id="FxSymbol0-011" data-type="1"><defs></defs><path fill="url(#309bb367-434d-4772-b7a8-5f38031a8013)" d="M9 .5A8.5 8.5 0 1 0 17.5 9 8.51 8.51 0 0 0 9 .5m0 15.84A7.34 7.34 0 1 1 16.34 9 7.34 7.34 0 0 1 9 16.34"></path><circle cx="9" cy="9" r="7.34" fill="#fff"></circle><path fill="url(#309bb367-434d-4772-b7a8-5f38031a8014)" d="M13.44 7.33a1.84 1.84 0 0 0 0-2.59l-3.15-3.16a1.83 1.83 0 0 0-2.58 0L4.56 4.74a1.84 1.84 0 0 0 0 2.59L7.18 10a.5.5 0 0 1 .15.36v4.88a.63.63 0 0 0 .18.44l1.2 1.2a.41.41 0 0 0 .58 0l1.16-1.16.68-.68a.25.25 0 0 0 0-.34l-.49-.49a.27.27 0 0 1 0-.37l.49-.49a.25.25 0 0 0 0-.34l-.49-.49a.27.27 0 0 1 0-.37l.49-.49a.25.25 0 0 0 0-.34l-.68-.69v-.25ZM9 2.35a1 1 0 0 1 0 2.07 1 1 0 1 1 0-2.07"></path><path fill="#ff9300" d="M8.18 15.3a.23.23 0 0 0 .38-.17v-4a.24.24 0 0 0-.11-.2.22.22 0 0 0-.34.2v4a.28.28 0 0 0 .07.17" opacity=".75"></path><rect width="5.17" height=".61" x="6.48" y="5.79" fill="#ff9300" opacity=".75" rx=".28"></rect><rect width="5.17" height=".61" x="6.48" y="6.78" fill="#ff9300" opacity=".75" rx=".28"></rect><defs><radialGradient id="309bb367-434d-4772-b7a8-5f38031a8014" cx="38.95" cy="182.07" r="9.88" gradientTransform="matrix(.94 0 0 .94 -28.71 -163.24)" gradientUnits="userSpaceOnUse"><stop offset=".27" stop-color="#ffd70f"></stop><stop offset=".49" stop-color="#ffcb12"></stop><stop offset=".88" stop-color="#feac19"></stop><stop offset="1" stop-color="#fea11b"></stop></radialGradient><radialGradient id="309bb367-434d-4772-b7a8-5f38031a8013" cx="9" cy="9" r="8.5" gradientUnits="userSpaceOnUse"><stop offset=".18" stop-color="#5ea0ef"></stop><stop offset=".56" stop-color="#5c9fee"></stop><stop offset=".69" stop-color="#559ced"></stop><stop offset=".78" stop-color="#4a97e9"></stop><stop offset=".86" stop-color="#3990e4"></stop><stop offset=".93" stop-color="#2387de"></stop><stop offset=".99" stop-color="#087bd6"></stop><stop offset="1" stop-color="#0078d4"></stop></radialGradient></defs></svg>') },
+                'scope:resource:logicapp': { icon: buildScopeTileIcon('LA', '#16a34a', '#15803d'), svgIcon: svgIcon('<svg viewBox="0 0 18 18" class="" id="FxSymbol0-010" data-type="1"><defs></defs><path fill="#0078d4" d="M13.851 9.047h-2.912a1.52 1.52 0 0 1-1.518-1.518V4.33h-.842v3.2a1.52 1.52 0 0 1-1.518 1.517H4.149a1.2 1.2 0 0 0-1.2 1.2v2.338h.841v-2.341a.355.355 0 0 1 .356-.355h2.915A2.35 2.35 0 0 0 8.8 9.125a.28.28 0 0 1 .408 0 2.35 2.35 0 0 0 1.735.764h2.912a.354.354 0 0 1 .355.355v2.338h.841v-2.338a1.2 1.2 0 0 0-1.2-1.197"></path><rect width="6.747" height="6.747" x="5.626" y="-.02" fill="url(#309bb367-434d-4772-b7a8-5f38031a8010)" rx=".604"></rect><rect width="6.747" height="6.747" y="11.273" fill="url(#309bb367-434d-4772-b7a8-5f38031a8011)" rx=".604"></rect><rect width="6.747" height="6.747" x="11.253" y="11.273" fill="url(#309bb367-434d-4772-b7a8-5f38031a8012)" rx=".604" transform="rotate(90 14.627 14.647)"></rect><defs><linearGradient id="309bb367-434d-4772-b7a8-5f38031a8012" x1="14.626" x2="14.626" y1="12.14" y2="18.457" gradientTransform="rotate(-90 14.627 14.646)" gradientUnits="userSpaceOnUse"><stop offset=".001" stop-color="#b4ec36"></stop><stop offset="1" stop-color="#86d633"></stop></linearGradient><linearGradient id="309bb367-434d-4772-b7a8-5f38031a8011" x1="3.374" x2="3.374" y1="12.14" y2="18.457" gradientUnits="userSpaceOnUse"><stop offset=".001" stop-color="#b4ec36"></stop><stop offset="1" stop-color="#86d633"></stop></linearGradient><linearGradient id="309bb367-434d-4772-b7a8-5f38031a8010" x1="9" x2="9" y1="1.796" y2="6.371" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#9cebff"></stop><stop offset="1" stop-color="#50e6ff"></stop></linearGradient></defs></svg>') },
+                'scope:resource:containerapps': { icon: buildScopeTileIcon('ACA', '#f97316', '#ea580c'), svgIcon: '' },
+                'scope:resource:containerregistry': { icon: buildScopeTileIcon('ACR', '#475569', '#334155'), svgIcon: '' },
+                'scope:resource:cognitiveservices': { icon: buildScopeTileIcon('AI', '#4f46e5', '#4338ca'), svgIcon: '' },
+                'scope:resource:managedidentity': { icon: buildScopeTileIcon('MI', '#0369a1', '#075985'), svgIcon: '' }
+            };
+
+            function resolveScopeIcon(category) {
+                const normalizedCategory = (category || '').toLowerCase();
+                const aliasedCategory = scopeCategoryAliases[normalizedCategory] || normalizedCategory;
+                const entry = scopeCategoryIcons[aliasedCategory];
+                if (!entry) return nodeIcons.scope;
+
+                if (entry.svgIcon && !entry.svgIcon.includes('...')) {
+                    return entry.svgIcon;
+                }
+
+                return entry.icon || nodeIcons.scope;
+            }
+
             const nodes = new vis.DataSet(filteredNodes.map(node => {
                 // Use icons for PIM-enabled and security groups
                 let icon = null;
@@ -492,6 +632,10 @@ function New-ScEntraGraphSection {
                     icon = nodeIcons.securityGroup;
                 } else if (isManagedIdentity) {
                     icon = nodeIcons.managedIdentity;
+                } else if (node.type === 'scope') {
+                    // Use custom icons for scope sub-types
+                    const category = getNodeCategory(node);
+                    icon = resolveScopeIcon(category);
                 } else if (node.type !== 'group') {
                     icon = nodeIcons[node.type];
                 }
@@ -516,11 +660,18 @@ function New-ScEntraGraphSection {
                 const config = {
                     id: node.id,
                     label: node.label,
+                    type: node.type,
                     group: node.type,
                     title: node.label + ' (' + node.type + ')',
                     shape: hasIcon ? 'image' : fallbackShape,
                     borderWidth: hasIcon ? 0 : 2,
-                    font: { color: textColor, size: 14 }
+                    font: { color: textColor, size: 14 },
+                    // Scope sub-type properties (used by getNodeCategory)
+                    managementGroupId:    node.managementGroupId    || null,
+                    subscriptionId:       node.subscriptionId       || null,
+                    resourceGroupName:    node.resourceGroupName    || null,
+                    resourceType:         node.resourceType         || null,
+                    resourceTypeFriendly: node.resourceTypeFriendly || null
                 };
                 if (detailTags.length) {
                     config.title += ' • ' + detailTags.join(', ');
@@ -563,7 +714,7 @@ function New-ScEntraGraphSection {
                 'has_permission': 345
             };
 
-            const edges = new vis.DataSet(graphEdges.map((edge, idx) => {
+            const edges = new vis.DataSet(filteredGraphEdges.map((edge, idx) => {
                 const normalizedLabel = (edge.label || '').toLowerCase();
                 let edgeColor;
 
@@ -623,16 +774,17 @@ function New-ScEntraGraphSection {
                     id: edge.from + '-' + edge.to + '-' + idx,
                     from: edge.from,
                     to: edge.to,
-                    label: edge.label || edge.type,
+                    label: showEdgeLabels ? (edge.label || edge.type) : '',
+                    title: edge.label || edge.type,
                     arrows: 'to',
                     color: {
                         color: edgeColor,
                         opacity: edge.type === 'has_role' ? 0.9 : 0.7
                     },
-                    dashes: (edge.isPIM && !edge.isPIMActive) || edge.type === 'owns' || edge.type === 'can_manage',
+                    dashes: edge.dashes === true || (edge.isPIM && !edge.isPIMActive) || edge.type === 'owns' || edge.type === 'can_manage',
                     width: edgeWidth,
                     font: {
-                        size: 10,
+                        size: showEdgeLabels ? 10 : 1,
                         color: mutedTextColor,
                         align: 'middle',
                         strokeWidth: 0,
@@ -648,12 +800,14 @@ function New-ScEntraGraphSection {
 
             const cloneColor = (color) => color ? Object.assign({}, color) : null;
             const originalEdgeStyles = {};
+            const originalEdgeLengths = {};
             edges.get().forEach(edge => {
                 originalEdgeStyles[edge.id] = {
                     color: cloneColor(edge.color),
                     width: edge.width,
                     dashes: edge.dashes || false
                 };
+                originalEdgeLengths[edge.id] = edge.length || 170;
             });
 
             const container = document.getElementById('escalationGraph');
@@ -668,7 +822,7 @@ function New-ScEntraGraphSection {
                     scaling: { min: 20, max: 40 }
                 },
                 edges: {
-                    smooth: { type: 'continuous', roundness: 0.5 },
+                    smooth: isLargeGraph ? false : { type: 'continuous', roundness: 0.5 },
                     width: 2,
                     selectionWidth: 3,
                     chosen: false
@@ -685,17 +839,18 @@ function New-ScEntraGraphSection {
                     },
                     minVelocity: 0.75,
                     solver: 'barnesHut',
-                    stabilization: { enabled: true, iterations: 400, updateInterval: 20 }
+                    stabilization: { enabled: true, iterations: isLargeGraph ? 120 : 400, updateInterval: isLargeGraph ? 40 : 20 }
                 },
                 interaction: {
                     hover: false,
                     tooltipDelay: 100,
                     zoomView: true,
                     dragView: true,
+                    hideEdgesOnDrag: isLargeGraph,
                     navigationButtons: true
                 },
                 layout: {
-                    improvedLayout: true,
+                    improvedLayout: !isLargeGraph,
                     hierarchical: { enabled: false }
                 }
             };
@@ -703,27 +858,403 @@ function New-ScEntraGraphSection {
             const defaultNodeSize = (options && options.nodes && options.nodes.size) ? options.nodes.size : 25;
 
             const network = new vis.Network(container, data, options);
+            buildPathFilterOptions();
 
-            const privilegedApps = new Set();
-            nodes.get().forEach(node => {
-                if (node.type === 'application') {
-                    const connectedEdges = network.getConnectedEdges(node.id);
-                    const hasAppPermissions = connectedEdges.some(edgeId => {
-                        const edge = edges.get(edgeId);
-                        return edge && edge.grantType === 'Role';
+            const visualizationModeEl = document.getElementById('visualizationMode');
+            let currentVisualizationMode = visualizationModeEl ? visualizationModeEl.value : 'force';
+            let isPathQueryActive = false;
+
+            function getVisibleNodeIds() {
+                return nodes.get().filter(node => !node.hidden).map(node => node.id);
+            }
+
+            function getAdaptiveSpacingFactor(visibleNodeCount) {
+                if (visibleNodeCount <= 6) return 0.28;
+                if (visibleNodeCount <= 14) return 0.42;
+                if (visibleNodeCount <= 30) return 0.6;
+                if (visibleNodeCount <= 60) return 0.8;
+                return 1;
+            }
+
+            function getAdaptiveZoomScale(visibleNodeCount) {
+                if (visibleNodeCount <= 4) return 2.7;
+                if (visibleNodeCount <= 8) return 2.25;
+                if (visibleNodeCount <= 15) return 1.9;
+                if (visibleNodeCount <= 30) return 1.55;
+                if (visibleNodeCount <= 60) return 1.28;
+                return 1;
+            }
+
+            function applyAdaptiveEdgeLengths(visibleNodeIds, spacingFactor) {
+                const visibleSet = new Set(visibleNodeIds || []);
+                const isCompactMode = currentVisualizationMode === 'compact' || currentVisualizationMode === 'horizontal' || currentVisualizationMode === 'vertical';
+                const compactBias = isCompactMode ? 0.82 : 1;
+
+                const edgeLengthUpdates = [];
+                edges.get().forEach(edge => {
+                    if (edge.hidden) {
+                        return;
+                    }
+                    if (!visibleSet.has(edge.from) || !visibleSet.has(edge.to)) {
+                        return;
+                    }
+
+                    const baseLength = originalEdgeLengths[edge.id] || edge.length || 170;
+                    const nextLength = Math.max(35, Math.round(baseLength * spacingFactor * compactBias));
+                    edgeLengthUpdates.push({ id: edge.id, length: nextLength });
+                });
+
+                if (edgeLengthUpdates.length > 0) {
+                    edges.update(edgeLengthUpdates);
+                }
+            }
+
+            function compactVisibleNodePositions(visibleNodeIds) {
+                if (!Array.isArray(visibleNodeIds) || visibleNodeIds.length < 2) {
+                    return;
+                }
+
+                const positions = network.getPositions(visibleNodeIds);
+                let minX = Infinity;
+                let minY = Infinity;
+                let maxX = -Infinity;
+                let maxY = -Infinity;
+                let sumX = 0;
+                let sumY = 0;
+                let count = 0;
+
+                visibleNodeIds.forEach(nodeId => {
+                    const pos = positions[nodeId];
+                    if (!pos) return;
+                    minX = Math.min(minX, pos.x);
+                    minY = Math.min(minY, pos.y);
+                    maxX = Math.max(maxX, pos.x);
+                    maxY = Math.max(maxY, pos.y);
+                    sumX += pos.x;
+                    sumY += pos.y;
+                    count++;
+                });
+
+                if (count < 2) {
+                    return;
+                }
+
+                const spanX = Math.max(maxX - minX, 1);
+                const spanY = Math.max(maxY - minY, 1);
+                const maxSpan = Math.max(spanX, spanY);
+
+                // Keep sparse graphs compact so nodes remain visible without manual zooming.
+                const desiredSpan = count <= 4 ? 240 :
+                                   count <= 8 ? 340 :
+                                   count <= 15 ? 460 :
+                                   count <= 30 ? 620 :
+                                   count <= 60 ? 820 : 1050;
+
+                const shrinkScale = Math.min(1, desiredSpan / maxSpan);
+                if (shrinkScale >= 0.985) {
+                    return;
+                }
+
+                const centerX = sumX / count;
+                const centerY = sumY / count;
+                const updates = [];
+                visibleNodeIds.forEach(nodeId => {
+                    const pos = positions[nodeId];
+                    if (!pos) return;
+                    updates.push({
+                        id: nodeId,
+                        x: centerX + (pos.x - centerX) * shrinkScale,
+                        y: centerY + (pos.y - centerY) * shrinkScale
                     });
-                    if (hasAppPermissions) {
-                        privilegedApps.add(node.id);
+                });
+
+                if (updates.length > 0) {
+                    nodes.update(updates);
+                }
+            }
+
+            function getHierarchicalLevelForNode(node) {
+                if (!node) return 3;
+
+                if (node.type === 'user') return 1;
+                if (node.type === 'group') return 2;
+                if (node.type === 'servicePrincipal' || node.type === 'application') return 2;
+                if (node.type === 'role') {
+                    return node.id && node.id.startsWith('azrole-') ? 4 : 3;
+                }
+                if (node.type === 'appRoleAssignment' || node.type === 'apiPermission') return 4;
+                if (node.type === 'scope') return 5;
+
+                return 3;
+            }
+
+            function applyHierarchicalLevels(visibleNodeIds) {
+                const visibleSet = new Set(visibleNodeIds || []);
+                const updates = [];
+
+                nodes.get().forEach(node => {
+                    if (visibleSet.has(node.id)) {
+                        updates.push({ id: node.id, level: getHierarchicalLevelForNode(node) });
+                    } else {
+                        updates.push({ id: node.id, level: undefined });
+                    }
+                });
+
+                if (updates.length > 0) {
+                    nodes.update(updates);
+                }
+            }
+
+            function clearHierarchicalLevels() {
+                const updates = nodes.get().map(node => ({ id: node.id, level: undefined }));
+                if (updates.length > 0) {
+                    nodes.update(updates);
+                }
+            }
+
+            function applyManualHierarchicalLayout(visibleNodeIds, direction) {
+                if (!Array.isArray(visibleNodeIds) || visibleNodeIds.length === 0) {
+                    return;
+                }
+
+                const levels = new Map();
+                visibleNodeIds.forEach(nodeId => {
+                    const node = nodes.get(nodeId);
+                    if (!node) return;
+                    const level = getHierarchicalLevelForNode(node);
+                    if (!levels.has(level)) {
+                        levels.set(level, []);
+                    }
+                    levels.get(level).push(node);
+                });
+
+                const orderedLevels = Array.from(levels.keys()).sort((a, b) => a - b);
+                if (orderedLevels.length === 0) {
+                    return;
+                }
+
+                const updates = [];
+                orderedLevels.forEach((level, levelIndex) => {
+                    const nodesInLevel = levels.get(level)
+                        .slice()
+                        .sort((a, b) => String(a.label || a.id).localeCompare(String(b.label || b.id)));
+
+                    const nodeCount = nodesInLevel.length;
+                    const levelGap = 280;
+                    const nodeGap = nodeCount > 90 ? 34 :
+                                    nodeCount > 60 ? 42 :
+                                    nodeCount > 35 ? 50 :
+                                    nodeCount > 20 ? 64 : 78;
+                    const laneCapacity = nodeCount > 220 ? 16 : nodeCount > 120 ? 20 : 24;
+                    const laneGap = 110;
+                    const levelBandGap = 140;
+                    const bandCenterOffset = (levelIndex - ((orderedLevels.length - 1) / 2)) * levelBandGap;
+
+                    const lanes = [];
+                    nodesInLevel.forEach((node, idx) => {
+                        const laneIndex = Math.floor(idx / laneCapacity);
+                        if (!lanes[laneIndex]) {
+                            lanes[laneIndex] = [];
+                        }
+                        lanes[laneIndex].push(node);
+                    });
+
+                    const laneSpan = (lanes.length - 1) * laneGap;
+                    lanes.forEach((laneNodes, laneIndex) => {
+                        const laneOffset = laneIndex * laneGap - laneSpan / 2;
+                        const axisOffset = -((laneNodes.length - 1) * nodeGap) / 2;
+
+                        laneNodes.forEach((node, idx) => {
+                            if (direction === 'LR') {
+                                updates.push({
+                                    id: node.id,
+                                    x: levelIndex * levelGap + laneOffset,
+                                    y: axisOffset + idx * nodeGap + bandCenterOffset
+                                });
+                            } else {
+                                updates.push({
+                                    id: node.id,
+                                    x: axisOffset + idx * nodeGap + bandCenterOffset,
+                                    y: levelIndex * levelGap + laneOffset
+                                });
+                            }
+                        });
+                    });
+                });
+
+                if (updates.length > 0) {
+                    nodes.update(updates);
+                }
+            }
+
+            function autoZoomVisibleNodes(animationDuration = 420) {
+                if (isUserDraggingNode) {
+                    return;
+                }
+
+                clearPendingAutoZoom();
+
+                const visibleNodeIds = getVisibleNodeIds();
+                if (visibleNodeIds.length === 0) {
+                    network.fit();
+                    return;
+                }
+
+                const isHierarchicalMode = currentVisualizationMode === 'horizontal' || currentVisualizationMode === 'vertical';
+                const shouldCompactPositions = currentVisualizationMode === 'compact' && visibleNodeIds.length <= 120;
+                if (!isHierarchicalMode && shouldCompactPositions) {
+                    compactVisibleNodePositions(visibleNodeIds);
+                }
+
+                network.fit({
+                    nodes: visibleNodeIds,
+                    maxZoomLevel: 3.4,
+                    animation: {
+                        duration: animationDuration,
+                        easingFunction: 'easeInOutQuad'
+                    }
+                });
+
+                const targetScale = isHierarchicalMode
+                    ? Math.min(1.25, getAdaptiveZoomScale(visibleNodeIds.length))
+                    : getAdaptiveZoomScale(visibleNodeIds.length);
+                const currentScale = network.getScale();
+                if (targetScale > currentScale + 0.02) {
+                    pendingAutoZoomTimer = setTimeout(() => {
+                        pendingAutoZoomTimer = null;
+                        if (isUserDraggingNode) {
+                            return;
+                        }
+                        network.moveTo({
+                            scale: targetScale,
+                            animation: {
+                                duration: Math.max(180, Math.round(animationDuration * 0.65)),
+                                easingFunction: 'easeInOutQuad'
+                            }
+                        });
+                    }, Math.max(60, Math.round(animationDuration * 0.4)));
+                }
+            }
+
+            function applyVisualizationMode(shouldAutoFit = true) {
+                const requestedDirectional = currentVisualizationMode === 'horizontal' || currentVisualizationMode === 'vertical';
+                if (requestedDirectional && !canApplyDirectionalVisualization()) {
+                    currentVisualizationMode = 'compact';
+                    if (visualizationModeEl) {
+                        visualizationModeEl.value = 'compact';
                     }
                 }
-            });
+
+                const visibleNodeIds = getVisibleNodeIds();
+                const visibleCount = Math.max(visibleNodeIds.length, 1);
+                const spacingFactor = getAdaptiveSpacingFactor(visibleCount);
+                const isHierarchicalMode = currentVisualizationMode === 'horizontal' || currentVisualizationMode === 'vertical';
+                if (!isHierarchicalMode) {
+                    applyAdaptiveEdgeLengths(visibleNodeIds, spacingFactor);
+                    clearHierarchicalLevels();
+                }
+
+                if (isHierarchicalMode) {
+                    applyHierarchicalLevels(visibleNodeIds);
+                    const hierarchicalDirection = currentVisualizationMode === 'horizontal' ? 'LR' : 'UD';
+                    network.setOptions({
+                        layout: {
+                            improvedLayout: false,
+                            hierarchical: { enabled: false }
+                        },
+                        physics: { enabled: false },
+                        edges: {
+                            smooth: { type: 'continuous', roundness: 0.2 }
+                        }
+                    });
+                    applyManualHierarchicalLayout(visibleNodeIds, hierarchicalDirection);
+                } else {
+                    const isCompact = currentVisualizationMode === 'compact';
+                    const springBase = isCompact ? 95 : 130;
+                    network.setOptions({
+                        layout: {
+                            improvedLayout: !isLargeGraph,
+                            hierarchical: { enabled: false }
+                        },
+                        physics: {
+                            enabled: true,
+                            barnesHut: {
+                                gravitationalConstant: isCompact ? -16500 : -14500,
+                                centralGravity: isCompact ? 0.35 : 0.28,
+                                springLength: Math.max(45, Math.round(springBase * spacingFactor)),
+                                springConstant: isCompact ? 0.03 : 0.024,
+                                damping: isCompact ? 0.25 : 0.2,
+                                avoidOverlap: 0.8
+                            },
+                            minVelocity: 0.65,
+                            solver: 'barnesHut',
+                            stabilization: {
+                                enabled: true,
+                                iterations: isLargeGraph ? 100 : 250,
+                                updateInterval: isLargeGraph ? 40 : 20
+                            }
+                        },
+                        edges: {
+                            smooth: isLargeGraph ? false : { type: 'continuous', roundness: isCompact ? 0.35 : 0.5 }
+                        }
+                    });
+
+                    // Let organic modes settle briefly, then freeze to avoid constant drift.
+                    network.stopSimulation();
+                    network.startSimulation();
+                    const stabilizationIterations = isLargeGraph ? 110 : 220;
+                    network.stabilize(stabilizationIterations);
+                    network.setOptions({
+                        physics: {
+                            enabled: false
+                        }
+                    });
+                }
+
+                if (shouldAutoFit) {
+                    autoZoomVisibleNodes();
+                }
+            }
 
             let initialViewPosition = null;
             let initialLayoutSettled = false;
             let gentleMotionAnimationFrame = null;
             let gentleMotionState = null;
+            let isUserDraggingNode = false;
+            let pendingAutoZoomTimer = null;
+
+            const rawNetworkFit = network.fit.bind(network);
+            const rawNetworkFocus = network.focus.bind(network);
+            network.fit = function(...args) {
+                if (isUserDraggingNode) {
+                    return;
+                }
+                return rawNetworkFit(...args);
+            };
+            network.focus = function(...args) {
+                if (isUserDraggingNode) {
+                    return;
+                }
+                return rawNetworkFocus(...args);
+            };
+
+            function clearPendingAutoZoom() {
+                if (pendingAutoZoomTimer !== null) {
+                    clearTimeout(pendingAutoZoomTimer);
+                    pendingAutoZoomTimer = null;
+                }
+            }
+
+            function hasEntityFilterActive() {
+                const filterEl = document.getElementById('nodeFilter');
+                return Boolean(filterEl && filterEl.value && filterEl.value.trim().length > 0);
+            }
 
             function startGentleMotion() {
+                if (!enableAnimatedGraph) {
+                    return;
+                }
+
                 if (gentleMotionAnimationFrame !== null) {
                     return;
                 }
@@ -835,15 +1366,21 @@ function New-ScEntraGraphSection {
                     originalNodePositions[nodeId] = stabilizedPositions[nodeId];
                 });
                 
-                // Start gentle motion after layout is stable
-                setTimeout(() => {
-                    startGentleMotion();
-                }, 500);
+                if (enableAnimatedGraph) {
+                    // Start gentle motion after layout is stable
+                    setTimeout(() => {
+                        startGentleMotion();
+                    }, 500);
+                }
             }
 
             network.once('stabilizationIterationsDone', finalizeInitialLayout);
 
             network.on('dragStart', function(params) {
+                isUserDraggingNode = true;
+                clearPendingAutoZoom();
+                stopGentleMotion();
+
                 // Unfix any node that is being dragged
                 if (params.nodes.length > 0) {
                     const draggedNodeId = params.nodes[0];
@@ -856,7 +1393,14 @@ function New-ScEntraGraphSection {
             });
 
             network.on('dragEnd', function(params) {
-                // Cleanup after drag
+                isUserDraggingNode = false;
+                if (hasEntityFilterActive()) {
+                    setTimeout(() => {
+                        if (!isUserDraggingNode && hasEntityFilterActive()) {
+                            startGentleMotion();
+                        }
+                    }, 120);
+                }
             });
 
             function applyGraphThemeStyles() {
@@ -920,6 +1464,10 @@ function New-ScEntraGraphSection {
             });
 
             const selectedNodes = new Set();
+
+            function canApplyDirectionalVisualization() {
+                return selectedNodes.size > 0 || isPathQueryActive;
+            }
 
             function getConnectedNodes(nodeId, visited = new Set(), excludeOtherPrincipals = false, originNodeId = null, originNodeType = null, depth = 0, pimGroupFilter = null) {
                 if (visited.has(nodeId)) return visited;
@@ -1026,7 +1574,7 @@ function New-ScEntraGraphSection {
                 return visited;
             }
 
-            function highlightPath(nodeId, additive = false) {
+            function highlightPath(nodeId, additive = false, activeProviderFilter = null) {
                 if (!additive) {
                     selectedNodes.clear();
                 }
@@ -1037,27 +1585,129 @@ function New-ScEntraGraphSection {
 
                 selectedNodes.forEach(selectedId => {
                     const selectedNode = nodes.get(selectedId);
-                    const isPrincipalSelected = selectedNode && (selectedNode.type === 'user' || selectedNode.type === 'group');
-                    let pimFilter = null;
-                    if (selectedNode && selectedNode.type === 'role') {
-                        if (selectedNode.label === 'Group Administrator') {
-                            pimFilter = 'exclude';
-                        } else if (selectedNode.label === 'Privileged Role Administrator') {
-                            pimFilter = 'only';
-                        }
-                    }
-                    const pathNodes = getConnectedNodes(selectedId, new Set(), isPrincipalSelected, null, null, 0, pimFilter);
-                    pathNodes.forEach(nId => allPathNodes.add(nId));
-                    pathNodes.forEach(nId => {
-                        const connEdges = network.getConnectedEdges(nId);
-                        connEdges.forEach(edgeId => {
-                            const edge = edges.get(edgeId);
-                            if (edge && pathNodes.has(edge.from) && pathNodes.has(edge.to)) {
-                                allPathEdges.add(edgeId);
+
+                    if (selectedNode && selectedNode.type === 'scope') {
+                        // Scope-specific traversal: show who has direct access to this scope (upward)
+                        // and what this scope contains (downward via mg_contains edges only).
+                        // This avoids the combinatorial explosion of bidirectional traversal through
+                        // sibling scope branches.
+                        allPathNodes.add(selectedId);
+                        const allEdgesSnapshot = edges.get();
+
+                        // Upward: find role nodes scoped here, then their assigned identities.
+                        // Also traverses ancestor scopes so inherited access (subscription, MG, tenant root)
+                        // is revealed when clicking a resource group or lower scope node.
+                        const addAccessAtScope = (scopeNodeId) => {
+                            allEdgesSnapshot.forEach(edge => {
+                                if (edge.to === scopeNodeId && edge.edgeType === 'assigned_to') {
+                                    allPathNodes.add(edge.from);
+                                    allPathEdges.add(edge.id);
+                                    allEdgesSnapshot.forEach(identEdge => {
+                                        if (identEdge.to === edge.from && identEdge.edgeType === 'has_role') {
+                                            allPathNodes.add(identEdge.from);
+                                            allPathEdges.add(identEdge.id);
+                                        }
+                                    });
+                                }
+                            });
+                        };
+                        addAccessAtScope(selectedId);
+
+                        // Walk up the mg_contains chain to include ancestor scopes and their role holders
+                        const traverseAncestors = (scopeNodeId) => {
+                            allEdgesSnapshot.forEach(edge => {
+                                if (edge.to === scopeNodeId && edge.edgeType === 'mg_contains' && !allPathNodes.has(edge.from)) {
+                                    allPathNodes.add(edge.from);
+                                    allPathEdges.add(edge.id);
+                                    addAccessAtScope(edge.from);
+                                    traverseAncestors(edge.from);
+                                }
+                            });
+                        };
+                        traverseAncestors(selectedId);
+
+                        // Downward: follow Contains edges to reveal the full scope subtree
+                        const expandContains = (nodeId) => {
+                            allEdgesSnapshot.forEach(edge => {
+                                if (edge.from === nodeId && edge.edgeType === 'mg_contains') {
+                                    if (!allPathNodes.has(edge.to)) {
+                                        allPathNodes.add(edge.to);
+                                        allPathEdges.add(edge.id);
+                                        expandContains(edge.to);
+                                    }
+                                }
+                            });
+                        };
+                        expandContains(selectedId);
+                    } else {
+                        const isPrincipalSelected = selectedNode && (selectedNode.type === 'user' || selectedNode.type === 'group' || selectedNode.type === 'servicePrincipal');
+                        let pimFilter = null;
+                        if (selectedNode && selectedNode.type === 'role') {
+                            if (selectedNode.label === 'Group Administrator') {
+                                pimFilter = 'exclude';
+                            } else if (selectedNode.label === 'Privileged Role Administrator') {
+                                pimFilter = 'only';
                             }
+                        }
+                        const pathNodes = getConnectedNodes(selectedId, new Set(), isPrincipalSelected, null, null, 0, pimFilter);
+                        pathNodes.forEach(nId => allPathNodes.add(nId));
+                        pathNodes.forEach(nId => {
+                            const connEdges = network.getConnectedEdges(nId);
+                            connEdges.forEach(edgeId => {
+                                const edge = edges.get(edgeId);
+                                if (edge && pathNodes.has(edge.from) && pathNodes.has(edge.to)) {
+                                    allPathEdges.add(edgeId);
+                                }
+                            });
                         });
+                    }
+                });
+
+                // Always reveal Azure RBAC scope nodes attached to any Azure role in the visible path.
+                // This keeps subscription / RG / resource context visible even when the path starts at a role node.
+                Array.from(allPathNodes).forEach(nId => {
+                    const n = nodes.get(nId);
+                    if (!n || n.type !== 'role' || !n.provider || String(n.provider).toLowerCase() !== 'azurerbac') return;
+                    const connEdges = network.getConnectedEdges(nId);
+                    connEdges.forEach(edgeId => {
+                        if (allPathEdges.has(edgeId)) return;
+                        const edge = edges.get(edgeId);
+                        if (!edge) return;
+                        const otherNodeId = edge.from === nId ? edge.to : edge.from;
+                        if (allPathNodes.has(otherNodeId)) return;
+                        const otherNode = nodes.get(otherNodeId);
+                        if (otherNode && otherNode.type === 'scope') {
+                            allPathNodes.add(otherNodeId);
+                            allPathEdges.add(edgeId);
+                        }
                     });
                 });
+
+                const hasIdentitySelected = Array.from(selectedNodes).some(selId => {
+                    const n = nodes.get(selId);
+                    return n && (n.type === 'user' || n.type === 'group' || n.type === 'servicePrincipal');
+                });
+
+                // When Azure RBAC Only filter is active and an identity is selected,
+                // restrict the visible path to that identity + its Azure role/scope nodes only.
+                if (activeProviderFilter === 'azure' && hasIdentitySelected) {
+                    const azureOnlyNodes = new Set(selectedNodes); // always keep the identity node(s)
+                    const azureOnlyEdges = new Set();
+                    allPathEdges.forEach(edgeId => {
+                        const edge = edges.get(edgeId);
+                        if (!edge) return;
+                        const ep = (edge.provider) ? String(edge.provider).toLowerCase() : '';
+                        if (ep === 'azurerbac') {
+                            azureOnlyEdges.add(edgeId);
+                            azureOnlyNodes.add(edge.from);
+                            azureOnlyNodes.add(edge.to);
+                        }
+                    });
+                    allPathNodes.clear();
+                    azureOnlyNodes.forEach(id => allPathNodes.add(id));
+                    allPathEdges.clear();
+                    azureOnlyEdges.forEach(id => allPathEdges.add(id));
+                }
 
                 const updates = [];
                 const allNodes = nodes.get();
@@ -1138,6 +1788,601 @@ function New-ScEntraGraphSection {
                 edges.update(edgeUpdates);
 
                 filterRiskTable(Array.from(allPathNodes));
+            }
+
+            // ---------------------------------------------------------------
+            // Path Query — BFS shortest path between any two graph nodes
+            // ---------------------------------------------------------------
+            function findShortestPath(startId, targetId) {
+                if (startId === targetId) return { nodes: [startId], edges: [] };
+
+                const allEdgesData = edges.get();
+
+                // Build adjacency respecting Azure RBAC semantics:
+                // - All edge types are traversable in both directions EXCEPT mg_contains.
+                // - mg_contains (scope hierarchy) is strictly parent → child only.
+                //   A role on a child resource does NOT grant access to the parent scope,
+                //   so traversing mg_contains in reverse would produce false escalation paths
+                //   (e.g. "role on /providers/Foo" ← reverse-mg_contains ← "RG").
+                const adj = new Map();
+                allEdgesData.forEach(edge => {
+                    if (!adj.has(edge.from)) adj.set(edge.from, []);
+                    if (!adj.has(edge.to))   adj.set(edge.to,   []);
+                    adj.get(edge.from).push({ nodeId: edge.to, edgeId: edge.id });
+                    // Allow reverse traversal for all edge types except mg_contains
+                    if (edge.edgeType !== 'mg_contains') {
+                        adj.get(edge.to).push({ nodeId: edge.from, edgeId: edge.id });
+                    }
+                });
+
+                const visited = new Set([startId]);
+                const queue   = [{ nodeId: startId, pathNodes: [startId], pathEdges: [] }];
+
+                while (queue.length > 0) {
+                    const { nodeId, pathNodes, pathEdges } = queue.shift();
+                    for (const { nodeId: nbId, edgeId } of (adj.get(nodeId) || [])) {
+                        if (visited.has(nbId)) continue;
+                        visited.add(nbId);
+                        const newNodes = [...pathNodes, nbId];
+                        const newEdges = [...pathEdges, edgeId];
+                        if (nbId === targetId) return { nodes: newNodes, edges: newEdges };
+                        queue.push({ nodeId: nbId, pathNodes: newNodes, pathEdges: newEdges });
+                    }
+                }
+                return null;
+            }
+
+            // Returns ALL simple paths from startId to targetId up to (shortestLength + 2) hops.
+            // This ensures both direct paths and longer group-membership-based paths are surfaced.
+            function findAllRelevantPaths(startId, targetId) {
+                if (startId === targetId) return [{ nodes: [startId], edges: [] }];
+
+                const allEdgesData = edges.get();
+
+                const adj = new Map();
+                allEdgesData.forEach(edge => {
+                    if (!adj.has(edge.from)) adj.set(edge.from, []);
+                    if (!adj.has(edge.to))   adj.set(edge.to,   []);
+                    adj.get(edge.from).push({ nodeId: edge.to, edgeId: edge.id });
+                    // Directed edges (no reverse traversal):
+                    // - mg_contains:    parent scope → child scope only
+                    // - has_role:       identity → role only (shared role ≠ shared membership)
+                    // - member_of:      identity → group only (co-membership ≠ access to peer's roles)
+                    // - assigned_to:    identity/role → target only (shared appRoleAssignment ≠ link between holders)
+                    // - can_manage:     managing role → managed object only (not the reverse)
+                    // - can_compromise: role → compromisable user only (not the reverse)
+                    const directedOnly = new Set(['mg_contains', 'has_role', 'member_of', 'assigned_to', 'can_manage', 'can_compromise']);
+                    if (!directedOnly.has(edge.edgeType)) {
+                        adj.get(edge.to).push({ nodeId: edge.from, edgeId: edge.id });
+                    }
+                });
+
+                // Guardrail: avoid impossible password-reset paths to privileged/critical users.
+                // User Administrator and similar edges ('can_compromise') should never model takeover
+                // of protected identities.
+                function isTraversalAllowed(fromId, toId, edgeId) {
+                    const edge = edges.get(edgeId);
+                    if (!edge) return true;
+
+                    if (edge.edgeType === 'can_compromise') {
+                        const targetNode = nodes.get(toId);
+                        const targetIsUser = targetNode && targetNode.type === 'user';
+                        const targetIsCritical = targetIsUser && criticalPathNodeIds.has(toId);
+                        const targetIsPrivileged = targetIsUser && (targetNode.isPrivileged === true || targetNode.isPrivilegedAccount === true);
+                        if (targetIsCritical || targetIsPrivileged) {
+                            return false;
+                        }
+                    }
+
+                    return true;
+                }
+
+                // Phase 1: find the shortest path length via BFS
+                let shortestLength = Infinity;
+                {
+                    const vis = new Set([startId]);
+                    const q = [{ nodeId: startId, depth: 0 }];
+                    while (q.length > 0) {
+                        const { nodeId, depth } = q.shift();
+                        if (nodeId === targetId) { shortestLength = depth; break; }
+                        if (depth + 1 >= shortestLength) continue;
+                        for (const { nodeId: nb, edgeId } of (adj.get(nodeId) || [])) {
+                            if (!isTraversalAllowed(nodeId, nb, edgeId)) continue;
+                            if (!vis.has(nb)) { vis.add(nb); q.push({ nodeId: nb, depth: depth + 1 }); }
+                        }
+                    }
+                }
+
+                if (shortestLength === Infinity) return null;
+
+                // Phase 2: DFS to collect all simple paths up to shortestLength + 2 (cap at 8).
+                // Stop early after 50 paths to keep performance acceptable on large graphs.
+                const maxDepth = Math.min(shortestLength + 2, 8);
+                const MAX_PATHS = 50;
+                const allPaths = [];
+
+                function dfs(nodeId, pathNodes, pathEdges, visited) {
+                    if (allPaths.length >= MAX_PATHS) return;
+                    if (nodeId === targetId) {
+                        allPaths.push({ nodes: [...pathNodes], edges: [...pathEdges] });
+                        return;
+                    }
+                    if (pathNodes.length > maxDepth) return;
+                    
+                    // Avoid traversing through other user nodes (security path analysis)
+                    const currentNodeData = nodes.get(nodeId);
+                    const isCurrentUser = currentNodeData && currentNodeData.type === 'user';
+                    
+                    for (const { nodeId: nb, edgeId } of (adj.get(nodeId) || [])) {
+                        if (allPaths.length >= MAX_PATHS) return;
+                        if (!isTraversalAllowed(nodeId, nb, edgeId)) continue;
+                        
+                        // Skip if we're trying to traverse through another user node
+                        const neighborNodeData = nodes.get(nb);
+                        const isNeighborUser = neighborNodeData && neighborNodeData.type === 'user';
+                        if (isCurrentUser && isNeighborUser && nodeId !== startId) {
+                            continue;  // Skip user→user traversal (except from start node)
+                        }
+                        
+                        if (!visited.has(nb)) {
+                            visited.add(nb);
+                            pathNodes.push(nb);
+                            pathEdges.push(edgeId);
+                            dfs(nb, pathNodes, pathEdges, visited);
+                            pathNodes.pop();
+                            pathEdges.pop();
+                            visited.delete(nb);
+                        }
+                    }
+                }
+
+                const vis2 = new Set([startId]);
+                dfs(startId, [startId], [], vis2);
+                return allPaths.length > 0 ? allPaths : null;
+            }
+
+            let pathTargetTypeFilter = ''; // '' = all types
+
+            // Returns a canonical category string for a node, drilling into scope sub-types
+            function getNodeCategory(n) {
+                if (!n) return '';
+                const t = n.type || n.group || ''; // vis DataSet stores type as 'group'
+                if (t === 'user') return 'user';
+                if (t === 'group') return 'group';
+                if (t === 'servicePrincipal') return 'servicePrincipal';
+                if (t === 'application') return 'application';
+                if (t === 'role') {
+                    return (n.id && n.id.startsWith('azrole-')) ? 'azureRole' : 'entraRole';
+                }
+                if (t === 'scope') {
+                    if (n.managementGroupId) return 'scope:managementGroup';
+                    if (n.subscriptionId && !n.resourceGroupName) return 'scope:subscription';
+                    if (n.resourceGroupName && !n.resourceType) return 'scope:resourceGroup';
+                    if (n.resourceType) {
+                        const friendly = (n.resourceTypeFriendly || n.resourceType || '').trim();
+                        return 'scope:resource:' + friendly.toLowerCase();
+                    }
+                    return 'scope';
+                }
+                return t;
+            }
+
+            // Populate the type filter <select> from the actual graph node set
+            function buildPathFilterOptions() {
+                const sel = document.getElementById('pathTypeFilter');
+                if (!sel) return;
+
+                // Ordered display config: category key -> label
+                const knownOrder = [
+                    ['user',              'User'],
+                    ['group',             'Group'],
+                    ['servicePrincipal',  'Service Principal'],
+                    ['application',       'Application'],
+                    ['entraRole',         'Entra Role'],
+                    ['azureRole',         'Azure Role'],
+                    ['scope:managementGroup', 'Scope: Management Group'],
+                    ['scope:subscription',    'Scope: Subscription'],
+                    ['scope:resourceGroup',   'Scope: Resource Group'],
+                ];
+
+                const categoryCounts = {};
+                nodes.get().forEach(n => {
+                    const cat = getNodeCategory(n);
+                    if (cat) categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+                });
+
+                // Rebuild options
+                while (sel.options.length > 1) sel.remove(1); // keep 'All types'
+
+                const addedDivider = { identity: false, role: false, scope: false, resource: false };
+
+                knownOrder.forEach(([cat, lbl]) => {
+                    if (!categoryCounts[cat]) return;
+                    const opt = document.createElement('option');
+                    opt.value = cat;
+                    opt.textContent = lbl + ' (' + categoryCounts[cat] + ')';
+                    sel.appendChild(opt);
+                    delete categoryCounts[cat];
+                });
+
+                // Dynamic resource sub-types not in the known list
+                const resourceKeys = Object.keys(categoryCounts).filter(k => k.startsWith('scope:resource:'));
+                resourceKeys.sort();
+                resourceKeys.forEach(cat => {
+                    const lbl = cat.replace('scope:resource:', '');
+                    const friendly = lbl.charAt(0).toUpperCase() + lbl.slice(1);
+                    const opt = document.createElement('option');
+                    opt.value = cat;
+                    opt.textContent = 'Scope: ' + friendly + ' (' + categoryCounts[cat] + ')';
+                    sel.appendChild(opt);
+                });
+
+                // Any remaining unknown categories
+                Object.keys(categoryCounts).forEach(cat => {
+                    if (cat.startsWith('scope:resource:')) return;
+                    const opt = document.createElement('option');
+                    opt.value = cat;
+                    opt.textContent = cat + ' (' + categoryCounts[cat] + ')';
+                    sel.appendChild(opt);
+                });
+            }
+
+            function showPathSuggestions(inputEl, suggestionsEl) {
+                const term = inputEl.value.trim().toLowerCase();
+                suggestionsEl.innerHTML = '';
+                if (term.length < 2) { suggestionsEl.style.display = 'none'; return; }
+
+                const isTarget = inputEl.id === 'pathEndInput';
+                let matches = nodes.get().filter(n => {
+                    if (isTarget && pathTargetTypeFilter && getNodeCategory(n) !== pathTargetTypeFilter) return false;
+                    return nodeMatchesSearch(n, term, false);
+                }).slice(0, 12);
+                if (matches.length === 0) { suggestionsEl.style.display = 'none'; return; }
+
+                const typeColors = { user: '#6366f1', group: '#10b981', role: '#f59e0b', scope: '#3b82f6', servicePrincipal: '#ec4899', application: '#8b5cf6' };
+
+                matches.forEach(n => {
+                    const item = document.createElement('div');
+                    item.style.cssText = 'padding: 6px 10px; cursor: pointer; border-bottom: 1px solid rgba(0,0,0,0.06); font-size: 12px; display: flex; align-items: center; gap: 6px; overflow: hidden;';
+                    const badge = document.createElement('span');
+                    badge.textContent = n.type || '';
+                    badge.style.cssText = 'flex-shrink: 0; font-size: 9px; padding: 1px 5px; border-radius: 8px; background: ' + (typeColors[n.type] || '#6b7280') + '22; color: ' + (typeColors[n.type] || '#6b7280') + '; border: 1px solid ' + (typeColors[n.type] || '#6b7280') + '44; text-transform: uppercase; letter-spacing: 0.3px;';
+                    const lbl = document.createElement('span');
+                    lbl.textContent = n.label || n.id;
+                    lbl.style.cssText = 'overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+                    item.appendChild(badge);
+                    item.appendChild(lbl);
+                    item.title = (n.label || n.id) + ' [' + n.type + ']';
+                    item.addEventListener('mousedown', () => {
+                        inputEl.value = n.label || n.id;
+                        inputEl.dataset.selectedNodeId = n.id;
+                        suggestionsEl.style.display = 'none';
+                    });
+                    item.addEventListener('mouseover', () => { item.style.background = 'rgba(99,102,241,0.08)'; });
+                    item.addEventListener('mouseout',  () => { item.style.background = ''; });
+                    suggestionsEl.appendChild(item);
+                });
+                suggestionsEl.style.display = 'block';
+            }
+
+            function resolvePathNodeId(inputEl) {
+                if (inputEl.dataset.selectedNodeId) {
+                    const n = nodes.get(inputEl.dataset.selectedNodeId);
+                    if (n) return [inputEl.dataset.selectedNodeId];
+                }
+                const term = inputEl.value.trim().toLowerCase();
+                const isTarget = inputEl.id === 'pathEndInput';
+                return nodes.get().filter(n => {
+                    if (isTarget && pathTargetTypeFilter && getNodeCategory(n) !== pathTargetTypeFilter) return false;
+                    return nodeMatchesSearch(n, term, false);
+                }).slice(0, 5).map(n => n.id);
+            }
+
+            function runPathQuery() {
+                const resultEl = document.getElementById('pathQueryResult');
+                resultEl.style.display = '';
+                isPathQueryActive = false;
+
+                const startIds = resolvePathNodeId(document.getElementById('pathStartInput'));
+                const endIds   = resolvePathNodeId(document.getElementById('pathEndInput'));
+
+                if (startIds.length === 0) {
+                    resultEl.innerHTML = '<span style="color:#f87171;">Start node not found. Try a different name.</span>';
+                    return;
+                }
+                if (endIds.length === 0) {
+                    resultEl.innerHTML = '<span style="color:#f87171;">Target node not found. Try a different name.</span>';
+                    return;
+                }
+
+                // Always select the first resolved start node for detangle and node actions.
+                const defaultStartNodeId = startIds[0];
+                if (defaultStartNodeId) {
+                    selectedNodes.clear();
+                    selectedNodes.add(defaultStartNodeId);
+                    selectedNodeId = defaultStartNodeId;
+                    isNodeSelected = true;
+                    currentSelectedNode = originalNodeData[defaultStartNodeId] || nodes.get(defaultStartNodeId) || null;
+                    network.selectNodes([defaultStartNodeId]);
+
+                    const defaultNode = originalNodeData[defaultStartNodeId] || nodes.get(defaultStartNodeId);
+                    if (defaultNode) {
+                        const selectedNodeNameEl = document.getElementById('selectedNodeName');
+                        const selectedNodeTypeEl = document.getElementById('selectedNodeType');
+                        const selectedNodeInfoEl = document.getElementById('selectedNodeInfo');
+                        if (selectedNodeNameEl) selectedNodeNameEl.textContent = defaultNode.label || defaultNode.id;
+                        if (selectedNodeTypeEl) selectedNodeTypeEl.textContent = '(' + (defaultNode.type || 'node') + ')';
+                        if (selectedNodeInfoEl) selectedNodeInfoEl.style.display = 'block';
+                    }
+
+                    ensureDetangleButton();
+                    ensureResetButton();
+                    if (detangleButtonRef) {
+                        detangleButtonRef.style.display = 'block';
+                        positionDetangleButton();
+                    }
+                    positionResetButton();
+                }
+
+                let allFoundPaths = [];
+                for (const sid of startIds) {
+                    for (const eid of endIds) {
+                        if (sid === eid) continue;
+                        const paths = findAllRelevantPaths(sid, eid);
+                        if (paths) allFoundPaths = allFoundPaths.concat(paths);
+                    }
+                }
+
+                if (allFoundPaths.length === 0) {
+                    isPathQueryActive = false;
+                    resultEl.innerHTML = '<span style="color:#f87171;">No path found between these nodes.</span>';
+                    return;
+                }
+
+                isPathQueryActive = true;
+
+                // Sort paths: shortest first
+                allFoundPaths.sort((a, b) => a.nodes.length - b.nodes.length);
+
+                // Deduplicate paths with identical node sequences
+                const pathSigs = new Set();
+                allFoundPaths = allFoundPaths.filter(p => {
+                    const sig = p.nodes.join('|');
+                    if (pathSigs.has(sig)) return false;
+                    pathSigs.add(sig);
+                    return true;
+                });
+
+                // Keep graph focused: use a limited number of found paths for visualization
+                const MAX_PATHS_FOR_GRAPH = 5;
+                const graphPaths = allFoundPaths.slice(0, MAX_PATHS_FOR_GRAPH);
+
+                // Union nodes and edges from selected graph paths only
+                const pathNodeSet = new Set();
+                const pathEdgeSet = new Set();
+                graphPaths.forEach(p => {
+                    p.nodes.forEach(n => pathNodeSet.add(n));
+                    p.edges.forEach(e => pathEdgeSet.add(e));
+                });
+
+                // Filter graph to only show nodes relevant to this path query
+                // This removes all unrelated users and resources from the visualization
+                const relevantNodeIds = new Set(pathNodeSet);
+                const relevantEdgeIds = new Set(pathEdgeSet);
+                
+                // Apply highlight using same styling infrastructure as highlightPath
+                const nodeUpdates = nodes.get().map(n => {
+                    if (!relevantNodeIds.has(n.id)) return { id: n.id, hidden: true, shadow: false, shadowSize: 0 };
+                    const baseStyle = originalNodeStyles[n.id] || {};
+                    const upd = {
+                        id: n.id, hidden: false,
+                        borderWidth: baseStyle.hasIcon ? 2 : 4,
+                        font: { color: currentTextColor(), size: 16, bold: true },
+                        size: baseStyle.size || defaultNodeSize,
+                        shadow: false
+                    };
+                    if (baseStyle.color) {
+                        upd.color = { background: baseStyle.color.background, border: '#6366f1',
+                                      highlight: { background: baseStyle.color.background, border: '#6366f1' } };
+                    }
+                    return upd;
+                });
+                nodes.update(nodeUpdates);
+
+                const edgeUpdates2 = edges.get().map(edge => {
+                    if (!relevantEdgeIds.has(edge.id)) return { id: edge.id, hidden: true };
+                    const baseStyle = originalEdgeStyles[edge.id] || {};
+                    return {
+                        id: edge.id, hidden: false, width: 3,
+                        color: { color: '#6366f1', opacity: 1 },
+                        dashes: baseStyle.dashes ?? edge.dashes ?? false
+                    };
+                });
+                edges.update(edgeUpdates2);
+
+                filterRiskTable(Array.from(pathNodeSet));
+                const allPathNodes = [...new Set(allFoundPaths.flatMap(p => p.nodes))];
+
+                // Default Path Query visualization to vertical hierarchy for readable escalation chains.
+                currentVisualizationMode = 'vertical';
+                if (visualizationModeEl) {
+                    visualizationModeEl.value = 'vertical';
+                }
+                applyVisualizationMode(true);
+
+                // Ensure there is a default selected node when Path Query is shown.
+                // This keeps detangle behavior and node actions consistent without requiring a manual click.
+                const defaultSelectedNodeId = (graphPaths[0] && graphPaths[0].nodes && graphPaths[0].nodes.length > 0)
+                    ? graphPaths[0].nodes[0]
+                    : null;
+                if (defaultSelectedNodeId) {
+                    selectedNodes.clear();
+                    selectedNodes.add(defaultSelectedNodeId);
+                    selectedNodeId = defaultSelectedNodeId;
+                    isNodeSelected = true;
+                    currentSelectedNode = originalNodeData[defaultSelectedNodeId] || nodes.get(defaultSelectedNodeId) || null;
+                    network.selectNodes([defaultSelectedNodeId]);
+
+                    const defaultNode = originalNodeData[defaultSelectedNodeId] || nodes.get(defaultSelectedNodeId);
+                    if (defaultNode) {
+                        const selectedNodeNameEl = document.getElementById('selectedNodeName');
+                        const selectedNodeTypeEl = document.getElementById('selectedNodeType');
+                        const selectedNodeInfoEl = document.getElementById('selectedNodeInfo');
+                        if (selectedNodeNameEl) selectedNodeNameEl.textContent = defaultNode.label || defaultNode.id;
+                        if (selectedNodeTypeEl) selectedNodeTypeEl.textContent = '(' + (defaultNode.type || 'node') + ')';
+                        if (selectedNodeInfoEl) selectedNodeInfoEl.style.display = 'block';
+                    }
+
+                    ensureDetangleButton();
+                    ensureResetButton();
+                    if (detangleButtonRef) {
+                        detangleButtonRef.style.display = 'block';
+                        positionDetangleButton();
+                    }
+                    positionResetButton();
+                }
+                
+                // Auto-detangle the displayed path set for better readability
+                if (graphPaths.length > 0) {
+                    const detangleTargets = [];
+                    graphPaths.forEach(path => {
+                        if (!path || !Array.isArray(path.nodes) || path.nodes.length === 0) return;
+                        detangleTargets.push(path.nodes[0]); // Start node
+                        if (path.nodes.length > 1) {
+                            detangleTargets.push(path.nodes[path.nodes.length - 1]); // End node
+                        }
+                    });
+
+                    const uniqueDetangleTargets = Array.from(new Set(detangleTargets)).filter(nodeId => {
+                        const node = nodes.get(nodeId);
+                        return node && !node.hidden;
+                    });
+
+                    setTimeout(() => {
+                        uniqueDetangleTargets.slice(0, 6).forEach((nodeId, index) => {
+                            setTimeout(() => detangleConnectedNodes(nodeId), index * 120);
+                        });
+                    }, 750);
+                }
+
+                // Render path chains — show first 5 by default, expandable
+                const totalPaths = allFoundPaths.length;
+                const PAGE = 5;
+
+                // Build a display sequence collapsing adjacent azrole → scope pairs.
+                // Edges: edges[k] connects nodes[k] to nodes[k+1].
+                function buildDisplaySequence(path) {
+                    const seq = [];
+                    let ni = 0, ei = 0;
+                    while (ni < path.nodes.length) {
+                        const nd     = nodes.get(path.nodes[ni]);
+                        const nextNd = ni + 1 < path.nodes.length ? nodes.get(path.nodes[ni + 1]) : null;
+                        const nextNextNd = ni + 2 < path.nodes.length ? nodes.get(path.nodes[ni + 2]) : null;
+                        const isAzrole   = nd && nd.id && nd.id.startsWith('azrole-');
+                        const nextScope  = nextNd && nextNd.type === 'scope';
+                        const isGroup    = nd && nd.type === 'group';
+                        const nextRole   = nextNd && nextNd.type === 'role' && !nextNd.id.startsWith('azrole-');
+                        const nextNextRole = nextNextNd && nextNextNd.type === 'role';
+                        
+                        // Collapse: azrole + scope (Azure RBAC)
+                        if (isAzrole && nextScope) {
+                            // Collapse: use role name (short label), strip 'Azure:' prefix and scope suffix
+                            const roleName = nd.label || '';  // Already just the role name
+                            const scopeLbl = (nextNd.label || nextNd.id || '').replace(/^Azure Scope:\s*/i, '');
+                            seq.push({ label: roleName, sub: scopeLbl, combined: true });
+                            ni += 2; ei += 1; // skip the assigned_to edge inside the pair
+                        }
+                        // Collapse: group + role (Entra permission paths)
+                        else if (isGroup && nextRole && !nextNextRole) {
+                            const groupName = nd.label || nd.id;
+                            const roleName  = nextNd.label || nextNd.id;
+                            seq.push({ label: groupName, sub: roleName, combined: true, groupRole: true });
+                            ni += 2; ei += 1; // skip the has_role edge inside the pair
+                        }
+                        else {
+                            const lbl = nd ? (nd.label || nd.id) : path.nodes[ni];
+                            seq.push({ label: lbl });
+                            ni++;
+                        }
+                        if (ni < path.nodes.length) {
+                            const ed = edges.get(path.edges[ei]);
+                            seq.push({ arrow: true, label: ed ? (ed.label || '') : '' });
+                            ei++;
+                        }
+                    }
+                    return seq;
+                }
+
+                function renderPathChain(path) {
+                    const seq = buildDisplaySequence(path);
+                    let chainHtml = '<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px;">';
+                    seq.forEach(item => {
+                        if (item.arrow) {
+                            chainHtml += '<span style="color: var(--muted-text-color); font-size: 11px; white-space: nowrap;">&rarr;' + (item.label ? ' ' + item.label + ' ' : '') + '&rarr;</span>';
+                        } else if (item.combined) {
+                            if (item.groupRole) {
+                                // Collapsed group+role: two-line badge (group above, role below)
+                                chainHtml += '<span title="' + item.label + ' → ' + item.sub + '" style="background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3); border-radius: 4px; padding: 3px 8px; font-size: 12px; max-width: 220px; overflow: hidden; display: inline-block; line-height: 1.3;">';
+                                chainHtml += '<span style="display: block; font-size: 10px; color: var(--muted-text-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">' + item.label + '</span>';
+                                chainHtml += '<span style="display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">' + item.sub + '</span>';
+                                chainHtml += '</span>';
+                            } else {
+                                // Collapsed azrole+scope: two-line badge
+                                chainHtml += '<span title="' + item.label + ' @ ' + item.sub + '" style="background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.3); border-radius: 4px; padding: 3px 8px; font-size: 12px; max-width: 220px; overflow: hidden; display: inline-block; line-height: 1.3;">';
+                                chainHtml += '<span style="display: block; font-size: 10px; color: var(--muted-text-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">' + item.label + '</span>';
+                                chainHtml += '<span style="display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">' + item.sub + '</span>';
+                                chainHtml += '</span>';
+                            }
+                        } else {
+                            chainHtml += '<span title="' + item.label + '" style="background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.3); border-radius: 4px; padding: 3px 8px; font-size: 12px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block;">' + item.label + '</span>';
+                        }
+                    });
+                    chainHtml += '</div>';
+                    return chainHtml;
+                }
+
+                function renderPaths(count) {
+                    const cap = Math.min(count, totalPaths);
+                    let html = '<strong style="color: var(--accent-color);">' + totalPaths + ' path' + (totalPaths !== 1 ? 's' : '') + ' found:</strong>';
+                    for (let idx = 0; idx < cap; idx++) {
+                        const path = allFoundPaths[idx];
+                        const hops = path.nodes.length - 1;
+                        html += '<div style="margin-top: 8px; padding: 6px 8px; border-radius: 4px; background: rgba(99,102,241,0.05); border: 1px solid rgba(99,102,241,0.15);">';
+                        html += '<span style="font-size: 11px; color: var(--muted-text-color);">Path ' + (idx + 1) + ' &mdash; ' + hops + ' hop' + (hops !== 1 ? 's' : '') + '</span>';
+                        html += renderPathChain(path);
+                        html += '</div>';
+                    }
+                    if (totalPaths > PAGE && count <= PAGE) {
+                        html += '<div style="margin-top: 8px; text-align: center;"><button onclick="(function(el){el.parentNode.parentNode.__showAll=true; var p=el.parentNode.parentNode; p.innerHTML=p.__renderAll();})(this)" style="font-size: 12px; color: var(--accent-color); background: transparent; border: 1px solid rgba(99,102,241,0.3); border-radius: 4px; padding: 4px 12px; cursor: pointer;">Show all ' + totalPaths + ' paths</button></div>';
+                    }
+                    return html;
+                }
+
+                resultEl.__renderAll = () => renderPaths(totalPaths);
+                const graphScopeNote = totalPaths > MAX_PATHS_FOR_GRAPH
+                    ? (' Showing nodes for the first ' + MAX_PATHS_FOR_GRAPH + ' paths to keep the graph readable.')
+                    : '';
+                resultEl.innerHTML = '<div style="margin-bottom: 8px; color: var(--muted-text-color); font-size: 12px;">Showing filtered graph — only nodes on the displayed path set are visible.' + graphScopeNote + ' <strong>Click Clear to restore the full graph.</strong></div>' + renderPaths(PAGE);
+            }
+
+            function clearPathQuery() {
+                const startEl = document.getElementById('pathStartInput');
+                const endEl   = document.getElementById('pathEndInput');
+                isPathQueryActive = false;
+                startEl.value = '';
+                endEl.value   = '';
+                delete startEl.dataset.selectedNodeId;
+                delete endEl.dataset.selectedNodeId;
+                document.getElementById('pathStartSuggestions').style.display = 'none';
+                document.getElementById('pathEndSuggestions').style.display  = 'none';
+                document.getElementById('pathQueryResult').style.display = 'none';
+                document.getElementById('pathQueryResult').innerHTML    = '';
+                currentVisualizationMode = 'compact';
+                if (visualizationModeEl) {
+                    visualizationModeEl.value = 'compact';
+                }
+                applyFilters();
+                setTimeout(() => applyVisualizationMode(true), 40);
             }
 
             function filterRiskTable(nodeIds) {
@@ -1427,19 +2672,13 @@ function New-ScEntraGraphSection {
             }
 
             function fitVisibleNodes() {
-                const visibleNodeIds = nodes.get().filter(node => !node.hidden).map(node => node.id);
-                if (visibleNodeIds.length > 0) {
-                    network.fit({ nodes: visibleNodeIds });
-                } else {
-                    network.fit();
-                }
+                autoZoomVisibleNodes(360);
             }
 
             function arrangeAndFitGraph() {
                 restoreGroupedNodes();
                 stopGentleMotion();
-                network.setOptions({ physics: { enabled: false } });
-                fitVisibleNodes();
+                applyVisualizationMode(true);
             }
 
             function groupVisibleNodesByType() {
@@ -1720,8 +2959,9 @@ function New-ScEntraGraphSection {
             }
 
             network.on('click', function(params) {
-                // Stop gentle motion when user interacts
-                stopGentleMotion();
+                if (!hasEntityFilterActive()) {
+                    stopGentleMotion();
+                }
                 
                 if (params.nodes.length > 0) {
                     const nodeId = params.nodes[0];
@@ -1746,8 +2986,9 @@ function New-ScEntraGraphSection {
                         // Show path from selected node to critical roles
                         highlightEscalationPathFromNode(nodeId);
                     } else {
-                        // Normal highlight behavior
-                        highlightPath(nodeId, isAdditive);
+                        // Normal highlight behaviour, respecting the active provider filter
+                        const currentProviderFilter = document.getElementById('providerFilter').value;
+                        highlightPath(nodeId, isAdditive, currentProviderFilter);
                     }
                     
                     document.getElementById('selectedNodeName').textContent = node.label;
@@ -1759,48 +3000,11 @@ function New-ScEntraGraphSection {
                     isNodeSelected = true;
                     ensureDetangleButton();
                     ensureResetButton();
-                    detangleButtonRef.style.display = 'block';
-                    positionDetangleButton();
-                    positionResetButton();
-                    
-                    // Get connected nodes for fitting
-                    const connectedEdges = network.getConnectedEdges(nodeId);
-                    const relatedNodeIds = new Set([nodeId]);
-                    
-                    // Find all nodes connected by visible edges
-                    connectedEdges.forEach(edgeId => {
-                        const edge = edges.get(edgeId);
-                        if (edge && !edge.hidden) {
-                            relatedNodeIds.add(edge.from);
-                            relatedNodeIds.add(edge.to);
-                        }
-                    });
-                    
-                    const nodesToFit = Array.from(relatedNodeIds).filter(id => {
-                        const n = nodes.get(id);
-                        return n && !n.hidden;
-                    });
-
-                    // Center on the clicked node and fit to screen
-                    if (nodesToFit.length > 1) {
-                        // Fit to show the selected node and related nodes
-                        network.fit({
-                            nodes: nodesToFit,
-                            animation: {
-                                duration: 500,
-                                easingFunction: 'easeInOutQuad'
-                            }
-                        });
-                    } else {
-                        // If only one node (isolated), center it with appropriate zoom
-                        network.focus(nodeId, {
-                            scale: 1.5,
-                            animation: {
-                                duration: 500,
-                                easingFunction: 'easeInOutQuad'
-                            }
-                        });
+                    if (detangleButtonRef) {
+                        detangleButtonRef.style.display = 'block';
+                        positionDetangleButton();
                     }
+                    positionResetButton();
                 }
             });
 
@@ -1981,6 +3185,21 @@ function New-ScEntraGraphSection {
                         detailsHtml += '<tr><td class="detail-label">Severity</td><td class="detail-value">' + node.severity + '</td></tr>';
                     }
                 } else if (node.type === 'role') {
+                    if (node.fullLabel) {
+                        detailsHtml += '<tr><td class="detail-label">Full Role Name</td><td class="detail-value">' + node.fullLabel + '</td></tr>';
+                    }
+                } else if (node.type === 'scope') {
+                    if (node.fullScopeLabel) {
+                        detailsHtml += '<tr><td class="detail-label">Full Scope</td><td class="detail-value">' + node.fullScopeLabel + '</td></tr>';
+                    }
+                } else if (node.type === 'servicePrincipal') {
+                    if (node.fullLabel) {
+                        detailsHtml += '<tr><td class="detail-label">Full Name</td><td class="detail-value">' + node.fullLabel + '</td></tr>';
+                    }
+                } else if (node.type === 'application') {
+                    if (node.fullLabel) {
+                        detailsHtml += '<tr><td class="detail-label">Full Name</td><td class="detail-value">' + node.fullLabel + '</td></tr>';
+                    }
                     if (node.isPrivileged !== undefined) {
                         const text = node.isPrivileged ? 'Privileged role' : 'Standard role';
                         const css = node.isPrivileged ? 'status-warning' : 'status-info';
@@ -2004,6 +3223,49 @@ function New-ScEntraGraphSection {
                     }
                     if (node.roleDefinitionId) {
                         detailsHtml += '<tr><td class="detail-label">Role Definition</td><td class="detail-value code">' + node.roleDefinitionId + '</td></tr>';
+                    }
+                    if (node.azureScopeDisplayName || node.azureScope) {
+                        detailsHtml += '<tr><td class="detail-label">Assignment Scope</td><td class="detail-value">' + (node.azureScopeDisplayName || node.azureScope) + '</td></tr>';
+                    }
+                    if (node.subscriptionName) {
+                        detailsHtml += '<tr><td class="detail-label">Subscription</td><td class="detail-value">' + node.subscriptionName + '</td></tr>';
+                    }
+                    if (node.resourceGroupName) {
+                        detailsHtml += '<tr><td class="detail-label">Resource Group</td><td class="detail-value">' + node.resourceGroupName + '</td></tr>';
+                    }
+                    if (node.resourceTypeFriendly || node.resourceType) {
+                        detailsHtml += '<tr><td class="detail-label">Resource Type</td><td class="detail-value">' + (node.resourceTypeFriendly || node.resourceType) + '</td></tr>';
+                    }
+                    if (node.resourceName) {
+                        detailsHtml += '<tr><td class="detail-label">Resource Name</td><td class="detail-value">' + node.resourceName + '</td></tr>';
+                    }
+                    if (node.azureScope) {
+                        detailsHtml += '<tr><td class="detail-label">Scope Path</td><td class="detail-value code">' + node.azureScope + '</td></tr>';
+                    }
+                    if (node.blastRadiusSummary) {
+                        detailsHtml += '<tr><td class="detail-label">Blast Radius</td><td class="detail-value">' + node.blastRadiusSummary + '</td></tr>';
+                    }
+                } else if (node.type === 'scope') {
+                    if (node.scopeDisplayName) {
+                        detailsHtml += '<tr><td class="detail-label">Scope</td><td class="detail-value">' + node.scopeDisplayName + '</td></tr>';
+                    }
+                    if (node.managementGroupDisplayName) {
+                        detailsHtml += '<tr><td class="detail-label">Management Group</td><td class="detail-value">' + node.managementGroupDisplayName + '</td></tr>';
+                    }
+                    if (node.subscriptionName) {
+                        detailsHtml += '<tr><td class="detail-label">Subscription</td><td class="detail-value">' + node.subscriptionName + '</td></tr>';
+                    }
+                    if (node.resourceGroupName) {
+                        detailsHtml += '<tr><td class="detail-label">Resource Group</td><td class="detail-value">' + node.resourceGroupName + '</td></tr>';
+                    }
+                    if (node.resourceTypeFriendly || node.resourceType) {
+                        detailsHtml += '<tr><td class="detail-label">Resource Type</td><td class="detail-value">' + (node.resourceTypeFriendly || node.resourceType) + '</td></tr>';
+                    }
+                    if (node.resourceName) {
+                        detailsHtml += '<tr><td class="detail-label">Resource Name</td><td class="detail-value">' + node.resourceName + '</td></tr>';
+                    }
+                    if (node.scope) {
+                        detailsHtml += '<tr><td class="detail-label">Scope Path</td><td class="detail-value code">' + node.scope + '</td></tr>';
                     }
                     if (Array.isArray(node.roleResourceScopes) && node.roleResourceScopes.length > 0) {
                         const scopeEntries = node.roleResourceScopes.filter(scope => scope);
@@ -2303,6 +3565,8 @@ function New-ScEntraGraphSection {
                     }
                 });
                 edges.update(edgeUpdates);
+
+                applyVisualizationMode(true);
             }
 
             function focusOnSearchMatch(candidates, normalizedSearchTerm) {
@@ -2315,9 +3579,8 @@ function New-ScEntraGraphSection {
 
                 if (sanitizedTerm.length > 0) {
                     const lowerTerm = sanitizedTerm.toLowerCase();
-                    target = candidates.find(node => (node.label || '').toLowerCase() === lowerTerm) ||
-                             candidates.find(node => (node.label || '').toLowerCase().startsWith(lowerTerm)) ||
-                             candidates.find(node => (node.label || '').toLowerCase().includes(lowerTerm));
+                    target = candidates.find(node => nodeMatchesSearch(node, lowerTerm, true)) ||
+                             candidates.find(node => nodeMatchesSearch(node, lowerTerm, false));
                 }
 
                 if (!target) {
@@ -2331,6 +3594,42 @@ function New-ScEntraGraphSection {
                 }
             }
 
+            function nodeMatchesSearch(node, normalizedSearchTerm, exactOnly = false) {
+                if (!normalizedSearchTerm) {
+                    return true;
+                }
+
+                const fields = [
+                    node.label,
+                    node.id,
+                    node.userPrincipalName,
+                    node.mail,
+                    node.scope,
+                    node.scopeDisplayName,
+                    node.azureScope,
+                    node.azureScopeDisplayName,
+                    node.roleDefinitionId,
+                    node.roleTemplateId,
+                    node.permissionValue,
+                    node.permissionDisplayName,
+                    node.subscriptionName,
+                    node.subscriptionId,
+                    node.resourceGroupName,
+                    node.resourceType,
+                    node.resourceTypeFriendly,
+                    node.resourceName,
+                    node.managementGroupId,
+                    node.managementGroupDisplayName
+                ].filter(value => value !== undefined && value !== null)
+                    .map(value => String(value).toLowerCase());
+
+                if (exactOnly) {
+                    return fields.some(value => value === normalizedSearchTerm);
+                }
+
+                return fields.some(value => value.includes(normalizedSearchTerm));
+            }
+
             function applyFilters() {
                 // Stop gentle motion when user applies filters
                 stopGentleMotion();
@@ -2340,8 +3639,78 @@ function New-ScEntraGraphSection {
                 const hasSearchTerm = normalizedSearchTerm.length > 0;
                 const typeFilter = document.getElementById('typeFilter').value;
                 const assignmentFilter = document.getElementById('assignmentFilter').value;
+                const providerFilter = document.getElementById('providerFilter').value;
                 const escalationFilter = document.getElementById('escalationFilter').checked;
                 const shouldGroupMatches = hasSearchTerm;
+
+                // Pre-compute identity nodes that participate in Azure RBAC assignments.
+                // Used to allow identity-name searching when Azure RBAC Only filter is active.
+                const identityNodesWithAzureConnections = new Set();
+                if (providerFilter === 'azure') {
+                    edges.get().forEach(edge => {
+                        const ep = (edge && edge.provider) ? String(edge.provider).toLowerCase() : '';
+                        if (ep === 'azurerbac') {
+                            identityNodesWithAzureConnections.add(edge.from);
+                            identityNodesWithAzureConnections.add(edge.to);
+                        }
+                    });
+                }
+
+                const nodeMatchesProvider = (node) => {
+                    if (!providerFilter) {
+                        return true;
+                    }
+
+                    const provider = (node && node.provider) ? String(node.provider).toLowerCase() : '';
+                    if (providerFilter === 'azure') {
+                        return provider === 'azurerbac';
+                    }
+
+                    if (providerFilter === 'entra') {
+                        return provider !== 'azurerbac';
+                    }
+
+                    return true;
+                };
+
+                // Extended provider check used during search: when Azure RBAC Only is active,
+                // identity nodes that are assigned Azure roles are included so users can search
+                // by name (e.g. "Alice") and then see Alice's Azure role paths highlighted.
+                const nodeMatchesProviderForSearch = (node) => {
+                    if (nodeMatchesProvider(node)) return true;
+                    if (providerFilter === 'azure') {
+                        const identityTypes = new Set(['user', 'group', 'servicePrincipal']);
+                        return node && identityTypes.has(node.type) && identityNodesWithAzureConnections.has(node.id);
+                    }
+                    return false;
+                };
+
+                const edgeMatchesProvider = (edge) => {
+                    if (!providerFilter) {
+                        return true;
+                    }
+
+                    const edgeProvider = (edge && edge.provider) ? String(edge.provider).toLowerCase() : '';
+                    if (providerFilter === 'azure') {
+                        if (edgeProvider === 'azurerbac') {
+                            return true;
+                        }
+                        const fromNode = originalNodeData[edge.from];
+                        const toNode = originalNodeData[edge.to];
+                        return nodeMatchesProvider(fromNode) || nodeMatchesProvider(toNode);
+                    }
+
+                    if (providerFilter === 'entra') {
+                        if (edgeProvider === 'azurerbac') {
+                            return false;
+                        }
+                        const fromNode = originalNodeData[edge.from];
+                        const toNode = originalNodeData[edge.to];
+                        return nodeMatchesProvider(fromNode) && nodeMatchesProvider(toNode);
+                    }
+
+                    return true;
+                };
 
                 if (!shouldGroupMatches) {
                     restoreGroupedNodes();
@@ -2350,7 +3719,7 @@ function New-ScEntraGraphSection {
                 // If escalation filter is enabled, show only escalation paths
                 if (escalationFilter) {
                     const hasSelectedNode = currentSelectedNode && currentSelectedNode.id;
-                    const noAdditionalFilters = !hasSearchTerm && !typeFilter && !assignmentFilter;
+                    const noAdditionalFilters = !hasSearchTerm && !typeFilter && !assignmentFilter && !providerFilter;
 
                     if (hasSelectedNode && noAdditionalFilters) {
                         highlightEscalationPathFromNode(currentSelectedNode.id);
@@ -2367,7 +3736,7 @@ function New-ScEntraGraphSection {
                     const escalationEdgeIds = new Set();
 
                     allEdges.forEach(edge => {
-                        if (edge.isEscalationPath) {
+                        if (edge.isEscalationPath && edgeMatchesProvider(edge)) {
                             const baseStyle = originalEdgeStyles[edge.id] || {};
                             escalationNodeIds.add(edge.from);
                             escalationNodeIds.add(edge.to);
@@ -2385,16 +3754,18 @@ function New-ScEntraGraphSection {
                     });
                     edges.update(edgeUpdates);
 
-                    const matchingNodes = graphNodes.filter(node => {
-                        const matchesSearch = !normalizedSearchTerm || node.label.toLowerCase().includes(normalizedSearchTerm);
+                    const matchingNodes = filteredNodes.filter(node => {
+                        const matchesSearch = !normalizedSearchTerm || nodeMatchesSearch(node, normalizedSearchTerm);
                         const matchesType = !typeFilter || node.type === typeFilter;
+                        const matchesProvider = hasSearchTerm ? nodeMatchesProviderForSearch(node) : nodeMatchesProvider(node);
                         const isInEscalationPath = escalationNodeIds.has(node.id);
-                        return matchesSearch && matchesType && isInEscalationPath;
+                        return matchesSearch && matchesType && matchesProvider && isInEscalationPath;
                     });
 
                     // If only one node matches, select it and show its escalation path
                     if (matchingNodes.length === 1) {
                         const selectedNode = matchingNodes[0];
+                        currentSelectedNode = originalNodeData[selectedNode.id];
                         highlightEscalationPathFromNode(selectedNode.id);
                         document.getElementById('selectedNodeName').textContent = selectedNode.label;
                         document.getElementById('selectedNodeType').textContent = '(' + selectedNode.type + ')';
@@ -2454,13 +3825,13 @@ function New-ScEntraGraphSection {
 
                         if (assignmentFilter === 'member' && edgeLabel === 'member') {
                             matches = true;
-                        } else if (assignmentFilter === 'active' && (edgeLabel === 'direct' || edgeLabel === 'pim active')) {
+                        } else if (assignmentFilter === 'active' && (edgeLabel === 'direct' || edgeLabel === 'pim active' || edgeLabel === 'azure active')) {
                             matches = true;
-                        } else if (assignmentFilter === 'eligible' && edgeLabel === 'eligible') {
+                        } else if (assignmentFilter === 'eligible' && (edgeLabel === 'eligible' || edgeLabel === 'azure eligible')) {
                             matches = true;
                         }
 
-                        if (matches) {
+                        if (matches && edgeMatchesProvider(edge)) {
                             validNodeIds.add(edge.from);
                             validNodeIds.add(edge.to);
                             edgeUpdates.push({ id: edge.id, hidden: false });
@@ -2470,11 +3841,12 @@ function New-ScEntraGraphSection {
                     });
                     edges.update(edgeUpdates);
 
-                    const matchingNodes = graphNodes.filter(node => {
-                        const matchesSearch = !normalizedSearchTerm || node.label.toLowerCase().includes(normalizedSearchTerm);
+                    const matchingNodes = filteredNodes.filter(node => {
+                        const matchesSearch = !normalizedSearchTerm || nodeMatchesSearch(node, normalizedSearchTerm);
                         const matchesType = !typeFilter || node.type === typeFilter;
+                        const matchesProvider = hasSearchTerm ? nodeMatchesProviderForSearch(node) : nodeMatchesProvider(node);
                         const matchesAssignment = !assignmentFilter || validNodeIds.has(node.id);
-                        return matchesSearch && matchesType && matchesAssignment;
+                        return matchesSearch && matchesType && matchesProvider && matchesAssignment;
                     });
 
                     const nodeUpdates = [];
@@ -2511,18 +3883,20 @@ function New-ScEntraGraphSection {
                     }
 
                 } else {
-                    const matchingNodes = graphNodes.filter(node => {
-                        const matchesSearch = !normalizedSearchTerm || node.label.toLowerCase().includes(normalizedSearchTerm);
+                    const matchingNodes = filteredNodes.filter(node => {
+                        const matchesSearch = !normalizedSearchTerm || nodeMatchesSearch(node, normalizedSearchTerm);
                         const matchesType = !typeFilter || node.type === typeFilter;
-                        return matchesSearch && matchesType;
+                        const matchesProvider = hasSearchTerm ? nodeMatchesProviderForSearch(node) : nodeMatchesProvider(node);
+                        return matchesSearch && matchesType && matchesProvider;
                     });
 
                     if (matchingNodes.length === 1) {
+                        currentSelectedNode = originalNodeData[matchingNodes[0].id];
                         network.selectNodes([matchingNodes[0].id]);
                         network.focus(matchingNodes[0].id, {
                             scale: 1.5
                         });
-                        highlightPath(matchingNodes[0].id);
+                        highlightPath(matchingNodes[0].id, false, providerFilter);
                         if (shouldGroupMatches) {
                             groupMatchingNodes(matchingNodes);
                         }
@@ -2561,7 +3935,7 @@ function New-ScEntraGraphSection {
                         if (hasSearchTerm) {
                             focusOnSearchMatch(matchingNodes, normalizedSearchTerm);
                         }
-                    } else if (hasSearchTerm || typeFilter) {
+                    } else if (hasSearchTerm || typeFilter || providerFilter) {
                         const updates = [];
                         const allNodes = nodes.get();
                         allNodes.forEach(node => {
@@ -2589,7 +3963,7 @@ function New-ScEntraGraphSection {
                 }
 
                 zoomButton.dataset.customZoomHandler = 'true';
-                zoomButton.title = 'Fit view to selected node and related nodes';
+                zoomButton.title = 'Fit window to currently visible nodes';
                 
                 // Remove default click handlers
                 const newButton = zoomButton.cloneNode(true);
@@ -2598,7 +3972,7 @@ function New-ScEntraGraphSection {
                 newButton.addEventListener('click', event => {
                     event.preventDefault();
                     event.stopPropagation();
-                    arrangeAndFitGraph();
+                    fitVisibleNodes();
                     return false;
                 });
 
@@ -2606,10 +3980,53 @@ function New-ScEntraGraphSection {
                 ensureDetangleButton();
             }
 
-            document.getElementById('nodeFilter').addEventListener('input', applyFilters);
-            document.getElementById('typeFilter').addEventListener('change', applyFilters);
-            document.getElementById('assignmentFilter').addEventListener('change', applyFilters);
-            document.getElementById('escalationFilter').addEventListener('change', applyFilters);
+            const applyFiltersWithVisualization = () => {
+                applyFilters();
+                setTimeout(() => applyVisualizationMode(true), 40);
+
+                if (hasEntityFilterActive()) {
+                    stopGentleMotion();
+                    setTimeout(() => {
+                        if (!isUserDraggingNode && hasEntityFilterActive()) {
+                            startGentleMotion();
+                        }
+                    }, 520);
+                } else {
+                    stopGentleMotion();
+                }
+            };
+
+            document.getElementById('nodeFilter').addEventListener('input', applyFiltersWithVisualization);
+            document.getElementById('typeFilter').addEventListener('change', applyFiltersWithVisualization);
+            document.getElementById('assignmentFilter').addEventListener('change', applyFiltersWithVisualization);
+            document.getElementById('providerFilter').addEventListener('change', applyFiltersWithVisualization);
+            document.getElementById('escalationFilter').addEventListener('change', applyFiltersWithVisualization);
+            if (visualizationModeEl) {
+                visualizationModeEl.addEventListener('change', event => {
+                    currentVisualizationMode = event.target.value || 'force';
+                    applyVisualizationMode(true);
+                });
+            }
+
+            // Path Query event wiring
+            document.getElementById('findPathBtn').addEventListener('click', runPathQuery);
+            document.getElementById('clearPathBtn').addEventListener('click', clearPathQuery);
+
+            // Target type-filter select
+            document.getElementById('pathTypeFilter').addEventListener('change', e => {
+                pathTargetTypeFilter = e.target.value;
+                const endEl = document.getElementById('pathEndInput');
+                delete endEl.dataset.selectedNodeId;
+                showPathSuggestions(endEl, document.getElementById('pathEndSuggestions'));
+            });
+
+            ['pathStartInput', 'pathEndInput'].forEach(id => {
+                const inputEl = document.getElementById(id);
+                const suggEl  = document.getElementById(id === 'pathStartInput' ? 'pathStartSuggestions' : 'pathEndSuggestions');
+                inputEl.addEventListener('input', () => { delete inputEl.dataset.selectedNodeId; showPathSuggestions(inputEl, suggEl); });
+                inputEl.addEventListener('keydown', e => { if (e.key === 'Enter') { suggEl.style.display = 'none'; runPathQuery(); } if (e.key === 'Escape') suggEl.style.display = 'none'; });
+                inputEl.addEventListener('blur', () => setTimeout(() => { suggEl.style.display = 'none'; }, 150));
+            });
 
             const graphContainer = document.getElementById('escalationGraph');
             let fullscreenButtonRef = null;
@@ -2785,7 +4202,12 @@ function New-ScEntraGraphSection {
 
                 const triggerDetangle = event => {
                     event.preventDefault();
-                    detangleVisibleNodes();
+                    if (selectedNodes.size === 1) {
+                        const selectedId = Array.from(selectedNodes)[0];
+                        detangleConnectedNodes(selectedId);
+                    } else {
+                        detangleVisibleNodes();
+                    }
                     return false;
                 };
 
@@ -3069,12 +4491,13 @@ function New-ScEntraGraphSection {
             setTimeout(attachRiskRowListeners, 200);
 
             document.getElementById('resetGraph').addEventListener('click', function() {
+                isPathQueryActive = false;
                 document.getElementById('nodeFilter').value = '';
                 document.getElementById('typeFilter').value = '';
                 document.getElementById('assignmentFilter').value = '';
                 document.getElementById('escalationFilter').checked = false;
                 resetHighlight();
-                network.fit();
+                applyVisualizationMode(true);
                 
                 // Hide detangle button when resetting
                 isNodeSelected = false;
@@ -3170,6 +4593,82 @@ $rows                </tbody>
 "@
 }
 
+function New-ScEntraAzureRbacSection {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)][array]$AzureRoleAssignments = @(),
+        [Parameter(Mandatory = $false)][array]$AzureEligibleRoleAssignments = @()
+    )
+
+    if ((-not $AzureRoleAssignments -or $AzureRoleAssignments.Count -eq 0) -and (-not $AzureEligibleRoleAssignments -or $AzureEligibleRoleAssignments.Count -eq 0)) {
+        return ''
+    }
+
+    $activeRowsBuilder = [System.Text.StringBuilder]::new()
+    foreach ($assignment in ($AzureRoleAssignments | Select-Object -First 300)) {
+        $principal = if ($assignment.PrincipalName) { $assignment.PrincipalName } else { $assignment.PrincipalId }
+        [void]$activeRowsBuilder.AppendLine(@"
+                    <tr>
+                        <td>$principal</td>
+                        <td>$($assignment.PrincipalType)</td>
+                        <td>$($assignment.RoleName)</td>
+                        <td>$($assignment.Scope)</td>
+                    </tr>
+"@)
+    }
+
+    $eligibleRowsBuilder = [System.Text.StringBuilder]::new()
+    foreach ($assignment in ($AzureEligibleRoleAssignments | Select-Object -First 300)) {
+        $principal = if ($assignment.PrincipalName) { $assignment.PrincipalName } else { $assignment.PrincipalId }
+        [void]$eligibleRowsBuilder.AppendLine(@"
+                    <tr>
+                        <td>$principal</td>
+                        <td>$($assignment.PrincipalType)</td>
+                        <td>$($assignment.RoleName)</td>
+                        <td>$($assignment.Scope)</td>
+                    </tr>
+"@)
+    }
+
+    $activeRows = $activeRowsBuilder.ToString()
+    $eligibleRows = $eligibleRowsBuilder.ToString()
+
+    return @"
+        <div class="section">
+            <h2>☁️ Azure RBAC Blast Radius</h2>
+            <p style="margin-bottom: 20px; color: #666;">Azure management-plane role assignments and eligible PIM roles retrieved via Azure Resource Graph.</p>
+
+            <h3 style="margin: 18px 0 8px; color: var(--accent-color);">Active Role Assignments</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Principal</th>
+                        <th>Principal Type</th>
+                        <th>Role</th>
+                        <th>Scope</th>
+                    </tr>
+                </thead>
+                <tbody>
+$activeRows                </tbody>
+            </table>
+
+            <h3 style="margin: 24px 0 8px; color: var(--accent-color);">Eligible Role Assignments</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Principal</th>
+                        <th>Principal Type</th>
+                        <th>Role</th>
+                        <th>Scope</th>
+                    </tr>
+                </thead>
+                <tbody>
+$eligibleRows                </tbody>
+            </table>
+        </div>
+"@
+}
+
 function New-ScEntraReportDocument {
     [CmdletBinding()]
     param(
@@ -3177,6 +4676,8 @@ function New-ScEntraReportDocument {
         [Parameter(Mandatory = $false)][array]$RoleDistribution = @(),
         [Parameter(Mandatory = $false)][array]$RiskDistribution = @(),
         [Parameter(Mandatory = $false)][array]$EscalationRisks = @(),
+        [Parameter(Mandatory = $false)][array]$AzureRoleAssignments = @(),
+        [Parameter(Mandatory = $false)][array]$AzureEligibleRoleAssignments = @(),
         [Parameter(Mandatory = $false)][hashtable]$GraphData,
         [Parameter(Mandatory = $false)][hashtable]$OrganizationInfo,
         [Parameter(Mandatory = $true)][string]$GeneratedOn
@@ -3184,8 +4685,12 @@ function New-ScEntraReportDocument {
 
     $headerSection = New-ScEntraReportHeaderSection -Stats $Stats -OrganizationInfo $OrganizationInfo -GeneratedOn $GeneratedOn
     $chartSection = New-ScEntraReportChartSection -RoleDistribution $RoleDistribution -RiskDistribution $RiskDistribution
-    $graphSection = if ($GraphData -and $GraphData.nodes -and $GraphData.nodes.Count -gt 0) { New-ScEntraGraphSection -GraphData $GraphData } else { '' }
+    $graphSection = if ($GraphData -and $GraphData.nodes -and $GraphData.nodes.Count -gt 0) { 
+        # Always show graph if there are nodes, even if there are no edges
+        New-ScEntraGraphSection -GraphData $GraphData 
+    } else { '' }
     $riskSection = New-ScEntraRiskSection -EscalationRisks $EscalationRisks
+    $azureRbacSection = New-ScEntraAzureRbacSection -AzureRoleAssignments $AzureRoleAssignments -AzureEligibleRoleAssignments $AzureEligibleRoleAssignments
 
     return @"
 <!DOCTYPE html>
@@ -3847,6 +5352,7 @@ $headerSection
 $chartSection
 $graphSection
 $riskSection
+$azureRbacSection
         <footer>
             <p>Generated by ScEntra - Entra ID Security Scanner</p>
             <p>Report generated on $GeneratedOn</p>

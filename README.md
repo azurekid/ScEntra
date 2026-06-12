@@ -117,6 +117,9 @@ Connect-ScEntraGraph -TenantId '<tenant_id>' -ClientId '<application_id>' -Clien
 ```powershell
 # Interactive menu mode
 Invoke-ScEntraAnalysis
+
+# Defender-safe mode (reduces owner/appRole enrichment calls that can trigger recon-style alerts)
+Invoke-ScEntraAnalysis -DefenderSafeMode
 ```
 
 <img width="502" height="361" alt="image" src="https://github.com/user-attachments/assets/18b0385c-bd77-4856-aa07-61b2239237c4" />

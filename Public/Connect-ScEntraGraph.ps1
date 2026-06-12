@@ -76,10 +76,11 @@ function Connect-ScEntraGraph {
             
             try {
                 $tokenResponse = Invoke-RestMethod @tokenRequest
+                $script:GraphAccessToken = $tokenResponse.access_token
                 $global:ScEntraAccessToken = $tokenResponse.access_token
                 $global:ScEntraTokenExpires = (Get-Date).AddSeconds($tokenResponse.expires_in - 300)  # 5 min buffer
                 Write-Host "✅ Successfully authenticated with client secret" -ForegroundColor Green
-                return $global:ScEntraAccessToken
+                return $script:GraphAccessToken
             }
             catch {
                 Write-Error "Failed to authenticate with client secret: $($_.Exception.Message)"
@@ -139,10 +140,11 @@ function Connect-ScEntraGraph {
             
             try {
                 $tokenResponse = Invoke-RestMethod @tokenRequest
+                $script:GraphAccessToken = $tokenResponse.access_token
                 $global:ScEntraAccessToken = $tokenResponse.access_token
                 $global:ScEntraTokenExpires = (Get-Date).AddSeconds($tokenResponse.expires_in - 300)  # 5 min buffer
                 Write-Host "✅ Successfully authenticated with certificate" -ForegroundColor Green
-                return $global:ScEntraAccessToken
+                return $script:GraphAccessToken
             }
             catch {
                 Write-Error "Failed to authenticate with certificate: $($_.Exception.Message)"
@@ -156,10 +158,11 @@ function Connect-ScEntraGraph {
         
         'AccessToken' {
             if ($AccessToken) {
+                $script:GraphAccessToken = $AccessToken
                 $global:ScEntraAccessToken = $AccessToken
                 $global:ScEntraTokenExpires = (Get-Date).AddHours(1)  # Assume 1 hour validity
                 Write-Host "✅ Using provided access token" -ForegroundColor Green
-                return $global:ScEntraAccessToken
+                return $script:GraphAccessToken
             }
         }
     }
@@ -225,6 +228,8 @@ function Connect-ScEntraGraph {
                 try {
                     $tokenResponse = Invoke-RestMethod @tokenRequest -ErrorAction Stop
                     $script:GraphAccessToken = $tokenResponse.access_token
+                    $global:ScEntraAccessToken = $tokenResponse.access_token
+                    $global:ScEntraTokenExpires = (Get-Date).AddSeconds($tokenResponse.expires_in - 300)
                     Write-Host "`n✓ Successfully authenticated with device code flow!" -ForegroundColor Green
                     
                     # Validate token has required scopes
@@ -269,6 +274,8 @@ function Connect-ScEntraGraph {
 
     if ($AccessToken) {
         $script:GraphAccessToken = $AccessToken
+        $global:ScEntraAccessToken = $AccessToken
+        $global:ScEntraTokenExpires = (Get-Date).AddHours(1)
         Write-Verbose "Using provided access token"
         Write-Host "✓ Access token loaded" -ForegroundColor Green
         
@@ -291,6 +298,7 @@ function Connect-ScEntraGraph {
             $token = Get-AzAccessToken -ResourceUrl "https://graph.microsoft.com" -ErrorAction SilentlyContinue
             if ($token) {
                 $script:GraphAccessToken = $token.Token | ConvertFrom-SecureString -AsPlainText
+                $global:ScEntraAccessToken = $script:GraphAccessToken
                 Write-Host "✓ Authenticated using Azure PowerShell context" -ForegroundColor Green
                 
                 # Validate token has required scopes
@@ -315,6 +323,7 @@ function Connect-ScEntraGraph {
         $cliToken = az account get-access-token --resource https://graph.microsoft.com 2>$null | ConvertFrom-Json
         if ($cliToken -and $cliToken.accessToken) {
             $script:GraphAccessToken = $cliToken.accessToken
+            $global:ScEntraAccessToken = $script:GraphAccessToken
             Write-Host "✓ Authenticated using Azure CLI context" -ForegroundColor Green
             
             # Validate token has required scopes

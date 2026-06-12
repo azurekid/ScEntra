@@ -110,6 +110,48 @@ if ($jsonData.GraphData) {
     }
 }
 
+# If GraphData is missing (e.g. generated before the graph fix), rebuild it from the JSON data
+if (-not $graphData -and $jsonData.AzureRoleAssignments) {
+    Write-Host "GraphData not found in JSON — rebuilding graph from stored data..." -ForegroundColor Yellow
+
+    # Convert GroupMemberships PSCustomObject to a regular hashtable
+    $groupMembershipsHt = @{}
+    if ($jsonData.GroupMemberships) {
+        $jsonData.GroupMemberships.PSObject.Properties | ForEach-Object {
+            $groupMembershipsHt[$_.Name] = @($_.Value)
+        }
+    }
+
+    try {
+        $scEntraModule = Get-Module ScEntra | Select-Object -First 1
+        $rebuiltGraph = & $scEntraModule {
+            param($users, $groups, $servicePrincipals, $appRegistrations, $roleAssignments, $pimAssignments, $azureRoleAssignments, $azureEligibleRoleAssignments, $groupMemberships)
+
+            New-ScEntraGraphData `
+                -Users $users `
+                -Groups $groups `
+                -ServicePrincipals $servicePrincipals `
+                -AppRegistrations $appRegistrations `
+                -RoleAssignments $roleAssignments `
+                -PIMAssignments $pimAssignments `
+                -AzureRoleAssignments $azureRoleAssignments `
+                -AzureEligibleRoleAssignments $azureEligibleRoleAssignments `
+                -GroupMemberships $groupMemberships `
+                -SubscriptionNames @{} `
+                -ManagementGroupHierarchy @()
+        } $jsonData.Users $jsonData.Groups $jsonData.ServicePrincipals $jsonData.AppRegistrations `
+          $jsonData.RoleAssignments $jsonData.PIMAssignments $jsonData.AzureRoleAssignments `
+          $jsonData.AzureEligibleRoleAssignments $groupMembershipsHt
+
+        if ($rebuiltGraph -and $rebuiltGraph.nodes -and $rebuiltGraph.nodes.Count -gt 0) {
+            $graphData = $rebuiltGraph
+            Write-Host "Graph rebuilt: $($rebuiltGraph.nodes.Count) nodes, $($rebuiltGraph.edges.Count) edges" -ForegroundColor Green
+        }
+    } catch {
+        Write-Warning "Could not rebuild graph data: $($_.Exception.Message)"
+    }
+}
+
 # Determine output HTML path
 $suffix = if ($RedactPII) { '-redacted' } else { '-regenerated' }
 $outputPath = $JsonPath -replace '\.json$', "$suffix.html"

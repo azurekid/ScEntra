@@ -25,6 +25,12 @@ function Get-ScEntraEscalationPaths {
     .PARAMETER AppRegistrations
         Array of app registrations from Get-ScEntraAppRegistrations
 
+    .PARAMETER AzureRoleAssignments
+        Array of active Azure RBAC assignments
+
+    .PARAMETER AzureEligibleRoleAssignments
+        Array of Azure RBAC eligible assignments (PIM)
+
     .EXAMPLE
         $escalationPaths = Get-ScEntraEscalationPaths -Users $users -Groups $groups -RoleAssignments $roles -PIMAssignments $pim
     #>
@@ -49,6 +55,24 @@ function Get-ScEntraEscalationPaths {
         [array]$AppRegistrations = @(),
 
         [Parameter(Mandatory = $false)]
+        [array]$AzureRoleAssignments = @(),
+
+        [Parameter(Mandatory = $false)]
+        [array]$AzureEligibleRoleAssignments = @(),
+
+        [Parameter(Mandatory = $false)]
+        [switch]$IncludeAllUsersInGraph,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$DefenderSafeMode,
+
+        [Parameter(Mandatory = $false)]
+        [hashtable]$SubscriptionNames = @{},
+
+        [Parameter(Mandatory = $false)]
+        [array]$ManagementGroupHierarchy = @(),
+
+        [Parameter(Mandatory = $false)]
         [int]$BatchThrottleLimit = 5,
 
         [Parameter(Mandatory = $false)]
@@ -68,7 +92,7 @@ function Get-ScEntraEscalationPaths {
     )
 
     # Return early if no data to analyze
-    if (($Users.Count -eq 0) -and ($Groups.Count -eq 0) -and ($RoleAssignments.Count -eq 0)) {
+    if (($Users.Count -eq 0) -and ($Groups.Count -eq 0) -and ($RoleAssignments.Count -eq 0) -and ($AzureRoleAssignments.Count -eq 0) -and ($AzureEligibleRoleAssignments.Count -eq 0)) {
         Write-Warning "No data available for escalation path analysis."
         return @{
             Risks = @()
@@ -92,6 +116,10 @@ function Get-ScEntraEscalationPaths {
     $requiredPermissions = @('PrivilegedAccess.Read.AzureADGroup', 'Group.Read.All')
     if (-not (Test-GraphPermissions -RequiredPermissions $requiredPermissions -ResourceName "Escalation Paths (PIM for Groups)")) {
         Write-Warning "Some escalation path analysis may be incomplete due to missing permissions."
+    }
+
+    if ($DefenderSafeMode) {
+        Write-Host "Defender-safe mode active: owner and appRoleAssignedTo enrichment will be skipped." -ForegroundColor Yellow
     }
 
     Write-Verbose "Analyzing escalation paths..."
@@ -165,11 +193,16 @@ function Get-ScEntraEscalationPaths {
     $groupsWithRoles = @($RoleAssignments | Where-Object { $_.MemberType -eq 'group' } | Select-Object -ExpandProperty MemberId -Unique)
     $pimEnabledGroupIds = @($Groups | Where-Object { $_.isPIMEnabled -eq $true } | Select-Object -ExpandProperty id -Unique)
     $roleEnabledGroups = @($Groups | Where-Object { $_.isAssignableToRole -eq $true } | Select-Object -ExpandProperty id)
+    $azureAssignedGroupIds = @(
+        @($AzureRoleAssignments | Where-Object { $_.PrincipalId -and $_.PrincipalType -and $_.PrincipalType.ToString().ToLowerInvariant() -eq 'group' } | Select-Object -ExpandProperty PrincipalId -Unique) +
+        @($AzureEligibleRoleAssignments | Where-Object { $_.PrincipalId -and $_.PrincipalType -and $_.PrincipalType.ToString().ToLowerInvariant() -eq 'group' } | Select-Object -ExpandProperty PrincipalId -Unique)
+    ) | Select-Object -Unique
 
-    $relevantGroupIds = @($groupsWithRoles + $pimEnabledGroupIds + $roleEnabledGroups) | Select-Object -Unique
+    $relevantGroupIds = @($groupsWithRoles + $pimEnabledGroupIds + $roleEnabledGroups + $azureAssignedGroupIds) | Select-Object -Unique
 
     Write-Host "Found $($roleEnabledGroups.Count) role-assignable groups" -ForegroundColor Yellow
     Write-Host "Found $($pimEnabledGroupIds.Count) PIM-enabled groups" -ForegroundColor Yellow
+    Write-Host "Found $($azureAssignedGroupIds.Count) Azure-assigned groups" -ForegroundColor Yellow
     Write-Host "Analyzing $($relevantGroupIds.Count) groups with role assignments or PIM eligibility" -ForegroundColor Cyan
 
     $batchRequests = @()
@@ -202,14 +235,16 @@ function Get-ScEntraEscalationPaths {
             $requestId++
         }
 
-        $batchRequests += @{
-            id     = "$requestId-owners-$groupId"
-            method = "GET"
-            url    = "/groups/$groupId/owners?`$select=id,displayName,userPrincipalName"
+        if (-not $DefenderSafeMode) {
+            $batchRequests += @{
+                id     = "$requestId-owners-$groupId"
+                method = "GET"
+                url    = "/groups/$groupId/owners?`$select=id,displayName,userPrincipalName"
+            }
+            $requestId++
         }
-        $requestId++
 
-        if ($groupsWithRoles -contains $groupId) {
+        if (($groupsWithRoles -contains $groupId) -or ($azureAssignedGroupIds -contains $groupId)) {
             $batchRequests += @{
                 id      = "$requestId-transitive-$groupId"
                 method  = "GET"
@@ -266,7 +301,7 @@ function Get-ScEntraEscalationPaths {
         else {
             try {
                 $membersUri = "$script:GraphBaseUrl/groups/$groupId/members?`$select=id,displayName,userPrincipalName"
-                $membersResult = Invoke-GraphRequest -Uri $membersUri -Method GET -ErrorAction SilentlyContinue
+                $membersResult = Invoke-ScEntraGraphRequest -Uri $membersUri -Method GET -ErrorAction SilentlyContinue
                 if ($membersResult.value) {
                     $groupMemberships[$groupId] = $membersResult.value
                 }
@@ -337,23 +372,25 @@ function Get-ScEntraEscalationPaths {
             }
         }
 
-        $ownersResponseKey = $batchResponses.Keys | Where-Object { $_ -like "*-owners-$groupId" } | Select-Object -First 1
-        if ($ownersResponseKey) {
-            $ownersResponse = $batchResponses[$ownersResponseKey]
-            if ($ownersResponse -and $ownersResponse.status -eq 200 -and $ownersResponse.body.value) {
-                $groupOwners[$groupId] = $ownersResponse.body.value
-            }
-        }
-        else {
-            try {
-                $ownersUri = "$script:GraphBaseUrl/groups/$groupId/owners?`$select=id,displayName,userPrincipalName"
-                $ownersResult = Invoke-GraphRequest -Uri $ownersUri -Method GET -ErrorAction SilentlyContinue
-                if ($ownersResult.value) {
-                    $groupOwners[$groupId] = $ownersResult.value
+        if (-not $DefenderSafeMode) {
+            $ownersResponseKey = $batchResponses.Keys | Where-Object { $_ -like "*-owners-$groupId" } | Select-Object -First 1
+            if ($ownersResponseKey) {
+                $ownersResponse = $batchResponses[$ownersResponseKey]
+                if ($ownersResponse -and $ownersResponse.status -eq 200 -and $ownersResponse.body.value) {
+                    $groupOwners[$groupId] = $ownersResponse.body.value
                 }
             }
-            catch {
-                Write-Verbose "Could not fetch owners for group ${groupId}: $($_.Exception.Message)"
+            else {
+                try {
+                    $ownersUri = "$script:GraphBaseUrl/groups/$groupId/owners?`$select=id,displayName,userPrincipalName"
+                    $ownersResult = Invoke-ScEntraGraphRequest -Uri $ownersUri -Method GET -ErrorAction SilentlyContinue
+                    if ($ownersResult.value) {
+                        $groupOwners[$groupId] = $ownersResult.value
+                    }
+                }
+                catch {
+                    Write-Verbose "Could not fetch owners for group ${groupId}: $($_.Exception.Message)"
+                }
             }
         }
     }
@@ -431,7 +468,7 @@ function Get-ScEntraEscalationPaths {
             else {
                 try {
                     $transitiveUri = "$script:GraphBaseUrl/groups/$groupId/transitiveMembers?`$select=id&`$count=true"
-                    $transitiveResult = Invoke-GraphRequest -Uri $transitiveUri -Method GET -TimeoutSec 5 -ErrorAction Stop
+                    $transitiveResult = Invoke-ScEntraGraphRequest -Uri $transitiveUri -Method GET -TimeoutSec 5 -ErrorAction Stop
                     $transitiveMemberCount = if ($transitiveResult.'@odata.count') { $transitiveResult.'@odata.count' } else { $transitiveResult.value.Count }
                 }
                 catch {
@@ -470,20 +507,22 @@ function Get-ScEntraEscalationPaths {
 
     $spBatchRequests = @()
     $spRequestId = 0
-    foreach ($sp in $ServicePrincipals) {
-        $spBatchRequests += @{
-            id     = "$spRequestId-sp-owners-$($sp.id)"
-            method = "GET"
-            url    = "/servicePrincipals/$($sp.id)/owners?`$select=id,displayName,userPrincipalName&`$top=999"
-        }
-        $spRequestId++
+    if (-not $DefenderSafeMode) {
+        foreach ($sp in $ServicePrincipals) {
+            $spBatchRequests += @{
+                id     = "$spRequestId-sp-owners-$($sp.id)"
+                method = "GET"
+                url    = "/servicePrincipals/$($sp.id)/owners?`$select=id,displayName,userPrincipalName&`$top=999"
+            }
+            $spRequestId++
 
-        $spBatchRequests += @{
-            id     = "$spRequestId-sp-approles-$($sp.id)"
-            method = "GET"
-            url    = "/servicePrincipals/$($sp.id)/appRoleAssignedTo?`$select=principalId,principalDisplayName,principalType,appRoleId,resourceId,resourceDisplayName&`$top=999"
+            $spBatchRequests += @{
+                id     = "$spRequestId-sp-approles-$($sp.id)"
+                method = "GET"
+                url    = "/servicePrincipals/$($sp.id)/appRoleAssignedTo?`$select=principalId,principalDisplayName,principalType,appRoleId,resourceId,resourceDisplayName&`$top=999"
+            }
+            $spRequestId++
         }
-        $spRequestId++
     }
 
     $spBatchResponses = @{}
@@ -502,47 +541,49 @@ function Get-ScEntraEscalationPaths {
     foreach ($sp in $ServicePrincipals) {
         $ownerCount = 0
 
-        $ownerResponseKey = $spBatchResponses.Keys | Where-Object { $_ -like "*-sp-owners-$($sp.id)" } | Select-Object -First 1
-        if ($ownerResponseKey) {
-            $ownerResponse = $spBatchResponses[$ownerResponseKey]
-            if ($ownerResponse -and $ownerResponse.status -eq 200) {
-                $owners = Get-PagedBatchItems -Response $ownerResponse
-                $spOwners[$sp.id] = $owners
-                $ownerCount = $owners.Count
-            }
-        }
-        else {
-            try {
-                $ownersUri = "$script:GraphBaseUrl/servicePrincipals/$($sp.id)/owners?`$select=id,displayName,userPrincipalName&`$top=999"
-                $owners = Get-AllGraphItems -Uri $ownersUri -Method GET
-                if ($owners) {
+        if (-not $DefenderSafeMode) {
+            $ownerResponseKey = $spBatchResponses.Keys | Where-Object { $_ -like "*-sp-owners-$($sp.id)" } | Select-Object -First 1
+            if ($ownerResponseKey) {
+                $ownerResponse = $spBatchResponses[$ownerResponseKey]
+                if ($ownerResponse -and $ownerResponse.status -eq 200) {
+                    $owners = Get-PagedBatchItems -Response $ownerResponse
                     $spOwners[$sp.id] = $owners
                     $ownerCount = $owners.Count
                 }
             }
-            catch {
-                Write-Verbose "Could not fetch owners for service principal $($sp.id): $_"
+            else {
+                try {
+                    $ownersUri = "$script:GraphBaseUrl/servicePrincipals/$($sp.id)/owners?`$select=id,displayName,userPrincipalName&`$top=999"
+                    $owners = Get-AllGraphItems -Uri $ownersUri -Method GET
+                    if ($owners) {
+                        $spOwners[$sp.id] = $owners
+                        $ownerCount = $owners.Count
+                    }
+                }
+                catch {
+                    Write-Verbose "Could not fetch owners for service principal $($sp.id): $_"
+                }
             }
-        }
 
-        $appRoleResponseKey = $spBatchResponses.Keys | Where-Object { $_ -like "*-sp-approles-$($sp.id)" } | Select-Object -First 1
-        if ($appRoleResponseKey) {
-            $appRoleResponse = $spBatchResponses[$appRoleResponseKey]
-            if ($appRoleResponse -and $appRoleResponse.status -eq 200) {
-                $appRoles = Get-PagedBatchItems -Response $appRoleResponse
-                $spAppRoleAssignments[$sp.id] = $appRoles
-            }
-        }
-        else {
-            try {
-                $appRolesUri = "$script:GraphBaseUrl/servicePrincipals/$($sp.id)/appRoleAssignedTo?`$select=principalId,principalDisplayName,principalType,appRoleId,resourceId,resourceDisplayName&`$top=999"
-                $appRoles = Get-AllGraphItems -Uri $appRolesUri -Method GET
-                if ($appRoles) {
+            $appRoleResponseKey = $spBatchResponses.Keys | Where-Object { $_ -like "*-sp-approles-$($sp.id)" } | Select-Object -First 1
+            if ($appRoleResponseKey) {
+                $appRoleResponse = $spBatchResponses[$appRoleResponseKey]
+                if ($appRoleResponse -and $appRoleResponse.status -eq 200) {
+                    $appRoles = Get-PagedBatchItems -Response $appRoleResponse
                     $spAppRoleAssignments[$sp.id] = $appRoles
                 }
             }
-            catch {
-                Write-Verbose "Could not fetch app role assignments for service principal $($sp.id): $_"
+            else {
+                try {
+                    $appRolesUri = "$script:GraphBaseUrl/servicePrincipals/$($sp.id)/appRoleAssignedTo?`$select=principalId,principalDisplayName,principalType,appRoleId,resourceId,resourceDisplayName&`$top=999"
+                    $appRoles = Get-AllGraphItems -Uri $appRolesUri -Method GET
+                    if ($appRoles) {
+                        $spAppRoleAssignments[$sp.id] = $appRoles
+                    }
+                }
+                catch {
+                    Write-Verbose "Could not fetch app role assignments for service principal $($sp.id): $_"
+                }
             }
         }
 
@@ -604,13 +645,15 @@ function Get-ScEntraEscalationPaths {
 
     $appBatchRequests = @()
     $appRequestId = 0
-    foreach ($app in $AppRegistrations) {
-        $appBatchRequests += @{
-            id     = "$appRequestId-app-$($app.id)"
-            method = "GET"
-            url    = "/applications/$($app.id)/owners?`$select=id,displayName,userPrincipalName"
+    if (-not $DefenderSafeMode) {
+        foreach ($app in $AppRegistrations) {
+            $appBatchRequests += @{
+                id     = "$appRequestId-app-$($app.id)"
+                method = "GET"
+                url    = "/applications/$($app.id)/owners?`$select=id,displayName,userPrincipalName"
+            }
+            $appRequestId++
         }
-        $appRequestId++
     }
 
     $appBatchResponses = @{}
@@ -628,25 +671,27 @@ function Get-ScEntraEscalationPaths {
     foreach ($app in $AppRegistrations) {
         $ownerCount = 0
 
-        $ownerResponseKey = $appBatchResponses.Keys | Where-Object { $_ -like "*-app-$($app.id)" } | Select-Object -First 1
-        if ($ownerResponseKey) {
-            $ownerResponse = $appBatchResponses[$ownerResponseKey]
-            if ($ownerResponse -and $ownerResponse.status -eq 200 -and $ownerResponse.body.value) {
-                $appOwners[$app.id] = $ownerResponse.body.value
-                $ownerCount = $ownerResponse.body.value.Count
-            }
-        }
-        else {
-            try {
-                $ownersUri = "$script:GraphBaseUrl/applications/$($app.id)/owners?`$select=id,displayName,userPrincipalName"
-                $owners = Invoke-GraphRequest -Uri $ownersUri -Method GET -ErrorAction SilentlyContinue
-                if ($owners.value) {
-                    $appOwners[$app.id] = $owners.value
-                    $ownerCount = $owners.value.Count
+        if (-not $DefenderSafeMode) {
+            $ownerResponseKey = $appBatchResponses.Keys | Where-Object { $_ -like "*-app-$($app.id)" } | Select-Object -First 1
+            if ($ownerResponseKey) {
+                $ownerResponse = $appBatchResponses[$ownerResponseKey]
+                if ($ownerResponse -and $ownerResponse.status -eq 200 -and $ownerResponse.body.value) {
+                    $appOwners[$app.id] = $ownerResponse.body.value
+                    $ownerCount = $ownerResponse.body.value.Count
                 }
             }
-            catch {
-                Write-Verbose "Could not analyze app registration $($app.id): $_"
+            else {
+                try {
+                    $ownersUri = "$script:GraphBaseUrl/applications/$($app.id)/owners?`$select=id,displayName,userPrincipalName"
+                    $owners = Invoke-ScEntraGraphRequest -Uri $ownersUri -Method GET -ErrorAction SilentlyContinue
+                    if ($owners.value) {
+                        $appOwners[$app.id] = $owners.value
+                        $ownerCount = $owners.value.Count
+                    }
+                }
+                catch {
+                    Write-Verbose "Could not analyze app registration $($app.id): $_"
+                }
             }
         }
 
@@ -761,16 +806,22 @@ function Get-ScEntraEscalationPaths {
         -AppRegistrations $AppRegistrations `
         -RoleAssignments $RoleAssignments `
         -PIMAssignments $PIMAssignments `
+        -AzureRoleAssignments $AzureRoleAssignments `
+        -AzureEligibleRoleAssignments $AzureEligibleRoleAssignments `
+        -IncludeAllUsersInGraph:$IncludeAllUsersInGraph `
         -GroupMemberships $groupMemberships `
         -GroupOwners $groupOwners `
         -SPOwners $spOwners `
         -SPAppRoleAssignments $spAppRoleAssignments `
-        -AppOwners $appOwners
+        -AppOwners $appOwners `
+        -SubscriptionNames $SubscriptionNames `
+        -ManagementGroupHierarchy $ManagementGroupHierarchy
 
     Write-Progress -Activity "Analyzing escalation paths" -Completed -Id 5
 
     return @{
-        Risks     = $escalationRisks
-        GraphData = $graphData
+        Risks            = $escalationRisks
+        GraphData        = $graphData
+        GroupMemberships = $groupMemberships
     }
 }
